@@ -246,8 +246,26 @@ mvn clean package -DskipTests
 ### Clear Kiro Cache
 ```bash
 # Close Kiro first, then:
-rm -rf .kiro/.cache 2>/dev/null
-rm -rf .vscode/.kiro-cache 2>/dev/null
+rm -rf .kiro/session-state/current-phase.json
+
+# Run session consolidation to clean up temporary files
+bash .kiro/hooks/session-consolidate.sh
+
+# Clear temporary session files
+rm -f temporary.md
+touch temporary.md
+
+# Clear VS Code workspace cache
+rm -rf .vscode/
+rm -rf ~/.vscode/
+
+# Disable heavy extensions temporarily
+# Reduce file watcher limits
+# Close unnecessary applications
+# Increase available RAM
+# Use SSD instead of HDD for better I/O performance
+
+
 ```
 
 ### If Context Files Missing

@@ -6,7 +6,7 @@ spring:
     allow-bean-definition-overriding: true
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/sdev_academy_db
+    url: jdbc:postgresql://localhost:5432/devacademykiro
     username: postgres
     password: ${DB_PASSWORD:password}
     driver-class-name: org.postgresql.Driver
