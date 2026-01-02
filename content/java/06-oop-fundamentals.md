@@ -36149,363 +36149,316 @@ public class PasteCommand implements Command {
     }
     public void undo() {
         doc.setText(backupText);    // Restore Snapshot
-    }
-}
-```
+> The Command Pattern encapsulates a request as an object, thereby letting you parameterize other objects with different requests, queue or log requests, and support undoable operations.
 
-#### Approach 4: Event Sourcing (The Modern Architecture)
-Instead of storing current state in DB, store **List of Commands**.
--   Current State = `Sum(All Commands)`.
--   To "Undo", you just replay history up to $N-1$.
--   Used in Banking (Ledgers) and Git.
+**The Four Key Roles**:
+1.  **Command**: Interface with `execute()`.
+2.  **ConcreteCommand**: Links a Receiver with an action (e.g., `LightOnCommand` calls `light.on()`).
+3.  **Receiver**: The logic owner (e.g., `Light`, `Document`, `Motor`).
+4.  **Invoker**: Triggers the command (e.g., `Button`, `JobScheduler`).
 
 ---
 
-### 4. Implementation: The "Transactional Replay Engine"
+### **3. Progressive Solution Evolution**
 
-**Scenario**: A Banking System. We need to audit every transaction. If a user transfers money by mistake, we need to "Undo" it correctly (Reverse transaction).
+#### Approach 1: Direct Method Calls (Tight Coupling)
+```java
+class Remote {
+    Light light;
+    void pressButton() { light.on(); } // Hardcoded!
+}
+```
+*   **Critique**: You cannot change button behavior at runtime. You cannot undo.
+
+#### Approach 2: Callback / Lambdas (Java 8+)
+```java
+// Runnable is a functional interface (Command)
+Runnable cmd = () -> light.on();
+cmd.run();
+```
+*   **Critique**: Good for simple "One-shot" tasks. Bad for "Undo" (Lambda has no state) or serialization.
+
+#### Approach 3: Full Command Object (Stateful)
+```java
+class LightOnCommand implements Command {
+    Light light;
+    public void execute() { light.on(); }
+    public void undo() { light.off(); } // State reversal!
+}
+```
+*   **Verdict**: Necessary for History/Undo and Distributed Systems.
+
+---
+
+### **4. Implementation I: Transactional CQRS Engine (History & Replay)**
+Simulating a Bank Transaction system with Undo/Redo capability.
+**CQRS** (Command Query Responsibility Segregation) relies heavily on Command objects as the "Write" model.
 
 ```java
 import java.util.Stack;
 
-// --- 1. The Command Interface ---
-interface TransactionCommand {
-    void execute(); // Do it
-    void undo();    // Reverse it
+// 1. The Command Interface
+interface Transaction {
+    void execute();
+    void undo();
 }
 
-// --- 2. Receiver (The Bank Account) ---
+// 2. The Receiver (Business Logic)
 class BankAccount {
-    private final String id;
-    private double balance;
-
-    public BankAccount(String id, double balance) {
+    private String id;
+    private int balance;
+    
+    public BankAccount(String id, int balance) {
         this.id = id;
         this.balance = balance;
     }
-
-    public void deposit(double amount) {
+    
+    public void deposit(int amount) {
         balance += amount;
-        System.out.printf("[%s] Deposted $%.2f. New Balance: $%.2f%n", id, amount, balance);
+        System.out.println(id + ": Deposited " + amount + ". Balance: " + balance);
     }
-
-    public void withdraw(double amount) {
-        if (balance >= amount) {
-            balance -= amount;
-            System.out.printf("[%s] Withdrew $%.2f. New Balance: $%.2f%n", id, amount, balance);
-        } else {
-            throw new IllegalStateException("Insufficient Funds");
-        }
+    
+    public void withdraw(int amount) {
+        if (balance < amount) throw new IllegalStateException("Insufficient Funds");
+        balance -= amount;
+        System.out.println(id + ": Withdrew " + amount + ". Balance: " + balance);
     }
 }
 
-// --- 3. Concrete Commands ---
-
-class DepositCommand implements TransactionCommand {
-    private final BankAccount account;
-    private final double amount;
-
-    public DepositCommand(BankAccount account, double amount) {
-        this.account = account;
-        this.amount = amount;
-    }
-
-    @Override
-    public void execute() { account.deposit(amount); }
-
-    @Override
-    public void undo() { 
-        System.out.println(">>> UNDOING DEPOSIT...");
-        account.withdraw(amount); // Inverse operation
-    }
-}
-
-class WithdrawCommand implements TransactionCommand {
-    private final BankAccount account;
-    private final double amount;
-    private boolean completed; // State tracking
-
-    public WithdrawCommand(BankAccount account, double amount) {
-        this.account = account;
-        this.amount = amount;
-    }
-
-    @Override
-    public void execute() {
-        // Only withdraw if funds exist. 
-        // Real systems would lock here.
-        account.withdraw(amount);
-        completed = true;
-    }
-
-    @Override
-    public void undo() {
-        if (completed) {
-            System.out.println(">>> UNDOING WITHDRAWAL...");
-            account.deposit(amount); // Inverse operation
-        }
-    }
-}
-
-class TransferCommand implements TransactionCommand {
+// 3. Concrete Command (Stateful)
+class TransferCommand implements Transaction {
     private final BankAccount from;
     private final BankAccount to;
-    private final double amount;
-    private boolean completed;
-
-    public TransferCommand(BankAccount from, BankAccount to, double amount) {
+    private final int amount;
+    private boolean completed = false;
+    
+    public TransferCommand(BankAccount from, BankAccount to, int amount) {
         this.from = from;
         this.to = to;
         this.amount = amount;
     }
-
+    
     @Override
     public void execute() {
         from.withdraw(amount);
         to.deposit(amount);
         completed = true;
+        System.out.println("✅ Transfer Complete");
     }
-
+    
     @Override
     public void undo() {
-        if (completed) {
-            System.out.println(">>> UNDOING TRANSFER...");
-            to.withdraw(amount);
-            from.deposit(amount); // Reverse flow
-        }
+        if (!completed) return;
+        to.withdraw(amount); // Reverse flow
+        from.deposit(amount);
+        completed = false;
+        System.out.println("⏪ Transfer Undone");
+    }
+    
+    @Override
+    public String toString() {
+        return "Transfer " + amount;
     }
 }
 
-// --- 4. Invoker (The Transaction Manager) ---
+// 4. Invoker (History Manager)
 class TransactionManager {
-    private final Stack<TransactionCommand> history = new Stack<>();
-    private final Stack<TransactionCommand> redoStack = new Stack<>();
-
-    public void executeCommand(TransactionCommand cmd) {
+    private final Stack<Transaction> history = new Stack<>();
+    
+    public void execute(Transaction tx) {
         try {
-            cmd.execute();
-            history.push(cmd);
-            redoStack.clear(); // New path, clear redo history
+            tx.execute();
+            history.push(tx);
         } catch (Exception e) {
             System.err.println("Transaction Failed: " + e.getMessage());
         }
     }
-
+    
     public void undoLast() {
-        if (history.isEmpty()) return;
-        TransactionCommand cmd = history.pop();
-        cmd.undo();
-        redoStack.push(cmd);
+        if (history.isEmpty()) {
+             System.out.println("Nothing to undo.");
+             return;
+        }
+        Transaction tx = history.pop();
+        tx.undo();
     }
-
-    public void redoLast() {
-        if (redoStack.isEmpty()) return;
-        TransactionCommand cmd = redoStack.pop();
-        cmd.execute();
-        history.push(cmd);
+    
+    public void printHistory() {
+        System.out.println("History Stack: " + history);
     }
 }
 
-// --- Usage ---
-public class BankingDemo {
+// 5. Usage
+public class CQRSApp {
     public static void main(String[] args) {
         BankAccount alice = new BankAccount("Alice", 1000);
-        BankAccount bob = new BankAccount("Bob", 500);
+        BankAccount bob = new BankAccount("Bob", 0);
+        
         TransactionManager tm = new TransactionManager();
-
-        tm.executeCommand(new DepositCommand(alice, 200));  // Alice: 1200
-        tm.executeCommand(new TransferCommand(alice, bob, 300)); // Alice: 900, Bob: 800
-
-        System.out.println("\n--- MISTAKE MADE, UNDOING ---");
-        tm.undoLast(); // Undoes Transfer. Alice: 1200, Bob: 500
         
-        System.out.println("\n--- REDOING ---");
-        tm.redoLast(); // Redoes Transfer. Alice: 900, Bob: 800
+        System.out.println("--- Executing Tx 1 ---");
+        tm.execute(new TransferCommand(alice, bob, 200));
+        
+        System.out.println("--- Executing Tx 2 ---");
+        tm.execute(new TransferCommand(alice, bob, 50));
+        
+        tm.printHistory();
+        
+        System.out.println("\n--- Undoing Last ---");
+        tm.undoLast(); // Reverts 50
+        
+        System.out.println("\n--- Undoing Again ---");
+        tm.undoLast(); // Reverts 200
     }
 }
 ```
 
-#### C++: Functors & std::function
-In C++, we can use standard functional objects.
-```cpp
-#include <iostream>
-#include <vector>
-#include <functional>
+---
 
-// Using std::function as a lightweight Command
-class Button {
-    using Action = std::function<void()>;
-    Action onClick;
-public:
-    void setOnClick(Action action) { onClick = action; }
-    void click() { if(onClick) onClick(); }
-};
+### **5. Implementation II: Asynchronous Job Queue**
+Processing Commands in a background Thread Pool (Simulating AWS SQS or Sidekiq).
+The "Command" is detached from the "Executor".
 
-int main() {
-    int counter = 0;
-    Button btn;
-    
-    // Lambda captures state (Closure) being effective Command
-    btn.setOnClick([&counter]() {
-        counter++;
-        std::cout << "Clicked! Count: " << counter << std::endl;
-    });
-    
-    btn.click();
+```java
+import java.util.concurrent.*;
+
+// Functional Command
+interface Job extends Runnable {
+    String getId();
 }
-```
-    public void execute() {
-        editor.append(text);
-    }
 
+public class JobQueueSystem {
+    
+    private final ExecutorService workerPool = Executors.newFixedThreadPool(2);
+    
+    public void submit(Job job) {
+        System.out.println("Using: " + job.getId());
+        workerPool.submit(() -> {
+            try {
+                System.out.println("👷 Worker picked up: " + job.getId());
+                job.run(); // Execute logic
+                System.out.println("✅ Finished: " + job.getId());
+            } catch (Exception e) {
+                System.err.println("❌ Job Failed: " + job.getId());
+            }
+        });
+    }
+    
+    public void shutdown() { workerPool.shutdown(); }
+
+    public static void main(String[] args) {
+        JobQueueSystem queue = new JobQueueSystem();
+        
+        queue.submit(new EmailJob("user@example.com", "Welcome!"));
+        queue.submit(new EmailJob("admin@example.com", "Alert!"));
+        
+        queue.shutdown();
+    }
+}
+
+class EmailJob implements Job {
+    private final String email;
+    private final String msg;
+    
+    public EmailJob(String email, String msg) { this.email = email; this.msg = msg; }
+    
     @Override
-    public void undo() {
-        // The reverse of Append(X) is Delete(Len(X))
-        editor.delete(text.length());
-    }
-}
-
-// 4. Invoker: The History Manager
-class CommandManager {
-    private Stack<Command> history = new Stack<>();
-    private Stack<Command> redoStack = new Stack<>();
-
-    public void execute(Command c) {
-        c.execute();
-        history.push(c);
-        redoStack.clear(); // New action invalidates redo future
-    }
-
-    public void undo() {
-        if (!history.isEmpty()) {
-            Command c = history.pop();
-            c.undo();
-            redoStack.push(c);
-        }
-    }
-
-    public void redo() {
-        if (!redoStack.isEmpty()) {
-            Command c = redoStack.pop();
-            c.execute();
-            history.push(c);
-        }
-    }
-}
-```
-
-#### Python: Functors and `__call__`
-Python treats objects with `__call__` as functions.
-
-```python
-from abc import ABC, abstractmethod
-
-# Receiver
-class BankAccount:
-    def __init__(self): self.balance = 0
-    def deposit(self, amount): self.balance += amount
-    def withdraw(self, amount): self.balance -= amount
-
-# Abstract Command
-class Transaction(ABC):
-    @abstractmethod
-    def execute(self): pass
-    @abstractmethod
-    def undo(self): pass
-
-# Concrete Command
-class Deposit(Transaction):
-    def __init__(self, account, amount):
-        self.account = account
-        self.amount = amount
+    public String getId() { return "EMAIL-" + email.hashCode(); }
     
-    def execute(self):
-        self.account.deposit(self.amount)
-        print(f"Deposited {self.amount}")
-        
-    def undo(self):
-        self.account.withdraw(self.amount) # Reverse logic
-        print(f"Undid Deposit {self.amount}")
-
-# Client
-account = BankAccount()
-deposit = Deposit(account, 100)
-deposit.execute() # Balance 100
-deposit.undo()    # Balance 0
+    @Override
+    public void run() {
+        try { Thread.sleep(100); } catch (Exception e){} // Deliberate latency
+        System.out.println("   📧 Sending '" + msg + "' to " + email);
+    }
+}
 ```
 
-#### C++: Modern `std::function` vs Classes
-C++11 lambdas are great, but for Undo, classes are still king.
+---
 
+### **6. Implementation III: Attack Simulations (Replay Attack)**
+
+If Command Objects are serialized and sent over a network, a malicious actor (Man-in-the-Middle) can capture and **replay** them.
+*Scenario*: User sends `TransferCommand(Alice, Bob, 1000)`. Attacker replays it 10 times. Alice loses 10,000.
+
+```java
+import java.util.*;
+
+class SecureCommand implements Runnable {
+    public final String id; // Nonce (Number used once)
+    public final long timestamp;
+    private final String action;
+    
+    public SecureCommand(String action) {
+        this.id = UUID.randomUUID().toString();
+        this.timestamp = System.currentTimeMillis();
+        this.action = action;
+    }
+    
+    @Override
+    public void run() {
+        System.out.println("Executing: " + action);
+    }
+}
+
+class SecureInvoker {
+    private final Set<String> processedIds = new HashSet<>();
+    private static final long WINDOW_MS = 5000; // 5 seconds validity
+    
+    public void receive(SecureCommand cmd) {
+        // 1. Check Age (Freshness)
+        if (System.currentTimeMillis() - cmd.timestamp > WINDOW_MS) {
+            System.err.println("⛔ Dropped Stale Command: " + cmd.id);
+            return;
+        }
+        
+        // 2. Check Uniqueness (Replay Protection)
+        if (processedIds.contains(cmd.id)) {
+            System.err.println("🚨 REPLAY ATTACK DETECTED! Dropped duplicate: " + cmd.id);
+            return;
+        }
+        
+        processedIds.add(cmd.id);
+        cmd.run();
+    }
+}
+
+public class ReplayAttackDemo {
+    public static void main(String[] args) throws InterruptedException {
+        SecureInvoker server = new SecureInvoker();
+        
+        SecureCommand cmd = new SecureCommand("Transfer $1000");
+        
+        System.out.println("1. Valid Legitimate Request");
+        server.receive(cmd); // OK
+        
+        System.out.println("2. Attacker Replays (Same ID)");
+        server.receive(cmd); // BLOCKED
+        
+        Thread.sleep(6000);
+        System.out.println("3. Attacker Replays (Stale)");
+        server.receive(cmd); // BLOCKED
+    }
+}
+```
+
+---
+
+### **7. Implementation IV: Benchmarks (Allocation Overhead)**
+
+Does creating an Object for *every* action kill GC?
+*Result*: In modern Java, short-lived objects (Eden Space) are extremely cheap. The abstraction cost is negligible compared to network/DB latency.
+However, for *High Frequency Trading*, you might use **Flyweight Commands** (recycle objects) to avoid allocation.
+
+---
+
+### **8. Multi-Language Perspectives**
+
+#### C++: Functors (Function Objects)
+C++ uses `operator()` to make objects callable.
 ```cpp
-#include <iostream>
-#include <vector>
-#include <stack>
-
 class Command {
 public:
     virtual void execute() = 0;
-    virtual void undo() = 0;
-    virtual ~Command() {}
-};
-
-class Light {
-public:
-    void on() { std::cout << "Light ON\n"; }
-    void off() { std::cout << "Light OFF\n"; }
-};
-
-class LightSwitchCommand : public Command {
-    Light& light;
-    bool isOn = false; // Internal State
-public:
-    LightSwitchCommand(Light& l) : light(l) {}
-    void execute() override {
-        light.on();
-        isOn = true;
-    }
-    void undo() override {
-        light.off();
-        isOn = false;
-    }
-};
-```
-
-#### Go: Interfaces & Closures
-Go uses simple interfaces for this.
-
-```go
-type Command interface {
-    Execute()
-    Undo()
-}
-
-type Editor struct {
-    Text string
-}
-
-type AddTextCmd struct {
-    Editor *Editor
-    Text   string
-}
-
-func (c *AddTextCmd) Execute() {
-    c.Editor.Text += c.Text
-}
-
-func (c *AddTextCmd) Undo() {
-    // String slicing to remove last N chars
-    c.Editor.Text = c.Editor.Text[:len(c.Editor.Text)-len(c.Text)]
-}
-```
-
-#### JavaScript: Redux (The Ultimate Command Pattern)
-Redux Actions are **Data Commands**. Reducers are the execution logic.
-This splits Command into Data (`Action`) and Logic (`Reducer`).
-
-```javascript
-// 1. The Command (Action) - Pure Data
-const addItem = (text) => ({
     type: 'ADD_TODO',
     payload: { text }
 });
@@ -36682,36 +36635,6 @@ Often paired with CQRS. Instead of storing just the *current state* of an entity
 ---
 
 
-#### Q57: How does the State Pattern replace complex `if-else/switch` logic in lifecycles?
-**Companies**: Meta, Google, Uber, Lyft, SpaceX
-**Difficulty**: **Medium** (Core Behavioral Pattern)
-**Category**: Behavioral Patterns, Automata Theory
-
----
-
-### 1. Conceptual Overview & Motivation
-
-**The "Why"**:
-Entities in software often have a "Lifecycle" or "Mode".
--   An **Order**: `Placed` -> `Paid` -> `Shipped` -> `Delivered`.
--   A **TCP Connection**: `Closed` -> `Listen` -> `SynReceived` -> `Established`.
--   A **Game Character**: `Idle` -> `Running` -> `Jumping` -> `Attacking`.
-
-**The Problem**:
-If you put all logic in one class, you get massive `switch` statements or nested `if-else` blocks.
-```java
-void handleInput() {
-    if (state == JUMPING) {
-        if (input == "PRESS_A") { /* Double Jump? */ }
-    } else if (state == ATTACKING) {
-        /* Ignore Input */
-    }
-}
-```
-As states multiply, this code behaves like a "Spaghetti Monster". Adding a new state requires changing EVERY method in the class, violating the Open/Closed Principle.
-
-**The Solution**:
-Invert the control. Make every **State** a **Class**.
 #### Q57: How does the State Pattern replace complex `if-else/switch` logic in lifecycles?
 **Companies**: Uber, Lyft, Google (Android Lifecycle), Game Dev Studios
 **Difficulty**: **Medium** (Core Behavioral Pattern)
