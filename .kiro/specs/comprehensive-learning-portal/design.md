@@ -1069,7 +1069,39 @@ content/java/06-oop-fundamentals.md (50,000+ lines)
 └── Complete learning progression from zero to expert
 ```
 
+
+### Advanced OOP Scenarios Architecture (Q51-Q60)
+
+**Q51: Thread-Safe Singleton Architecture**
+- **Core Concept**: Ensure single instance with thread safety and lazy initialization.
+- **Implementations**:
+  1.  **Double-Checked Locking**: Using `volatile` and `synchronized` block.
+  2.  **Static Inner Class (Bill Pugh)**: Leveraging ClassLoader guarantees for lazy loading.
+  3.  **Enum Singleton**: Java's built-in serialization-safe guarantee (Best Practice).
+- **Enterprise Use Case**: `ConfigurationManager` for reading hot-reloadable app settings.
+
+**Q52: Generic Stack Design**
+- **Core Concept**: Type-safe collection with LIFO access.
+- **Components**: `Stack<T>`, `Node<T>` (for linked list), `ArrayStack<T>` (for performance).
+- **Features**: Custom Iterator, Stream support, bounds checking.
+
+**Q53: Adapter Pattern Design**
+- **Core Concept**: Interface adaptation.
+- **Scenario**: Bridging a Modern JSON API (`PaymentGateway`) to a Legacy XML System (`BankCore`).
+- **Components**: `Target` interface, `Adaptee` (legacy), `Adapter` class.
+
+**Q54: Decorator Pattern Design**
+- **Core Concept**: Dynamic behavior extension.
+- **Scenario**: `DataSource` decoration for functionality (Compression, Encryption, Caching).
+- **Components**: `DataSource` (Component), `FileDataSource` (Concrete), `DataSourceDecorator`.
+
+**Q55-Q60 Design Guidelines**
+- **Thread Safety**: All examples must discuss concurrency implications.
+- **Scalability**: Patterns must be shown in context of distributed systems where applicable.
+- **Performance**: Comparative analysis of implementation choices (e.g., Singleton locking overhead).
+
 ---
+
 
 ### Java Complete Ecosystem Design Architecture (118 Topics)
 

@@ -151,6 +151,13 @@ This specification defines the requirements for building the world's most compre
 13. THE Learning_Portal_System SHALL include real-world production examples from Google, Amazon, Meta, Netflix showing how OOP is used at scale
 14. THE Learning_Portal_System SHALL allocate 4-5 hours per topic for content creation following the standardized workflow
 15. THE Learning_Portal_System SHALL maintain Content_Methodology_v3_Framework documentation and ensure zero context loss across development sessions
+16. THE Learning_Portal_System SHALL enhance Q51-Q60 (Advanced OOP Scenarios) with ~1,400 lines per question, covering:
+    - **Q51**: Thread-Safe Singleton (Double-checked locking, Enum, Bill Pugh)
+    - **Q52**: Generic Stack (Array/Linked implementations, Iterators)
+    - **Q53**: Adapter Pattern (Legacy to Modern API bridging)
+    - **Q54**: Decorator Pattern (I/O Stream or UI Component styling)
+    - **Q55-Q60**: Command, State, Observer, Proxy, Facade patterns with concurrency focus, enterprise examples, and 5-language implementations.
+
 
 ### Requirement 1.17: Universal Content Template System
 
