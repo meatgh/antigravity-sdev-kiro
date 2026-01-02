@@ -35116,6 +35116,224 @@ This pattern solves the "Impedance Mismatch" between two systems. It's not just 
 3.  *Head First Design Patterns* - Chapter 7: Adapters and Facades.
 
 ---
+// Feature: Authentication
+class AuthMiddleware extends BaseMiddleware {
+    public AuthMiddleware(RequestHandler next) { super(next); }
+
+    @Override
+    public String handle(String request) {
+        if (!request.contains("AuthToken=123")) {
+            return "HTTP 401 Unauthorized"; // Blocking logic (Short-circuit)
+        }
+        System.out.println("[AUDIT] User Authorized");
+        return super.handle(request); // Delegate to next
+    }
+}
+
+// Feature: Logging
+class LoggingMiddleware extends BaseMiddleware {
+    private static final Logger LOGGER = Logger.getLogger("Server");
+
+    public LoggingMiddleware(RequestHandler next) { super(next); }
+
+    @Override
+    public String handle(String request) {
+        long start = System.nanoTime();
+        System.out.println("[LOG] Request started: " + request);
+        
+        String response = super.handle(request); // Delegate
+        
+        long duration = (System.nanoTime() - start) / 1000;
+        System.out.println("[LOG] Request finished in " + duration + "us");
+        return response;
+    }
+}
+
+// Feature: Response Compression (GZIP)
+class GzipMiddleware extends BaseMiddleware {
+    public GzipMiddleware(RequestHandler next) { super(next); }
+
+    @Override
+    public String handle(String request) {
+        String originalResponse = super.handle(request); // Delegate
+        return compress(originalResponse); // Post-processing behavior
+    }
+
+    private String compress(String input) {
+        return "{GZIP " + input + "}";
+    }
+}
+
+// --- Usage ---
+public class DecoratorDemo {
+    public static void main(String[] args) {
+        // Chain Construction:
+        // Request -> Gzip -> Log -> Auth -> Controller
+        // Wait! Wrappers are executed Outside-In.
+        
+        // Correct Order: 
+        // 1. Client calls Gzip.handle()
+        // 2. Gzip calls Log.handle()
+        // 3. Log calls Auth.handle()
+        // 4. Auth calls Basic.handle()
+        
+        RequestHandler server = new GzipMiddleware(
+                                    new LoggingMiddleware(
+                                        new AuthMiddleware(
+                                            new BasicController()
+                                        )
+                                    )
+                                );
+        
+        System.out.println("--- Test 1: Valid Request ---");
+        String response = server.handle("GET /home?AuthToken=123");
+        System.out.println("Client received: " + response);
+        
+        System.out.println("\n--- Test 2: Invalid Request ---");
+        // AuthMiddleware will short-circuit; Controller never runs.
+        String error = server.handle("GET /admin"); 
+        System.out.println("Client received: " + error);
+    }
+}
+
+#### Python: Function Decorators (Syntactic Sugar)
+Python has built-in support, but it's important to distinguish **Design Pattern** (Object wrapping) from **Language Feature** (Function wrapping).
+
+```python
+# The "Pattern" using a Class
+class TextTag:
+    def __init__(self, text): self._text = text
+    def render(self): return self._text
+
+class BoldWrapper:
+    def __init__(self1, wrapped): self._wrapped = wrapped
+    def render(self): return f"<b>{self._wrapped.render()}</b>"
+
+# The "Syntax" (@decorator)
+def audit_log(func):
+    def wrapper(*args, **kwargs):
+        print(f"Calling {func.__name__}...")
+        return func(*args, **kwargs)
+    return wrapper
+
+@audit_log
+def save_user(id):
+    print(f"User {id} saved.")
+```
+
+#### React (JS): High Order Components (HOC)
+In React, a HOC is a function that takes a component and returns a new component (Decorator).
+```javascript
+const withRouter = (WrappedComponent) => {
+    return (props) => {
+        // Inject extra prop 'router'
+        return <WrappedComponent {...props} router={new Router()} />;
+    };
+};
+
+const UserPage = (props) => <div>User: {props.router.id}</div>;
+export default withRouter(UserPage);
+```
+
+#### Go: Middleware Pattern
+Go uses functions wrapping functions.
+```go
+type Handler func(string) string
+
+func LoggingMiddleware(next Handler) Handler {
+    return func(req string) string {
+        fmt.Println("Log start")
+        res := next(req)
+        fmt.Println("Log end")
+        return res
+    }
+}
+```
+
+---
+
+### 5. Deep Theory: Implementation Details & Sorting
+
+**The Order Matters**:
+In our Java example, `Gzip(Auth(Basic))` behaves differently from `Auth(Gzip(Basic))`.
+-   **Case A**: `Gzip` wraps `Auth`. If Auth fails, it returns "401". Gzip compresses "401" -> "{GZIP 401}". Client gets compressed error.
+-   **Case B**: `Auth` wraps `Gzip`. If Auth fails, it returns "401" immediately. Gzip never runs. Client gets raw error.
+-   **Security Rule**: Auth should usually be the *outermost* layer (first to execute) to protect inner resources from processing overhead (Denial of Service).
+
+**Decorator vs Adapter vs Proxy**:
+-   **Adapter**: Changes interface.
+-   **Proxy**: Same interface. Controls access (lazy loading, permissions). Does NOT typically add "functional" behavior like compression/logging visibly.
+-   **Decorator**: Same interface. Adds *additive* behavior (stackable).
+
+---
+
+### 6. Practice & Assessment
+
+#### Core Exercises
+1.  **Basic**: Implement a `Shape` interface and concrete `Circle`. Add `RedBorderDecorator`.
+2.  **Intermediate**: Create an `InputStream` decorator called `CaesarCipherInputStream` that rotates every byte read by N positions.
+3.  **Advanced**: System Design Challenge. Design a "Pizza Ordering System" using Decorators where users can add unlimited toppings (`Cheese`, `Pepperoni`, `Olives`), calculating the total cost dynamically.
+
+#### Edge Case Drills
+1.  **Identity Crisis**: Write a test that checks `decorator instanceof ConcreteComponent`. It will fail. Explain why this breaks code relying on specific types (e.g., casting `InputStream` to `FileInputStream`).
+2.  **Double Wrapping**: What happens if you wrap: `new Gzip(new Gzip(new Data()))`? It gzips twice. Is this desired? How to prevent it? (Introspection).
+3.  **Lifecycle**: If `BaseComponent` has a `close()` method, ensure your decorator calls `super.close()` (delegate), otherwise you get resource leaks.
+
+#### Challenge: The Fluent Builder
+**Problem**: "Constructor Hell". `new A(new B(new C(new D())))` is ugly.
+**Task**: Create a Fluent API Builder to make it clean:
+```java
+Handler h = HandlerBuilder.start(new BasicController())
+                          .withAuth()
+                          .withLogging()
+                          .withGzip()
+                          .build();
+```
+
+---
+
+### 7. Common Mistakes & Anti-Patterns
+
+| Mistake | Consequence |
+| :--- | :--- |
+| **Broken Identity** | Relying on `==` or `instanceof` checks on the wrapped object. The client sees the wrapper, not the core. |
+| **Constructor Hell** | Creating chains is syntactically painful. Use a Builder or Factory to hide the `new A(new B())` mess. |
+| **Order Dependency** | Creating decorators that crash if placed in the wrong order (e.g., Compression needing Encryption metadata). Decorators should ideally be independent. |
+| **Bloated Interface** | Component interface has 50 methods? The Decorator has to implement/delegate ALL 50. Decorator works best with small, focused interfaces. |
+
+---
+
+### 8. Interview Bank: Follow-Up Questions
+
+1.  **Q**: "Why not just use Inheritance (Subclassing)?"
+    **A**: Inheritance is static. You can't add/remove features at runtime. Also, Inheritance leads to class explosion (Combinatorial types).
+2.  **Q**: "Does a Decorator know about the concrete component it wraps?"
+    **A**: No! It only knows about the `Component` interface. This is crucial for decoupling.
+3.  **Q**: "How does `java.io.BufferedInputStream` work?"
+    **A**: It wraps an `InputStream`. When you call `read()`, it reads a big chunk (8KB) from the underlying stream into a RAM buffer, then serves bytes from RAM, reducing execution context switches (Native Calls).
+4.  **Q**: "What is the difference between Decorator and Strategy?"
+    **A**: **Decorator** changes the "skin" (adds outside behavior). **Strategy** changes the "guts" (replaces inside algorithm). You usually have *one* strategy but *many* decorators.
+
+---
+
+### 9. Cheatsheet & Summary
+
+| Pattern | Key characteristic | Metaphor |
+| :--- | :--- | :--- |
+| **Decorator** | Wrapping, Additive, Dynamic | Russian Nesting Dolls |
+| **Adapter** | Interface Conversion | Travel Plug |
+| **Inheritance**| Static, Is-A, Rigid | Family DNA |
+
+**Verdict**: Use Decorator when you need "Pyramid" behavior (layers of functionality) or when inheritance is not viable due to existing class explosions.
+
+---
+
+### 10. References
+1.  *Design Patterns (GoF)* - Structural Patterns.
+2.  *Head First Design Patterns* - Chapter 3: "The Starbuzz Coffee Problem".
+3.  *Effective Java* - Item 18: Favor Composition over Inheritance.
+
+---
     zap *ZapLogger
 }
 
@@ -35399,161 +35617,105 @@ Consider a **Notification System**. You start with a simple `EmailNotifier`.
 -   **Requirement 2**: Add Slack support. -> `SlackNotifier`? `EmailAndSlackNotifier`? `SMSAndSlackNotifier`? `AllThreeNotifier`?
 -   **Requirement 3**: Add Facebook Messenger.
 
-If you use **Inheritance** (Subclassing) to solve this, you hit **Combinatorial Explosion**.
+If you use **Inheritance** (Subclassing) to solve this, you hit **Exploding Class Hierarchy**.
 For $N$ features, you might need $2^N$ subclasses to cover all combinations. This is unmaintainable.
 
 **The "Open/Closed" Challenge**:
-We want to add new features (e.g., "WhatsApp Notification") without modifying the existing `Notifier` code (Open for Extension, Closed for Modification).
-Inheritance is static. You decide the features at compile time.
-**Decorator** is dynamic. You can mix and match behaviors at runtime, like stacking Lego blocks.
+We want to add new features (e.g., "Compression", "Encryption") without modifying the existing `Stream` code (Open for Extension, Closed for Modification).
+Inheritance is static (compile-time). **Decorator** is dynamic (runtime). You can mix and match behaviors as needed.
 
 **Real-World Analogies**:
 1.  **The "Starbucks" Problem**:
     -   Base: Coffee.
     -   Decorators: Milk, Soy, Mocha, Whip, Caramel.
     -   You don't buy a `SoyMochaWhipCaramelCoffee` pre-made product. You take a Coffee and *decorate* it with Soy, then Mocha, then Whip.
-2.  **RPG Video Games**:
-    -   Character Base Stats: Strength 10.
-    -   Equip "Ring of Power": Strength +5 (Decorator).
-    -   Equip "Armor of Glory": Defense +10 (Decorator).
-    -   Eat "Potion of Haste": Speed +50 (Decorator).
-    -   The character is conceptually wrapped in layers of buffs.
-3.  **Gift Wrapping**:
-    -   Item -> Box -> Bubble Wrap -> Gift Paper -> Ribbon.
-    -   You unwrap them in reverse order to get the item.
+2.  **Web Middleware**:
+    -   Request -> [Auth Check] -> [Logging] -> [Gzip] -> [Controller].
+    -   Each layer wraps the next.
 
 ---
 
 ### 2. Comprehensive Definition
 
 **Formal Definition**:
-> The Decorator Pattern attaches additional responsibilities to an object dynamically. Decorators provide a flexible alternative to subclassing for extending functionality.
+> The Decorator Pattern attaches additional responsibilities to an object dynamically. Decorators provide a flexible alternative to subclassing for extending functionality by wrapping the object.
 
 **The Four Key Roles**:
-1.  **Component (Interface)**: Defines the interface for objects that can have responsibilities added (e.g., `InputStream`, `Coffee`).
-2.  **ConcreteComponent**: The core object to which additional responsibilities can be attached (e.g., `FileInputStream`, `Espresso`).
-3.  **Decorator (Abstract Wrapper)**: Maintains a reference to a Component object and defines an interface that conforms to Component's interface.
-4.  **ConcreteDecorator**: Adds responsibilities to the component (e.g., `BufferedInputStream`, `Milk`).
-
-**UML Structure**:
-```
-     [ Component ] <---------------------+
-          ^                              |
-          |                              |
-  +-------+-------+             [ Decorator ] <>----(wraps)--+
-  |               |                      ^
-[ Concrete ]  [ Concrete ]               |
-[ Component ] [ Component ]      +-------+-------+
-                                 |               |
-                           [ Concrete ]     [ Concrete ]
-                           [ DecoratorA]    [ DecoratorB]
-```
+1.  **Component (Interface)**: Defines the interface for objects that can have responsibilities added (e.g., `WebServer`).
+2.  **ConcreteComponent**: The core object (e.g., `BasicWebServer`).
+3.  **Decorator (Abstract Wrapper)**: Holds a reference to a Component and implements the same interface.
+4.  **ConcreteDecorator**: Adds specific behavior (e.g., `AuthMiddleware`).
 
 ---
 
 ### 3. Progressive Solution Evolution
 
-#### Approach 1: Static Inheritance (The Maintenance Nightmare)
-Creating a specific class for every permutation.
-
+#### Approach 1: Static Inheritance (The "Deep" Hierarchy)
 ```java
-public class EmailNotifier { ... }
-public class SMSNotifier { ... }
-public class EmailAndSMSNotifier { ... }
-public class EmailAndSlackNotifier { ... }
-// ... 50 more classes ...
+class DataSource {}
+class EncryptedDataSource extends DataSource {} 
+class CompressedDataSource extends DataSource {}
+class EncryptedCompressedDataSource extends EncryptedDataSource {} // Nightmare
 ```
-*   **Critique**: Violates DRY (Don't Repeat Yourself). The code to send SMS is duplicated in `SMSNotifier` and `EmailAndSMSNotifier`. Adding a new type requires modifying/adding exponential classes.
+*   **Critique**: Rigid. You cannot remove encryption at runtime. You cannot change the order easily.
 
-#### Approach 2: The "God Class" with Configuration Flags
-Putting all features in one massive class.
-
+#### Approach 2: The "God Class"
 ```java
-public class Notifier {
-    private boolean sendEmail;
-    private boolean sendSMS;
-    private boolean sendSlack;
-    private boolean encrypt;
-    private boolean compress;
-
-    public void send(String msg) {
-        if (encrypt) msg = encrypt(msg);
-        if (compress) msg = compress(msg);
-        
-        if (sendEmail) emailService.send(msg);
-        if (sendSMS) smsService.send(msg);
-        // ...
-    }
+class DataSource {
+    boolean compress;
+    boolean encrypt;
+    // ...
 }
 ```
-*   **Critique**: **Single Responsibility Principle Violation**. This class does everything. It's fragile. What if order matters? What if we want to encrypt *after* compressing? Flags fix the order statically.
+*   **Critique**: Violation of Single Responsibility Principle. The class becomes bloated with unrelated logic.
 
-#### Approach 3: The Decorator Pattern (Composition)
+#### Approach 3: Decorator Pattern (Composition)
 Wrappers that delegate.
-
 ```java
-// 1. Interface
-interface Notifier { void send(String msg); }
-
-// 2. Base
-class BasicNotifier implements Notifier {
-    public void send(String msg) { System.out.println("Email: " + msg); }
-}
-
-// 3. Abstract Decorator
-abstract class NotifierDecorator implements Notifier {
-    protected Notifier wrappee; // The Core
-    public NotifierDecorator(Notifier n) { this.wrappee = n; }
-    public void send(String msg) { wrappee.send(msg); }
-}
-
-// 4. Concrete Features
-class SMSDecorator extends NotifierDecorator {
-    public SMSDecorator(Notifier n) { super(n); }
-    public void send(String msg) {
-        super.send(msg); // Delegate first
-        System.out.println("SMS: " + msg); // Then add behavior
-    }
-}
+DataSource source = new CompressionDecorator(
+                        new EncryptionDecorator(
+                            new FileDataSource("data.txt")));
+source.writeData(data);
 ```
-*   **Usage**: `new SMSDecorator(new SlackDecorator(new BasicNotifier()))`.
+*   **Verdict**: Flexible. 3 classes cover all combinations.
 
 ---
 
-### 4. Multi-Language Implementations
+### 4. Implementation: The "Middleware Chain Builder"
 
-#### Java: The "Secure I/O Stream" Framework
-Java's `java.io` package is the canonical example of Decorator. We will build a custom version for **Secure Data Transmission**.
-**Goal**: Create a stream writer that can be optionally Encrypted, Compressed, and Signed.
+**Scenario**: We are building a lightweight Web Server framework (like Express.js or Spring Security) from scratch. We need to handle requests, but allow users to plug in Authentication, Logging, and Rate Limiting dynamically.
 
 ```java
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.util.Base64;
+import java.util.logging.Logger;
 
 // --- 1. Component Interface ---
-interface DataStream {
-    void write(String data);
-    String read();
+interface RequestHandler {
+    String handle(String request);
 }
 
-// --- 2. Concrete Component (The Disk Writer) ---
-class FileStream implements DataStream {
-    private String content = ""; // Simulation of a file on disk
-
+// --- 2. Concrete Component (The Core Logic) ---
+class BasicController implements RequestHandler {
     @Override
-    public void write(String data) {
-        System.out.println("[Disk] Writing raw bytes: " + data);
-        this.content = data;
-    }
-
-    @Override
-    public String read() {
-        return this.content;
+    public String handle(String request) {
+        // Simulating business logic
+        return "HTTP 200 OK: Processed request [" + request + "]";
     }
 }
 
-// --- 3. Base Decorator ---
+// --- 3. Abstract Decorator ---
+// Must implement the Interface AND match its signature
+abstract class BaseMiddleware implements RequestHandler {
+    protected final RequestHandler next;
+
+    public BaseMiddleware(RequestHandler next) {
+        this.next = next;
+    }
+
+    @Override
+    public String handle(String request) {
+        return next.handle(request);
+    }
+}
 abstract class StreamDecorator implements DataStream {
     protected final DataStream next;
 
