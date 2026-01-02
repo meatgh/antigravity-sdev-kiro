@@ -1032,7 +1032,7 @@ This applies to:
 
     - [x] **Q54: Decorator Pattern**: [ULTRA-STRICT] Added Multi-Project (MiddlewareBuilder, ResilienceFramework), Attack Suite (Entropy/Order), and Benchmarks.
 
-    - [x] **Q55: Circular Dependencies**: [REMEDIATION] Expanded to 1.5k+ lines. "Graph Resolution Engine" project and compiler-level dependency analysis.
+    - [x] **Q55: Circular Dependencies**: [ULTRA-STRICT] Added Multi-Project (DependencyGraphEngine, EventBus), Attack Suite (StackOverflow), and Spring Internals.
 
     - [x] **Q56: Command Pattern**: [REMEDIATION] Expanded to 1.5k+ lines. "Transactional Replay Engine" project, CQRS & Event Sourcing deep dive.
 
