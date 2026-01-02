@@ -36076,286 +36076,422 @@ public class CycleDetector {
 
 
 #### Q56: How does the Command Pattern enable "Undo" functionality and Transactional behavior?
-**Companies**: Microsoft, Apple, Adobe, Salesforce
-**Difficulty**: Medium
-**Category**: Behavioral Design Patterns
+**Companies**: Microsoft, Apple, Adobe, Salesforce, Atlassian (Jira)
+**Difficulty**: **Medium** (Core Behavioral Pattern)
+**Category**: Behavioral Patterns, System Design (CQRS)
 
 ---
 
 ### 1. Conceptual Overview & Motivation
 
 **The "Why"**:
-In a GUI framework (like Button clicks) or a Database Transaction manager, the object *invoking* the operation (The Button) should not know *how* to perform the operation (The Business Logic).
-We need to decouple the **Sender** (Invoker) from the **Receiver**.
+In many systems, the *Initiator* of an action (User clicking a button, API client) needs to be decoupled from the *Executor* (Business Logic).
+Furthermore, we often need:
+1.  **Undo/Redo**: "Ctrl+Z" functionality.
+2.  **Queueing**: Processing requests asynchronously (Job Queues).
+3.  **Logging**: Keeping a history of *what* happened (Audit Trails).
+4.  **Transactions**: The ability to rollback if a sequence fails.
 
 **The Problem**:
-If `Button` calls `Light.turnOn()` directly, you cannot change the button to turn on a generic `Device` without rewriting the `Button` class. Also, you cannot "Undo" `Light.turnOn()` if you don't store the state *before* the action.
-
-**The Solution**:
-Encapsulate the request as an **Object** (`Command`).
-The `Button` holds a `Command`. When clicked, it calls `command.execute()`.
-The `Command` knows the `Receiver` (`Light`) and calls `light.turnOn()`.
+If a `Button` calls `Light.turnOn()` directly:
+-   The `Button` is hardcoded to `Light`. It can't be reused for `Fan`.
+-   There is no object representing "The Act of Turning On". You cannot store it, delay it, or undo it. It's just a fleeting method call.
+-   To Undo, you need to know the state *before* the call, which is lost immediately after the method returns.
 
 **Real-World Analogies**:
-1.  **Diner Order**: You (Client) give an Order (Command) to the Waiter (Invoker). The Waiter passes it to the Chef (Receiver). The waiter doesn't know how to cook; they just invoke the order.
-2.  **Remote Control**: The buttons are programmable. Button 1 is "Turn TV On". Button 2 is "Turn Lights Off".
+1.  **Diner Order**:
+    -   **Client**: You.
+    -   **Invoker**: The Waiter (Takes command, doesn't cook).
+    -   **Command**: The Order Ticket ("Burger, Medium Rare"). It's an object. It can be queued, re-ordered, or cancelled.
+    -   **Receiver**: The Cook (Knows how to fry).
+2.  **Legal Checks**: You don't pay the bank teller directly. You write a **Check** (Command). The check is an instruction object that authorizes the transfer.
 
 ---
 
 ### 2. Comprehensive Definition
 
 **Formal Definition**:
-> The Command Pattern encapsulates a request as an object, thereby letting you parameterize clients with different requests, queue or log requests, and support undoable operations.
+> The **Command Pattern** encapsulates a request as an object, thereby letting you parameterize clients with different requests, queue or log requests, and support undoable operations.
 
-**Structure**:
-1.  **Command (Interface)**: Declares `execute()`.
-2.  **ConcreteCommand**: Implements `execute()`. Calls methods on the Receiver.
-3.  **Receiver**: The object that does the actual work (e.g., `Light`, `Document`).
-4.  **Invoker**: Holds the command and asks it to run (e.g., `RemoteControl`, `Button`).
-5.  **Client**: configurations the concrete command and sets it into the invoker.
+**Key Components**:
+1.  **Command (Interface)**: Declares `void execute()` and optionally `void undo()`.
+2.  **ConcreteCommand**: Implements `execute()`. Binds a `Receiver` with an action.
+3.  **Receiver**: The object that does the actual work (e.g., `Document`, `Light`).
+4.  **Invoker**: Stores the command and triggers it (e.g., `Toolbar`, `Scheduler`).
+5.  **Client**: Assembles the command object with the receiver and passes it to the invoker.
+
+**The Magic of Undo**:
+To support Undo, the Command object must store **State**.
+-   `Execute`: `prevState = receiver.getState(); receiver.action();`
+-   `Undo`: `receiver.setState(prevState);`
 
 ---
 
 ### 3. Progressive Solution Evolution
 
-#### Approach 1: Direct Coupling (The Rigid Way)
-Invoker calls Receiver directly.
+#### Approach 1: Direct Method Calls (The Tight Coupling)
+The UI Button calls the business logic directly.
 ```java
-class Button {
-    Light light; // Hard dependency
-    void click() { light.turnOn(); }
+public class SaveButton {
+    private Document doc; // Hard dependency
+    public void click() { doc.save(); } // Irreversible?
+}
+// Critique: No Undo. No Logging. Tightly coupled.
+```
+
+#### Approach 2: Callback/Lambda (The Stateless Decoupling)
+Pass a function `() -> doc.save()`.
+```java
+public class Button {
+    private Runnable action;
+    public void click() { action.run(); }
+}
+// Critique: Decoupled, BUT Runnable has no 'undo()' method. It's stateless.
+```
+
+#### Approach 3: The Command Object (Stateful & Reversible)
+Wrap the action in a class.
+```java
+public class PasteCommand implements Command {
+    private Document doc;
+    private String backupText; // STATE for Undo
+
+    public void execute() {
+        backupText = doc.getText(); // Save Snapshot
+        doc.insertFromClipboard();
+    }
+    public void undo() {
+        doc.setText(backupText);    // Restore Snapshot
+    }
 }
 ```
-**Critique**: Button is useless for anything other than a Light.
 
-#### Approach 2: Callback Functions (Functional Way)
-Pass a function pointer/lambda.
-```java
-class Button {
-    Runnable action;
-    void click() { action.run(); }
-}
-```
-**Pros**: Simple decoupling.
-**Cons**: Hard to store state (like "previous value" for Undo) inside a raw lambda.
-
-#### Approach 3: Command Object (The OOP Way)
-Full object with state.
-```java
-// Logic for Undo is typically:
-// 1. Save state in 'execute()'
-// 2. Restore state in 'undo()'
-interface Command { void execute(); void undo(); }
-```
+#### Approach 4: Event Sourcing (The Modern Architecture)
+Instead of storing current state in DB, store **List of Commands**.
+-   Current State = `Sum(All Commands)`.
+-   To "Undo", you just replay history up to $N-1$.
+-   Used in Banking (Ledgers) and Git.
 
 ---
 
 ### 4. Multi-Language Implementations
 
-#### Java: Text Editor Undo/Redo Engine
-Implementing a simple text editor that supports Ctrl+Z.
+#### Java: Text Editor Engine with Global Undo Stack
+A robust implementation managing a history of actions.
 
 ```java
 import java.util.Stack;
 
-// 1. Command Interface
+// 1. The Command Interface
 interface Command {
     void execute();
     void undo();
 }
 
-// 2. Receiver (The Editor)
+// 2. Receiver: The Text Editor Business Logic
 class TextEditor {
-    private StringBuilder content = new StringBuilder();
+    private StringBuilder buffer = new StringBuilder();
 
     public void append(String text) {
-        content.append(text);
+        buffer.append(text);
     }
 
-    public void delete(int length) {
-        content.delete(content.length() - length, content.length());
+    public void delete(int count) {
+        if (count > buffer.length()) return;
+        buffer.delete(buffer.length() - count, buffer.length());
     }
 
-    public String getText() {
-        return content.toString();
-    }
+    public String getText() { return buffer.toString(); }
 }
 
-// 3. Concrete Command
+// 3. Concrete Command for Appending Text
 class AppendCommand implements Command {
     private final TextEditor editor;
-    private final String textToAppend;
+    private final String text;
 
     public AppendCommand(TextEditor editor, String text) {
         this.editor = editor;
-        this.textToAppend = text;
+        this.text = text;
     }
 
     @Override
     public void execute() {
-        editor.append(textToAppend);
+        editor.append(text);
     }
 
     @Override
     public void undo() {
-        // Undo of "Append" is "Delete"
-        editor.delete(textToAppend.length());
+        // The reverse of Append(X) is Delete(Len(X))
+        editor.delete(text.length());
     }
 }
 
-// 4. Invoker (The Toolbar / History Manager)
-class CommandHistory {
-    private final Stack<Command> history = new Stack<>();
+// 4. Invoker: The History Manager
+class CommandManager {
+    private Stack<Command> history = new Stack<>();
+    private Stack<Command> redoStack = new Stack<>();
 
     public void execute(Command c) {
         c.execute();
         history.push(c);
+        redoStack.clear(); // New action invalidates redo future
     }
 
     public void undo() {
         if (!history.isEmpty()) {
             Command c = history.pop();
             c.undo();
+            redoStack.push(c);
+        }
+    }
+
+    public void redo() {
+        if (!redoStack.isEmpty()) {
+            Command c = redoStack.pop();
+            c.execute();
+            history.push(c);
         }
     }
 }
-
-// Client
-// TextEditor editor = new TextEditor();
-// CommandHistory history = new CommandHistory();
-// history.execute(new AppendCommand(editor, "Hello "));
-// history.execute(new AppendCommand(editor, "World"));
-// System.out.println(editor.getText()); // "Hello World"
-// history.undo(); 
-// System.out.println(editor.getText()); // "Hello "
 ```
 
-#### Python: Callable Objects
-Python's `__call__` makes objects behave like functions.
+#### Python: Functors and `__call__`
+Python treats objects with `__call__` as functions.
 
 ```python
 from abc import ABC, abstractmethod
 
 # Receiver
-class Light:
-    def turn_on(self): print("Light is ON")
-    def turn_off(self): print("Light is OFF")
+class BankAccount:
+    def __init__(self): self.balance = 0
+    def deposit(self, amount): self.balance += amount
+    def withdraw(self, amount): self.balance -= amount
 
-# Command Interface
-class Command(ABC):
+# Abstract Command
+class Transaction(ABC):
     @abstractmethod
     def execute(self): pass
+    @abstractmethod
+    def undo(self): pass
 
 # Concrete Command
-class LightOnCommand(Command):
-    def __init__(self, light):
-        self._light = light
-
+class Deposit(Transaction):
+    def __init__(self, account, amount):
+        self.account = account
+        self.amount = amount
+    
     def execute(self):
-        self._light.turn_on()
-
-# Invoker
-class RemoteControl:
-    def submit(self, command):
-        command.execute()
+        self.account.deposit(self.amount)
+        print(f"Deposited {self.amount}")
+        
+    def undo(self):
+        self.account.withdraw(self.amount) # Reverse logic
+        print(f"Undid Deposit {self.amount}")
 
 # Client
-light = Light()
-on_command = LightOnCommand(light)
-remote = RemoteControl()
-remote.submit(on_command)
+account = BankAccount()
+deposit = Deposit(account, 100)
+deposit.execute() # Balance 100
+deposit.undo()    # Balance 0
 ```
 
-#### C++: Functors (Function Objects)
-Operator overloading `()` allows objects to be invoked.
+#### C++: Modern `std::function` vs Classes
+C++11 lambdas are great, but for Undo, classes are still king.
 
 ```cpp
 #include <iostream>
 #include <vector>
+#include <stack>
 
-// Receiver
-class Light {
-public:
-    void on() { std::cout << "Light On" << std::endl; }
-    void off() { std::cout << "Light Off" << std::endl; }
-};
-
-// Command Interface
 class Command {
 public:
     virtual void execute() = 0;
+    virtual void undo() = 0;
+    virtual ~Command() {}
 };
 
-// Concrete Command
-class LightOnCommand : public Command {
-    Light* light;
+class Light {
 public:
-    LightOnCommand(Light* l) : light(l) {}
-    void execute() override { light->on(); }
+    void on() { std::cout << "Light ON\n"; }
+    void off() { std::cout << "Light OFF\n"; }
 };
 
-// Invoker
-class SimpleRemote {
-    Command* slot;
+class LightSwitchCommand : public Command {
+    Light& light;
+    bool isOn = false; // Internal State
 public:
-    void setCommand(Command* c) { slot = c; }
-    void buttonPressed() { slot->execute(); }
+    LightSwitchCommand(Light& l) : light(l) {}
+    void execute() override {
+        light.on();
+        isOn = true;
+    }
+    void undo() override {
+        light.off();
+        isOn = false;
+    }
 };
 ```
 
-#### Go: Function Types or Interface
-Go uses interfaces or simple function types.
+#### Go: Interfaces & Closures
+Go uses simple interfaces for this.
 
 ```go
-package command
-
-import "fmt"
-
 type Command interface {
     Execute()
+    Undo()
 }
 
-type Receiver struct{}
-func (r *Receiver) Action() { fmt.Println("Action performed") }
-
-type ConcreteCommand struct {
-    receiver *Receiver
+type Editor struct {
+    Text string
 }
 
-func (c *ConcreteCommand) Execute() {
-    c.receiver.Action()
+type AddTextCmd struct {
+    Editor *Editor
+    Text   string
 }
 
-type Invoker struct {
-    commands []Command
+func (c *AddTextCmd) Execute() {
+    c.Editor.Text += c.Text
 }
 
-func (i *Invoker) StoreAndExecute(c Command) {
-    i.commands = append(i.commands, c)
-    c.Execute()
+func (c *AddTextCmd) Undo() {
+    // String slicing to remove last N chars
+    c.Editor.Text = c.Editor.Text[:len(c.Editor.Text)-len(c.Text)]
 }
 ```
 
-#### JavaScript: First-Class Functions
-In JS, commands are often just functions, but objects are used for serialization (Redux).
+#### JavaScript: Redux (The Ultimate Command Pattern)
+Redux Actions are **Data Commands**. Reducers are the execution logic.
+This splits Command into Data (`Action`) and Logic (`Reducer`).
 
 ```javascript
-// Redux Action (Data Implementation of Command)
-const action = {
+// 1. The Command (Action) - Pure Data
+const addItem = (text) => ({
     type: 'ADD_TODO',
-    payload: { text: 'Learn Command Pattern' }
-};
+    payload: { text }
+});
 
-// Reducer (The Executor logic)
-function todoReducer(state = [], action) {
+// 2. The Receiver + Execution (Reducer)
+function todos(state = [], action) {
     switch (action.type) {
         case 'ADD_TODO':
-            return [...state, action.payload];
+            return [...state, { text: action.payload.text }];
         default:
             return state;
     }
 }
+
+// 3. Invoker (Store)
+// store.dispatch(addItem('Learn CQRS'));
+// Time Travel Debugging = Replaying the Actions!
 ```
+
+### [CONTINUE_Q56_LAYERS_5_10]
+
+
+### 5. Practice & Assessment
+
+#### Core Exercises
+1.  **Refactoring Drill (Callback to Command)**:
+    -   *Input*: A `Button` class taking a `Runnable`.
+    -   *Task*: Refactor to use `Command` interface. Add `undo()` capability.
+    -   *Goal*: Implement a "Toggle Case" button (Upper <-> Lower) that can be undone.
+2.  **Macro Recorder**:
+    -   *Task*: Create a `MacroCommand` that holds a `List<Command>`.
+    -   *Logic*: `execute()` loops through list and calls `execute()`. `undo()` loops REVERSE through list and calls `undo()`.
+    -   *Use Case*: "F1 Key" executes "Save, format, and push to git".
+3.  **Queue Processing**:
+    -   *Task*: Implement a `CommandQueue` that accepts commands and executes them on a background thread.
+    -   *Challenge*: Handle exception in one command. Should the queue stop or continue? (Dead Letter Queue concept).
+
+#### Edge Case Drills
+1.  **Destructive Undo**:
+    -   *Scenario*: User types "Hello", hits Undo (Text is empty), types "World".
+    -   *Problem*: The "Redo" stack (containing "Hello") must be cleared when a new divergent action ("World") occurs.
+    -   *Task*: Implement `CommandHistory.add(cmd)` to `redoStack.clear()`.
+2.  **Heavy State**:
+    -   *Scenario*: Image Editor. `BlurCommand` saves the *whole bitmap* for undo.
+    -   *Problem*: Memory explosion.
+    -   *Fix*: Memento Pattern (store diffs) or Disk-based Undo.
+3.  **Failed Command**:
+    -   *Scenario*: A Transactional Command (Bank Transfer). Step 1 (Debit) works. Step 2 (Credit) fails.
+    -   *Task*: The Command itself must catch the failure and internally trigger `undo()` (Compensating Transaction).
+
+#### Challenge: The Transactional Replay Engine
+**Scenario**: You are building a database migration tool.
+**Task**: Implement a `TransactionManager`.
+-   Accepts a list of `MigrationCommands`.
+-   Executes them one by one.
+-   If Command 3 fails, it must automatically call `undo()` on Command 2, then Command 1.
+-   Ensure "All or Nothing" behavior.
+
+---
+
+### 6. Common Mistakes & Anti-Patterns
+
+| Mistake | Consequence |
+| :--- | :--- |
+| **Smart Command** | Putting too much business logic in the Command. Command should be thin glue; logic belongs in Receiver. |
+| **Ignoring Undo** | Designing commands that are irreversible (e.g., `DeleteFile`). If irreversible, warn user or do "Soft Delete". |
+| **No Cleanup** | Infinite Undo Stack causes Memory Leaks. Logic should limit stack size (e.g., max 50 Undos). |
+| **Thread Safety** | Invoking commands from UI thread that invoke long-running Receiver methods blocks the UI. Wrap execution in `CompletableFuture`. |
+
+---
+
+### 7. Deep Dive: CQRS and Event Sourcing
+
+**1. CQRS (Command Query Responsibility Segregation)**:
+Traditional CRUD uses the same model for Reads and Writes.
+CQRS splits them:
+-   **Command Model (Write)**: `UserService.updateUser(Command c)`. Optimized for consistency. Returns `void`.
+-   **Query Model (Read)**: `UserQueryService.getUser(id)`. Optimized for speed (caching, denormalization). Returns DTO.
+**Command Pattern** is the heart of the "Write" side.
+
+**2. Event Sourcing**:
+Instead of storing "Current State" (User name is "Bob"), store the **Commands/Events** that led there.
+-   `UserCreated(name="Alice")`
+-   `UserNameChanged(newName="Bob")`
+-   **Current State**: Replay all events.
+**Undo**: Just replay events up to $N-1$.
+**Audit**: Perfect history of *who* did *what* and *when*.
+
+---
+
+### 8. Interview Bank: Follow-Up Questions
+
+1.  **Q**: "Difference between Command and Strategy Pattern?"
+    **A**:
+    -   **Command**: Encapsulates *Request*. Goal is to decouple Sender/Receiver or enable Undo/Queueing.
+    -   **Strategy**: Encapsulates *Algorithm*. Goal is to swap logic at runtime (e.g., Sorting method).
+2.  **Q**: "How do you handle Undo for 'Delete' operations?"
+    **A**: Two ways:
+    -   **Heavy**: Store the deleted object's state in the Command (Memento).
+    -   **Light**: Use Soft Deletes (mark `isDeleted=true`). Undo just sets `isDeleted=false`.
+3.  **Q**: "What if a Command takes too long?"
+    **A**: Asynchronous Command. The `execute()` method returns a `Future`/`Promise`. The Invoker puts it in a thread pool.
+4.  **Q**: "Relate Command Pattern to Thread Pools."
+    **A**: `Runnable` and `Callable` in Java *are* Commands. The `ExecutorService` (Invoker) takes these functional commands and executes them on available worker threads (Receivers).
+
+---
+
+### 9. Cheatsheet & Summary
+
+| Pattern | Goal | Key Feature | Undo Support? |
+| :--- | :--- | :--- | :--- |
+| **Command** | Encapsulate Request | Object with `execute()` | ✅ Yes |
+| **Strategy** | Swap Algorithm | Interface with logic | ❌ No |
+| **Memento** | Capture State | Snapshot Object | ❌ (Helper) |
+
+**Key Tactic**: If you see "Undo", "Queue", "Macro", or "Transaction" in requirements, use Command Pattern.
+
+---
+
+### 10. References
+1.  *Design Patterns (GoF)* - Behavioral Patterns.
+2.  *Enterprise Integration Patterns* - Message Channel / Command Message.
+3.  *Implementing Domain-Driven Design* - Vaughn Vernon (CQRS & Event Sourcing).
+
+---
 
 ### 5. Practice & Assessment
 
