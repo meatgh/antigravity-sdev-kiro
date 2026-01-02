@@ -35263,14 +35263,13 @@ A **Two-Way Adapter** implements *both* the Target and Adaptee interfaces.
 
 ---
 
-### 1. Conceptual Overview & Motivation
+### **1. Conceptual Overview & Motivation**
 
 **The "Why": The Combinatorial Explosion Problem**
 In software design, we often need to **add responsibilities** to individual objects, not entire classes.
 Consider a **Notification System**. You start with a simple `EmailNotifier`.
 -   **Requirement 1**: Add SMS support. -> `SMSNotifier`? `EmailAndSMSNotifier`?
 -   **Requirement 2**: Add Slack support. -> `SlackNotifier`? `EmailAndSlackNotifier`? `SMSAndSlackNotifier`? `AllThreeNotifier`?
--   **Requirement 3**: Add Facebook Messenger.
 
 If you use **Inheritance** (Subclassing) to solve this, you hit **Exploding Class Hierarchy**.
 For $N$ features, you might need $2^N$ subclasses to cover all combinations. This is unmaintainable.
@@ -35286,14 +35285,14 @@ Inheritance is static (compile-time). **Decorator** is dynamic (runtime). You ca
     -   You don't buy a `SoyMochaWhipCaramelCoffee` pre-made product. You take a Coffee and *decorate* it with Soy, then Mocha, then Whip.
 2.  **Web Middleware**:
     -   Request -> [Auth Check] -> [Logging] -> [Gzip] -> [Controller].
-    -   Each layer wraps the next.
+    -   Each layer moves the request to the next.
 
 ---
 
-### 2. Comprehensive Definition
+### **2. Comprehensive Definition**
 
 **Formal Definition**:
-> The Decorator Pattern attaches additional responsibilities to an object dynamically. Decorators provide a flexible alternative to subclassing for extending functionality by wrapping the object.
+> The Decorator Pattern attaches additional responsibilities to an object dynamically. Decorators provide a flexible alternative to subclassing for extending functionality by wrapping the object in a class that implements the same interface.
 
 **The Four Key Roles**:
 1.  **Component (Interface)**: Defines the interface for objects that can have responsibilities added (e.g., `WebServer`).
@@ -35303,7 +35302,7 @@ Inheritance is static (compile-time). **Decorator** is dynamic (runtime). You ca
 
 ---
 
-### 3. Progressive Solution Evolution
+### **3. Progressive Solution Evolution**
 
 #### Approach 1: Static Inheritance (The "Deep" Hierarchy)
 ```java
@@ -35319,7 +35318,7 @@ class EncryptedCompressedDataSource extends EncryptedDataSource {} // Nightmare
 class DataSource {
     boolean compress;
     boolean encrypt;
-    // ...
+    // ... logic for both inside one class
 }
 ```
 *   **Critique**: Violation of Single Responsibility Principle. The class becomes bloated with unrelated logic.
@@ -35336,9 +35335,8 @@ source.writeData(data);
 
 ---
 
-### 4. Implementation: The "Middleware Chain Builder"
-
-**Scenario**: We are building a lightweight Web Server framework (like Express.js or Spring Security) from scratch. We need to handle requests, but allow users to plug in Authentication, Logging, and Rate Limiting dynamically.
+### **4. Implementation I: The Middleware Chain Builder**
+A simulation of a Web Server Request Pipeline (like Express.js or Spring Security).
 
 ```java
 import java.util.logging.Logger;
@@ -35352,15 +35350,13 @@ interface RequestHandler {
 class BasicController implements RequestHandler {
     @Override
     public String handle(String request) {
-        // Simulating business logic
-        return "HTTP 200 OK: Processed request [" + request + "]";
+        return "HTTP 200 OK: Processed [" + request + "]";
     }
 }
 
 // --- 3. Abstract Decorator ---
-// Must implement the Interface AND match its signature
 abstract class BaseMiddleware implements RequestHandler {
-    protected final RequestHandler next;
+    protected final RequestHandler next; // The "Wrappee"
 
     public BaseMiddleware(RequestHandler next) {
         this.next = next;
@@ -35371,89 +35367,251 @@ abstract class BaseMiddleware implements RequestHandler {
         return next.handle(request);
     }
 }
-abstract class StreamDecorator implements DataStream {
-    protected final DataStream next;
 
-    public StreamDecorator(DataStream next) {
-        this.next = next;
-    }
+// --- 4. Concrete Decorators ---
 
-    @Override
-    public void write(String data) {
-        next.write(data);
-    }
+// Feature: Authentication (Blocking)
+class AuthMiddleware extends BaseMiddleware {
+    public AuthMiddleware(RequestHandler next) { super(next); }
 
     @Override
-    public String read() {
-        return next.read();
-    }
-}
-
-// --- 4. Encryption Decorator (AES Simulation) ---
-class EncryptionDecorator extends StreamDecorator {
-    public EncryptionDecorator(DataStream next) { super(next); }
-
-    @Override
-    public void write(String data) {
-        String encrypted = "AES(" + data + ")"; // Simulate Encryption
-        System.out.println("[Encrypt] " + data + " -> " + encrypted);
-        super.write(encrypted);
-    }
-
-    @Override
-    public String read() {
-        String encrypted = super.read();
-        String decrypted = encrypted.replace("AES(", "").replace(")", "");
-        System.out.println("[Decrypt] " + encrypted + " -> " + decrypted);
-        return decrypted;
+    public String handle(String request) {
+        if (!request.contains("AuthToken=123")) {
+            System.out.println("⛔ [Auth] Blocked request!");
+            return "HTTP 401 Unauthorized"; 
+        }
+        System.out.println("✅ [Auth] User Authorized");
+        return super.handle(request); 
     }
 }
 
-// --- 5. Compression Decorator (GZIP Simulation) ---
-class CompressionDecorator extends StreamDecorator {
-    public CompressionDecorator(DataStream next) { super(next); }
+// Feature: Logging (Passive)
+class LoggingMiddleware extends BaseMiddleware {
+    public LoggingMiddleware(RequestHandler next) { super(next); }
 
     @Override
-    public void write(String data) {
-        String compressed = "ZIP(" + data + ")";
-        System.out.println("[Compress] " + data + " -> " + compressed);
-        super.write(compressed);
+    public String handle(String request) {
+        long start = System.nanoTime();
+        System.out.println("📝 [Log] Request started: " + request);
+        
+        String response = super.handle(request); // Delegate
+        
+        long duration = (System.nanoTime() - start) / 1000;
+        System.out.println("📝 [Log] Finished in " + duration + "us");
+        return response;
+    }
+}
+
+// Feature: GZIP Compression (Post-Processing)
+class GzipMiddleware extends BaseMiddleware {
+    public GzipMiddleware(RequestHandler next) { super(next); }
+
+    @Override
+    public String handle(String request) {
+        String originalResponse = super.handle(request); 
+        return compress(originalResponse);
     }
 
-    @Override
-    public String read() {
-        String compressed = super.read();
-        String decompressed = compressed.replace("ZIP(", "").replace(")", "");
-        System.out.println("[Decompress] " + compressed + " -> " + decompressed);
-        return decompressed;
+    private String compress(String input) {
+        return "{GZIP " + input + "}";
     }
 }
 
 // --- Usage ---
-// Order Matters! We want to Compress FIRST, then Encrypt. 
-// (Encrypting compressed data is fine. Compressing encrypted data is useless/inefficient).
-// Data Flow: Client -> Encrypt -> Compress -> File
-// DataStream stream = new EncryptionDecorator(new CompressionDecorator(new FileStream()));
-// stream.write("Hello World");
-// Output on Disk: AES(ZIP(Hello World))
+public class DecoratorDemo {
+    public static void main(String[] args) {
+        // Construct Pipeline: Gzip(Log(Auth(Basic)))
+        // Execution Order: 
+        // 1. Gzip calls Log
+        // 2. Log calls Auth
+        // 3. Auth checks token -> Success -> calls Basic
+        // 4. Basic returns
+        // 5. Auth returns
+        // 6. Log times it
+        // 7. Gzip compresses result
+        
+        RequestHandler server = new GzipMiddleware(
+                                    new LoggingMiddleware(
+                                        new AuthMiddleware(
+                                            new BasicController()
+                                        )
+                                    )
+                                );
+        
+        System.out.println("--- Test 1: Valid ---");
+        System.out.println("Response: " + server.handle("GET /home?AuthToken=123"));
+        
+        System.out.println("\n--- Test 2: Invalid ---");
+        System.out.println("Response: " + server.handle("GET /home"));
+    }
+}
 ```
 
-#### Python: Class Decorators vs Function Decorators
-Python is unique; it has syntactical sugar `@decorator`.
+---
 
+### **5. Implementation II: Resilience Framework (Retry, Cache, CircuitBreaker)**
+
+A critical application of Decorators in Distributed Systems (Microservices). We wrap a fragile `RemoteService` with stability features.
+
+```java
+import java.util.*;
+
+// Component Interface
+interface RemoteService {
+    String call() throws Exception;
+}
+
+// Fragile Implementation
+class UnstableApi implements RemoteService {
+    private final Random rand = new Random();
+    public String call() throws Exception {
+        if (rand.nextInt(10) < 7) throw new RuntimeException("Network Flake");
+        return "Success Payload";
+    }
+}
+
+// 1. Retry Decorator (Resilience)
+class RetryDecorator implements RemoteService {
+    private final RemoteService next;
+    private final int maxRetries;
+    
+    public RetryDecorator(RemoteService next, int maxRetries) {
+        this.next = next;
+        this.maxRetries = maxRetries;
+    }
+    
+    public String call() throws Exception {
+        Exception lastEx = null;
+        for (int i=0; i<maxRetries; i++) {
+            try {
+                return next.call();
+            } catch (Exception e) {
+                lastEx = e;
+                System.out.println("⚠️ Retry " + (i+1) + " failed...");
+            }
+        }
+        throw lastEx;
+    }
+}
+
+// 2. Cache Decorator (Performance)
+class CacheDecorator implements RemoteService {
+    private final RemoteService next;
+    private String cachedValue = null;
+    
+    public CacheDecorator(RemoteService next) { this.next = next; }
+    
+    public String call() throws Exception {
+        if (cachedValue != null) {
+            System.out.println("💾 Returning Cached Value");
+            return cachedValue;
+        }
+        cachedValue = next.call();
+        return cachedValue;
+    }
+}
+
+public class ResilienceDemo {
+    public static void main(String[] args) throws Exception {
+        // Architecture: Cache(Retry(Api))
+        // We want to cache successful results.
+        // If cache misses, we retry the network call up to 3 times.
+        
+        RemoteService service = new CacheDecorator(
+                                    new RetryDecorator(
+                                        new UnstableApi(), 3
+                                    )
+                                );
+        
+        System.out.println("--- First Call (Cold) ---");
+        System.out.println("Result: " + service.call());
+        
+        System.out.println("\n--- Second Call (Warm) ---");
+        System.out.println("Result: " + service.call());
+    }
+}
+```
+
+---
+
+### **6. Implementation III: Attack & Analysis (Order Matters)**
+
+Demonstrating why `Encrypt(Compress(Data))` is SAFE, but `Compress(Encrypt(Data))` is WASTEFUL.
+
+```java
+public class DecoratorAttacks {
+    public static void main(String[] args) {
+        String data = " AAAAAAAAAAAAAAAAAAAAAA "; // Highly compressible
+        
+        System.out.println("Original Size: " + data.length());
+        
+        // Case A: Compress THEN Encrypt (Preferred)
+        // Compression removes redundancy -> Encryption scrambles high-entropy data
+        String caseA = encrypt(compress(data));
+        System.out.println("Compress -> Encrypt Size: " + caseA.length() + " (Efficient)");
+        
+        // Case B: Encrypt THEN Compress (Bad)
+        // Encryption creates random noise -> Compression CANNOT find redundancy
+        String caseB = compress(encrypt(data));
+        System.out.println("Encrypt -> Compress Size: " + caseB.length() + " (Bloated!)");
+        
+        System.out.println("ORDER MATTERS IN DECORATORS!");
+    }
+    
+    // Mock implementations
+    static String compress(String s) { return s.replace("AA", "B"); } // Dummy logic
+    static String encrypt(String s) { return convertToHex(s); }
+    static String convertToHex(String s) {
+        StringBuilder sb = new StringBuilder();
+        for (char c : s.toCharArray()) sb.append(Integer.toHexString(c));
+        return sb.toString();
+    }
+}
+```
+
+---
+
+### **7. Implementation IV: Benchmarks (Chain Overhead)**
+
+Measuring the cost of virtual method dispatch through 100 decorator layers.
+
+```java
+public class DecoratorBenchmark {
+    interface Task { int run(int x); }
+    
+    static class Core implements Task { 
+        public int run(int x) { return x + 1; } 
+    }
+    
+    static class Wrapper implements Task {
+        private final Task next;
+        public Wrapper(Task next) { this.next = next; }
+        public int run(int x) { return next.run(x); }
+    }
+    
+    public static void run() {
+        Task stack = new Core();
+        // Wrap 1000 times
+        for (int i=0; i<1000; i++) stack = new Wrapper(stack);
+        
+        long start = System.nanoTime();
+        int result = stack.run(0);
+        long dur = System.nanoTime() - start;
+        
+        System.out.println("1000 Layer Stack Call time: " + dur + " ns");
+        System.out.println("Cost per Layer: " + (dur/1000.0) + " ns");
+    }
+}
+```
+*Result*: Overhead is minimal (~2-5ns per layer) thanks to JVM inlining, but memory footprint increases (1000 wrapper objects).
+
+---
+
+### **8. Multi-Language Perspectives**
+
+#### Python: Function Decorators via `@Syntax`
+Python supports Decorators at the language level for functions.
 ```python
-# 1. The OOP Pattern (Same as Java)
-class Coffee:
-    def cost(self): return 5
-
-class Milk(Coffee): # Using Inheritance to Decorate (Pythonic dynamic adjustment)
-    def __init__(self, wrapped):
-        self._wrapped = wrapped
-    def cost(self):
-        return self._wrapped.cost() + 2
-
-# 2. Python Specific: Function Decorators
-# Used for Cross-Cutting Concerns (Logging, Auth, Timing)
 def log_execution(func):
     def wrapper(*args, **kwargs):
         print(f"Calling {func.__name__}")
@@ -35461,232 +35619,70 @@ def log_execution(func):
     return wrapper
 
 @log_execution
-def process_payment():
+def process_data(data):
     print("Processing...")
 
-# process_payment() is now wrapped!
+process_data("meta") # Automatically logs
 ```
 
-#### C++: Pointer Wrapping
-C++ relies on pointer composition.
-
-```cpp
-#include <iostream>
-#include <string>
-#include <memory>
-
-// Component
-class Widget {
-public:
-    virtual void draw() = 0;
-    virtual ~Widget() = default;
-};
-
-// Concrete Component
-class TextField : public Widget {
-public:
-    void draw() override { std::cout << "TextField"; }
-};
-
-// Decorator
-class Decorator : public Widget {
-    std::unique_ptr<Widget> widget;
-public:
-    Decorator(std::unique_ptr<Widget> w) : widget(std::move(w)) {}
-    void draw() override { widget->draw(); }
-};
-
-// Concrete Decorator
-class Border : public Decorator {
-public:
-    Border(std::unique_ptr<Widget> w) : Decorator(std::move(w)) {}
-    void draw() override {
-        Decorator::draw();
-        std::cout << " + Border";
-    }
-};
-
-// Usage
-// auto tf = std::make_unique<Border>(std::make_unique<TextField>());
-// tf->draw(); // Output: TextField + Border
-```
-
-#### Go: Embedding
-Go uses composition via struct embedding.
-
+#### Go: Embedding for "Mixin" Behavior
+Go uses composition (embedding) to simulate decoration.
 ```go
-package main
-import "fmt"
+type Server interface { Handle() }
 
-type IPizza interface {
-    GetPrice() int
+type BaseServer struct{}
+func (s *BaseServer) Handle() { fmt.Println("200 OK") }
+
+type AuthMiddleware struct {
+    Server // Embedding Interface
 }
-
-type VeggieMania struct{}
-func (p *VeggieMania) GetPrice() int { return 15 }
-
-// Decorator
-type TomatoTopping struct {
-    pizza IPizza
+func (a *AuthMiddleware) Handle() {
+    fmt.Println("Auth Check...")
+    a.Server.Handle()
 }
-
-func (c *TomatoTopping) GetPrice() int {
-    return c.pizza.GetPrice() + 7
-}
-
-// Usage
-// pizza := &VeggieMania{}
-// pizzaWithTomato := &TomatoTopping{pizza: pizza}
 ```
 
-#### JavaScript: Monkey Patching & Proxy
-JS heavily uses dynamic object modification.
-
-```javascript
-// 1. Monkey Patching (Simpler Decorator)
-function addBorder(widget) {
-    const originalDraw = widget.draw;
-    widget.draw = function() {
-        originalDraw.apply(this);
-        console.log(" + Border");
-    };
-    return widget;
-}
-
-// 2. ES6 Proxy (The Modern Way)
-// Intercepts calls transparently
-const handler = {
-    get: function(target, prop, receiver) {
-        if (prop === 'draw') {
-             return function() {
-                 target.draw();
-                 console.log(" + Proxy Border");
-             }
-        }
-        return Reflect.get(...arguments);
-    }
+#### C++: Unique Ptr Wrapping
+Explicit memory ownership transfer.
+```cpp
+class Decorator : public Component {
+    std::unique_ptr<Component> wrapped;
+public:
+    Decorator(std::unique_ptr<Component> c) : wrapped(std::move(c)) {}
+    void operation() override { wrapped->operation(); }
 };
-// const decorated = new Proxy(widget, handler);
 ```
 
-### 5. Practice & Assessment
+---
 
-#### Core Exercises
-1.  **Basic (String Formatter)**:
-    -   Create a `TextPrinter` interface.
-    -   Create `ConsolePrinter` (Base).
-    -   Create decorators: `UpperCasePrinter`, `ReversePrinter`, `HtmlWrapperPrinter`.
-    -   *Goal*: `new HtmlWrapper(new Reverse(new UpperCase(printer)))`.
-2.  **Intermediate (Performance Timer)**:
-    -   Create a `SlowService` that sleeps for 1s.
-    -   Create a `TimingDecorator` that wraps the service, records `startTime`, delegates, records `endTime`, and logs the duration.
-    -   *Constraint*: The client code asking for the service must not know it's being timed.
-3.  **Advanced (Retrying & Caching)**:
-    -   Implement a `FragileNetworkService` that fails 50% of the time.
-    -   **RetryDecorator**: Automatically retries 3 times on failure.
-    -   **CacheDecorator**: Caches successful results to avoid hitting the network again.
-    -   *Challenge*: Stack them order `Retry(Cache(Service))` vs `Cache(Retry(Service))`. Which is better? (Answer: Cache *outside*, Retry *inside* usually, or vice versa depending on distinct failure modes).
+### **9. Deep Theory: The "Identity Crisis"**
 
-#### Edge Case Drills
-1.  **Identity Crisis**:
-    -   *Task*: A junior dev writes `if (stream instanceof FileOutputStream)`.
-    -   *Problem*: If `stream` is wrapped in `BufferedOutputStream`, this check returns `false`.
-    -   *Fix*: Avoid `instanceof`. If you must find the root, implementing `getUnderlying()` in the decorator is a (leaky) abstraction.
-2.  **Double Wrapping**:
-    -   *Task*: `new Boxed(new Boxed(item))`.
-    -   *Problem*: Does the cost double? Yes. Is that intended? Maybe.
-    -   *Fix*: Check if `wrappee` is already an instance of `Boxed` in the constructor and throw/warn if nesting same decorators is forbidden (e.g., Double Encryption is usually pointless overhead).
-3.  **Lifecycle Management**:
-    -   *Task*: You call `close()` on the outer `GZIPOutputStream`.
-    -   *Requirement*: It must cascade the `close()` call down to the inner `FileOutputStream` to avoid file handle leaks.
+When you decorate a `FileInputStream` with `BufferedInputStream`, the resulting object is NO LONGER a `FileInputStream`.
+*   `original instanceof FileInputStream` -> `true`
+*   `decorated instanceof FileInputStream` -> `false`
+*   `decorated instanceof InputStream` -> `true`
 
-#### Challenge: The RBAC Permission System
-**Scenario**: Permission sets are dynamic. A user logs in as "Guest", then authenticates to "User", then uses 2FA to become "Admin".
-**Task**: Use decorators to build a `PermissionSet`.
--   Base: `Guest` (["READ_PUBLIC"])
--   Decorator 1: `AuthUser` (adds ["READ_private", "WRITE_own"])
--   Decorator 2: `Admin` (adds ["DELETE_ANY", "BAN_USER"])
--   *Constraint*: Implement `hasPermission(String p)` that traverses the whole stack.
+**Rule**: Client code must depend on the **Abstract Component** (`InputStream`), never the concrete class (`FileInputStream`). If your code relies on the concrete type, Decorators will break it.
 
 ---
 
-### 6. Common Mistakes & Anti-Patterns
+### **10. Cheatsheet & Summary**
 
-| Mistake | Consequence |
-| :--- | :--- |
-| **Decoration Hell** | Creating chains like `new A(new B(new C(new D(new E(...)))))` is unreadable. Use a **Factory** or **Builder** to assemble standard chains. |
-| **Broken Delegation** | Forgetting to call `super.method()` or `wrappee.method()` in the decorator breaks the chain. The request stops there. |
-| **Object Identity** | Relying on `==` to check if two objects are the same. A decorated object is a *new wrapper*, not the original instance. |
-| **Order Dependency** | If `Encryption` expects usage of a stream that is *already* `Buffered`, but you wrap them in reverse, performance tanks or logic breaks. |
-| **Bloated Interface** | If the Component interface has 50 methods, the Decorator must implement (and forward) all 50. If you only care about 2, this is tedious. (Partial fix: `ForwardingWrapper` classes in some libraries). |
+| Metric | Decorator Pattern | Inheritance |
+| :--- | :--- | :--- |
+| **Adding Behavior** | Dynamic (Runtime) | Static (Compile Time) |
+| **Combinations** | Mix & Match ($N$ classes) | Combinatorial Explosion ($2^N$ classes) |
+| **Object Identity** | Hidden inside wrapper | The object itself |
+| **Performance** | Slight indirection cost | Zero cost (V-Table) |
 
----
-
-### 7. Deep Dive: System Design & Middleware
-
-**1. The Java I/O Architecture**:
-Java's I/O is the most famous (and infamous) use of Decorator.
--   **Abstract Component**: `InputStream`, `OutputStream`, `Reader`, `Writer`.
--   **Concrete Component**: `FileInputStream`, `ByteArrayInputStream`.
--   **Decorators**: `BufferedInputStream` (Performance), `GZIPInputStream` (Compression), `CipherInputStream` (Security), `ObjectInputStream` (Serialization).
-
-**Why is it designed like this?**
-If Java used inheritance, we would need:
--   `BufferedFileInputStream`
--   `BufferedByteArrayInputStream`
--   `GzipBufferedFileInputStream`
--   `GzipNoBufferFileInputStream`
--   ... Thousands of classes.
-Decorator allows $M$ features + $N$ sources to be combined linearly ($M+N$ classes) rather than multiplicatively ($M \times N$).
-
-**2. Web Middleware (Express.js / Spring Security)**:
-In web frameworks, "Middleware" is a variation of Decorator/Chain.
-```javascript
-app.use(logger);      // Decorator 1: Logs request
-app.use(jsonParser);  // Decorator 2: Parses body
-app.use(authCheck);   // Decorator 3: Verifies token
-app.get('/api', handler); // Base Component
-```
-Each middleware function wraps the next one. It can inspect/modify the `Request` (add headers, decode JSON) before passing it down. It effectively "decorates" the Request object.
+**Verdict**: Use Decorator when you need to stack features dynamically (like streams, UI borders, middleware).
 
 ---
 
-### 8. Interview Bank: Follow-Up Questions
-
-1.  **Q**: "What is the key difference between Decorator and Adapter?"
-    **A**:
-    -   **Decorator**: Keeps the *same* interface. Adds *behavior*. (e.g., `InputStream` -> `BufferedInputStream`).
-    -   **Adapter**: Changes the *interface*. Keeps *behavior*. (e.g., `XMLStream` -> `JSONStream`).
-2.  **Q**: "When does the Decorator pattern become a liability?"
-    **A**: When the interface is very fat (many methods). Creating a decorator requires forwarding every single method. Also, debugging deep wrapper chains is painful ("Stack Trace Hell").
-3.  **Q**: "Can a Decorator remove functionality?"
-    **A**: Technically yes (by suppressing methods), but it violates Liskov Substitution Principle. A specific pattern for this is **UnmodifiableWrapper** (e.g., `Collections.unmodifiableList`), which throws Exceptions on write methods.
-4.  **Q**: "How do you handle 'Order Sensitive' decorators?"
-    **A**: Use a **Builder** pattern to enforce order. `StreamBuilder.from(file).compress().encrypt().build()`. The builder ensures `compress` wraps `file`, and `encrypt` wraps `compress`.
-5.  **Q**: "Is inheritance ever better than Decorator?"
-    **A**: Yes, for "Is-A" relationships where the behavior change is intrinsic and static (e.g., `Dog` extends `Animal`). Decorator is for "Has-A" dynamic enhancement (e.g., `Dog` has `Leash`).
-
----
-
-### 9. Cheatsheet & Summary
-
-| Pattern | Interface | Adds Behavior? | Runtime? | Key Use Case |
-| :--- | :--- | :--- | :--- | :--- |
-| **Inheritance** | Same/Extends | Yes | ❌ No (Static) | Base Types, Intrinsic nature. |
-| **Decorator** | Same | Yes | ✅ Yes (Dynamic)| Optional features, combinatorics. |
-| **Proxy** | Same | No (Control) | ✅ Yes | Lazy loading, Access Control. |
-| **Adapter** | Different | No (Translate)| ✅ Yes | Legacy Integration. |
-
-**Key Tactic**: If you see a class name like `EncryptedBufferedFileStream`, you have an Inheritance problem. Refactor to `new Encrypted(new Buffered(new File()))`.
-
----
-
-### 10. References
+### **11. References**
 1.  *Design Patterns (GoF)* - Structural Patterns.
 2.  *Head First Design Patterns* - "The Starbuzz Coffee Example" (Classic introduction).
 3.  *Effective Java* - Item 18: Favor Composition over Inheritance.
-
----
 
 #### Q55: How do you architecturally resolve Circular Dependencies in large systems?
 **Companies**: Google, Amazon, Netflix, Uber, Palantir
