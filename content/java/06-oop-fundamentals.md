@@ -34899,12 +34899,12 @@ class StripeAdapter implements PaymentProcessor {
 
     @Override
     public void pay(String account, double amount) {
-        long cents = (long) (amount * 100); // Logic translation
-        stripe.chargeCard(account, cents);  // Method translation
+        long cents = (long) (amount * 100);
+        stripe.chargeCard(account, cents);
     }
 }
 
-// Adapter for PayPal (Pass-through)
+// Adapter for PayPal (Matches signature)
 class PayPalAdapter implements PaymentProcessor {
     private final PayPalApi paypal;
 
@@ -34918,107 +34918,204 @@ class PayPalAdapter implements PaymentProcessor {
     }
 }
 
-// --- 4. Factory/Strategy (Optional) ---
-class PaymentFactory {
-    public static PaymentProcessor getProcessor(String type) {
-        if ("stripe".equals(type)) return new StripeAdapter(new StripeApi());
-        if ("paypal".equals(type)) return new PayPalAdapter(new PayPalApi());
-        throw new IllegalArgumentException("Unknown provider");
+// --- 4. The Client (Agnostic to Vendor) ---
+class ECommerceApp {
+    private final PaymentProcessor processor;
+
+    public ECommerceApp(PaymentProcessor processor) {
+        this.processor = processor;
+    }
+
+    public void checkout(String user, double total) {
+        System.out.println("Processing Checkout...");
+        processor.pay(user, total);
     }
 }
 
-// --- Usage ---
-// PaymentProcessor proc = PaymentFactory.getProcessor("stripe");
-// proc.pay("tok_123", 99.99); 
-// Output: Stripe: Charged 9999 cents to tok_123
-```
+// Usage
+public class AdapterDemo {
+    public static void main(String[] args) {
+        // Switch vendors by changing ONE line of code
+        PaymentProcessor stripe = new StripeAdapter(new StripeApi());
+        PaymentProcessor paypal = new PayPalAdapter(new PayPalApi());
 
-#### Python: Adapter via Inheritance & Mixins
-Python's Multiple Inheritance makes Class Adapters easy (though Composition is still safer).
+        ECommerceApp app = new ECommerceApp(stripe);
+        app.checkout("user_123", 49.99);
+    }
+}
+
+#### Python: Wrappers & Duck Typing
+In Python, if the Adaptee already has the method name, you don't even need an adapter! If it doesn't, you wrapper it.
 
 ```python
-class Target:
-    def request(self) -> str:
-        return "Target: The default target's behavior."
+class PDFRenderer:
+    def render_pdf(self, file): print(f"Rendering PDF: {file}")
 
-class Adaptee:
-    def specific_request(self) -> str:
-        return ".eetpadA eht fo roivaheb laicepS"
+class HTMLRenderer:
+    def render_html(self, file): print(f"Rendering HTML: {file}")
 
-class ObjectAdapter(Target):
-    def __init__(self, adaptee: Adaptee):
-        self._adaptee = adaptee
+# The Interface we want: 'render(file)'
 
-    def request(self) -> str:
-        # Adaptation logic: Reverse the string
-        return f"Adapter: (TRANSLATED) {self._adaptee.specific_request()[::-1]}"
+class HTMLAdapter:
+    def __init__(self, html_renderer):
+        self.renderer = html_renderer
+        
+    def render(self, file):
+        # Adapt method name
+        self.renderer.render_html(file)
+
+# Client
+def main_render(renderer, filename):
+    # Relies on Duck Typing: expects .render()
+    renderer.render(filename)
 
 # Usage
-# adaptee = Adaptee()
-# adapter = ObjectAdapter(adaptee)
-# print(adapter.request())
+pdf = PDFRenderer()
+# Monkey Patching (Pythonic Hack -> "Adapter at Runtime")
+pdf.render = pdf.render_pdf 
+
+main_render(pdf, "doc.pdf") # Works!
 ```
 
-#### C++: Class Adapter (Private Inheritance)
-In C++, we can inherit implementation privately (so `specificRequest` isn't exposed) while inheriting interface publicly.
-
-```cpp
-#include <iostream>
-
-// Target Interface
-class Rectangle {
-public:
-    virtual void draw() = 0;
-};
-
-// Adaptee (Legacy Component)
-class LegacyRectangle {
-public:
-    LegacyRectangle(int x1, int y1, int x2, int y2) {
-        x1_ = x1; y1_ = y1; x2_ = x2; y2_ = y2;
-    }
-    void oldDraw() {
-        std::cout << "Legacy Drawing: " << x1_ << " " << y1_ << std::endl;
-    }
-private:
-    int x1_, y1_, x2_, y2_;
-};
-
-// Class Adapter: Inherits Interface (public) AND Implementation (private)
-// This implements "Is-A Rectangle" and "Is-Implemented-In-Terms-Of LegacyRectangle"
-class RectangleAdapter : public Rectangle, private LegacyRectangle {
-public:
-    RectangleAdapter(int x, int y, int w, int h)
-        : LegacyRectangle(x, y, x + w, y + h) {}
-
-    void draw() override {
-        // Translation logic
-        std::cout << "Adapter: Converting coordinates..." << std::endl;
-        oldDraw(); // Calls private inherited method
-    }
-};
-```
-
-#### Go: Using Interfaces implicitly
-Go interfaces are satisfied implicitly, making adapters very fluid.
+#### Go: Implicit Interfaces
+Go interfaces are satisfied implicitly, making adapters lightweight.
 
 ```go
 package main
 import "fmt"
 
-// Target Interface
-type Logger interface {
-    Log(message string)
+// Target
+type LightningConnector interface {
+    PlugIntoLightningPort()
 }
 
-// Adaptee (3rd party lib)
-type ZapLogger struct{}
-func (z *ZapLogger) Info(msg string, fields map[string]interface{}) {
-    fmt.Println("[ZAP]", msg, fields)
+// Adaptee
+type MicroUSBPhone struct {}
+func (m *MicroUSBPhone) PlugIntoMicroUSBPort() {
+    fmt.Println("Charging via MicroUSB...")
 }
 
 // Adapter
-type ZapAdapter struct {
+type LightningToMicroUSBAdapter struct {
+    device *MicroUSBPhone
+}
+
+func (a *LightningToMicroUSBAdapter) PlugIntoLightningPort() {
+    fmt.Println("Adapter converting Lightning to MicroUSB...")
+    a.device.PlugIntoMicroUSBPort()
+}
+```
+
+#### C++: Class Adapter (Private Inheritance)
+C++ allows `Class Adapter` via multiple inheritance.
+```cpp
+// Target
+class ITarget {
+public:
+    virtual void Request() = 0;
+};
+
+// Adaptee
+class Adaptee {
+public:
+    void SpecificRequest() { cout << "Called SpecificRequest" << endl; }
+};
+
+// Adapter inherits implementation from Adaptee, interface from Target
+class Adapter : public ITarget, private Adaptee {
+public:
+    void Request() override {
+        // Reuse code from Adaptee
+        SpecificRequest();
+    }
+};
+```
+
+---
+
+### 5. Deep Theory: Composition vs. Inheritance
+
+**The "Object Adapter" (Composition)** uses delegation.
+-   Holds reference: `private Adaptee adaptee;`
+-   **Pros**: can adapt subclasses of `Adaptee`.
+-   **Cons**: requires extra object indirection.
+
+**The "Class Adapter" (Inheritance)** uses subclassing.
+-   Inherits: `extends Adaptee implements Target`
+-   **Pros**: can override behavior of `Adaptee`.
+-   **Cons**: cannot adapt subclasses; strictly tied to parent class.
+
+**Impedance Mismatch**:
+This pattern solves the "Impedance Mismatch" between two systems. It's not just about method names; it's about data formats (XML->JSON), error handling (Exceptions->Return Codes), and async models (Callback->Promise).
+
+---
+
+### 6. Practice & Assessment
+
+#### Core Exercises
+1.  **Basic**: Write a `SquarePegAdapter` that fits a `SquarePeg` into a `RoundHole` by calculating the equivalent radius.
+2.  **Intermediate**: Implement an Adapter that converts a Java `Iterator` to an `Enumeration`. Method `next()` -> `nextElement()`.
+3.  **Advanced**: Build a "Two-Way Adapter" that implements **both** `TargetA` and `TargetB` interfaces, allowing two disparate systems to talk to each other bidirectionally.
+
+#### Edge Case Drills
+1.  **Stateful Adaptation**: Adapt a stateless functional interface to a stateful object. Ensure the adapter manages the state correctly (e.g., buffering stream data).
+2.  **Exception Translation**: Adaptee throws `SQLException` (Checked), Target expects `RuntimeException` (Unchecked). Your adapter MUST wrap/translate the exception, otherwise it violates the interface contract.
+3.  **NULL handling**: Adaptee returns `null`, Target expects `Optional<String>`. The adapter must handle this conversion to prevent NPEs in the client.
+
+#### Challenge: The Database Migrator
+**Scenario**: You are migrating from MySQL (JDBC) to MongoDB (NoSQL).
+**Task**: 
+1.  Create a generic `DatabaseInterface` (CRUD).
+2.  Implement `MySQLAdapter` (wraps JDBC constructs).
+3.  Implement `MongoAdapter` (wraps MongoCollection).
+4.  Write a script that copies data from Source to Dest using ONLY the interface.
+
+---
+
+### 7. Common Mistakes & Anti-Patterns
+
+| Mistake | Consequence |
+| :--- | :--- |
+| **Logic in Adapter** | Putting complex business logic (e.g., tax calculation) in the adapter. An adapter should ONLY translate. Logic belongs in a Decorator or Service. |
+| **Over-Adapting** | Creating adapters for stable interfaces that verify rarely change. Adds complexity for no reason ("Speculative Generality"). |
+| **Revealing Implementation** | Throwing `MySQLException` from a generic `DatabaseAdapter`. The client shouldn't know it's MySQL! Wrap in `DatabaseException`. |
+| **Two-Way Coupling** | The Adaptee should NEVER know about the Adapter. It should be oblivious. |
+
+---
+
+### 8. Interview Bank: Follow-Up Questions
+
+1.  **Q**: "Difference between Adapter and Decorator?"
+    **A**: **Adapter** changes the interface (Square -> Round). **Decorator** enhances the behavior (Square -> Red Square) without changing the interface.
+2.  **Q**: "Difference between Adapter and Proxy?"
+    **A**: **Proxy** provides the SAME interface (usually for access control or lazy loading). **Adapter** provides a DIFFERENT interface.
+3.  **Q**: "Difference between Adapter and Facade?"
+    **A**: **Adapter** wraps ONE class to fix incompatibility. **Facade** wraps MANY classes to simplify a complex subsystem.
+4.  **Q**: "Can you use Reflection to make a Universal Adapter?"
+    **A**: Yes, `java.lang.reflect.Proxy` can dynamically implement an interface and route calls to a handler, but it's slow and fragile (no compile-time safety).
+
+---
+
+### 9. Cheatsheet & Summary
+
+| Pattern | Purpose | Interface Change? |
+| :--- | :--- | :--- |
+| **Adapter** | Compatibility | Yes (A -> B) |
+| **Decorator** | Enhancement | No (A -> A+) |
+| **Proxy** | Control | No (A -> A) |
+| **Facade** | Simplification | Yes (A,B,C -> Simple) |
+| **Bridge** | Decoupling | Yes (Abstraction -> Impl) |
+
+**Key Takeaway**: Use Adapter when you have an existing class that does what you need, but its interface doesn't match the one you require.
+
+---
+
+### 10. References
+1.  *Design Patterns (GoF)* - The Structural Patterns chapter.
+2.  *Refactoring to Patterns* - Josh Kerievsky. (Move logic out of adapters).
+3.  *Head First Design Patterns* - Chapter 7: Adapters and Facades.
+
+---
     zap *ZapLogger
 }
 
@@ -35095,7 +35192,7 @@ private:
 public:
     ObjectAdapter() : adaptee(std::make_unique<LegacyRect>()) {}
     
-    void draw(int x1, int y1, int x2, int y2) const override {
+    draw(int x1, int y1, int x2, int y2) const override {
         std::cout << "[ObjectAdapter] Transforming coordinates..." << std::endl;
         int w = x2 - x1;
         int h = y2 - y1;
