@@ -36467,7 +36467,7 @@ public class CycleDetector {
 
 ### 1. Conceptual Overview & Motivation
 
-**The "Why"**:
+**The "Why": Decoupling Intent from Execution**
 In many systems, the *Initiator* of an action (User clicking a button, API client) needs to be decoupled from the *Executor* (Business Logic).
 Furthermore, we often need:
 1.  **Undo/Redo**: "Ctrl+Z" functionality.
@@ -36557,47 +36557,199 @@ Instead of storing current state in DB, store **List of Commands**.
 
 ---
 
-### 4. Multi-Language Implementations
+### 4. Implementation: The "Transactional Replay Engine"
 
-#### Java: Text Editor Engine with Global Undo Stack
-A robust implementation managing a history of actions.
+**Scenario**: A Banking System. We need to audit every transaction. If a user transfers money by mistake, we need to "Undo" it correctly (Reverse transaction).
 
 ```java
 import java.util.Stack;
 
-// 1. The Command Interface
-interface Command {
-    void execute();
-    void undo();
+// --- 1. The Command Interface ---
+interface TransactionCommand {
+    void execute(); // Do it
+    void undo();    // Reverse it
 }
 
-// 2. Receiver: The Text Editor Business Logic
-class TextEditor {
-    private StringBuilder buffer = new StringBuilder();
+// --- 2. Receiver (The Bank Account) ---
+class BankAccount {
+    private final String id;
+    private double balance;
 
-    public void append(String text) {
-        buffer.append(text);
+    public BankAccount(String id, double balance) {
+        this.id = id;
+        this.balance = balance;
     }
 
-    public void delete(int count) {
-        if (count > buffer.length()) return;
-        buffer.delete(buffer.length() - count, buffer.length());
+    public void deposit(double amount) {
+        balance += amount;
+        System.out.printf("[%s] Deposted $%.2f. New Balance: $%.2f%n", id, amount, balance);
     }
 
-    public String getText() { return buffer.toString(); }
+    public void withdraw(double amount) {
+        if (balance >= amount) {
+            balance -= amount;
+            System.out.printf("[%s] Withdrew $%.2f. New Balance: $%.2f%n", id, amount, balance);
+        } else {
+            throw new IllegalStateException("Insufficient Funds");
+        }
+    }
 }
 
-// 3. Concrete Command for Appending Text
-class AppendCommand implements Command {
-    private final TextEditor editor;
-    private final String text;
+// --- 3. Concrete Commands ---
 
-    public AppendCommand(TextEditor editor, String text) {
-        this.editor = editor;
-        this.text = text;
+class DepositCommand implements TransactionCommand {
+    private final BankAccount account;
+    private final double amount;
+
+    public DepositCommand(BankAccount account, double amount) {
+        this.account = account;
+        this.amount = amount;
     }
 
     @Override
+    public void execute() { account.deposit(amount); }
+
+    @Override
+    public void undo() { 
+        System.out.println(">>> UNDOING DEPOSIT...");
+        account.withdraw(amount); // Inverse operation
+    }
+}
+
+class WithdrawCommand implements TransactionCommand {
+    private final BankAccount account;
+    private final double amount;
+    private boolean completed; // State tracking
+
+    public WithdrawCommand(BankAccount account, double amount) {
+        this.account = account;
+        this.amount = amount;
+    }
+
+    @Override
+    public void execute() {
+        // Only withdraw if funds exist. 
+        // Real systems would lock here.
+        account.withdraw(amount);
+        completed = true;
+    }
+
+    @Override
+    public void undo() {
+        if (completed) {
+            System.out.println(">>> UNDOING WITHDRAWAL...");
+            account.deposit(amount); // Inverse operation
+        }
+    }
+}
+
+class TransferCommand implements TransactionCommand {
+    private final BankAccount from;
+    private final BankAccount to;
+    private final double amount;
+    private boolean completed;
+
+    public TransferCommand(BankAccount from, BankAccount to, double amount) {
+        this.from = from;
+        this.to = to;
+        this.amount = amount;
+    }
+
+    @Override
+    public void execute() {
+        from.withdraw(amount);
+        to.deposit(amount);
+        completed = true;
+    }
+
+    @Override
+    public void undo() {
+        if (completed) {
+            System.out.println(">>> UNDOING TRANSFER...");
+            to.withdraw(amount);
+            from.deposit(amount); // Reverse flow
+        }
+    }
+}
+
+// --- 4. Invoker (The Transaction Manager) ---
+class TransactionManager {
+    private final Stack<TransactionCommand> history = new Stack<>();
+    private final Stack<TransactionCommand> redoStack = new Stack<>();
+
+    public void executeCommand(TransactionCommand cmd) {
+        try {
+            cmd.execute();
+            history.push(cmd);
+            redoStack.clear(); // New path, clear redo history
+        } catch (Exception e) {
+            System.err.println("Transaction Failed: " + e.getMessage());
+        }
+    }
+
+    public void undoLast() {
+        if (history.isEmpty()) return;
+        TransactionCommand cmd = history.pop();
+        cmd.undo();
+        redoStack.push(cmd);
+    }
+
+    public void redoLast() {
+        if (redoStack.isEmpty()) return;
+        TransactionCommand cmd = redoStack.pop();
+        cmd.execute();
+        history.push(cmd);
+    }
+}
+
+// --- Usage ---
+public class BankingDemo {
+    public static void main(String[] args) {
+        BankAccount alice = new BankAccount("Alice", 1000);
+        BankAccount bob = new BankAccount("Bob", 500);
+        TransactionManager tm = new TransactionManager();
+
+        tm.executeCommand(new DepositCommand(alice, 200));  // Alice: 1200
+        tm.executeCommand(new TransferCommand(alice, bob, 300)); // Alice: 900, Bob: 800
+
+        System.out.println("\n--- MISTAKE MADE, UNDOING ---");
+        tm.undoLast(); // Undoes Transfer. Alice: 1200, Bob: 500
+        
+        System.out.println("\n--- REDOING ---");
+        tm.redoLast(); // Redoes Transfer. Alice: 900, Bob: 800
+    }
+}
+```
+
+#### C++: Functors & std::function
+In C++, we can use standard functional objects.
+```cpp
+#include <iostream>
+#include <vector>
+#include <functional>
+
+// Using std::function as a lightweight Command
+class Button {
+    using Action = std::function<void()>;
+    Action onClick;
+public:
+    void setOnClick(Action action) { onClick = action; }
+    void click() { if(onClick) onClick(); }
+};
+
+int main() {
+    int counter = 0;
+    Button btn;
+    
+    // Lambda captures state (Closure) being effective Command
+    btn.setOnClick([&counter]() {
+        counter++;
+        std::cout << "Clicked! Count: " << counter << std::endl;
+    });
+    
+    btn.click();
+}
+```
     public void execute() {
         editor.append(text);
     }
@@ -36789,39 +36941,9 @@ function todos(state = [], action) {
 
 #### Edge Case Drills
 1.  **Destructive Undo**:
-    -   *Scenario*: User types "Hello", hits Undo (Text is empty), types "World".
-    -   *Problem*: The "Redo" stack (containing "Hello") must be cleared when a new divergent action ("World") occurs.
-    -   *Task*: Implement `CommandHistory.add(cmd)` to `redoStack.clear()`.
-2.  **Heavy State**:
-    -   *Scenario*: Image Editor. `BlurCommand` saves the *whole bitmap* for undo.
-    -   *Problem*: Memory explosion.
-    -   *Fix*: Memento Pattern (store diffs) or Disk-based Undo.
-3.  **Failed Command**:
-    -   *Scenario*: A Transactional Command (Bank Transfer). Step 1 (Debit) works. Step 2 (Credit) fails.
-    -   *Task*: The Command itself must catch the failure and internally trigger `undo()` (Compensating Transaction).
-
-#### Challenge: The Transactional Replay Engine
-**Scenario**: You are building a database migration tool.
-**Task**: Implement a `TransactionManager`.
--   Accepts a list of `MigrationCommands`.
--   Executes them one by one.
--   If Command 3 fails, it must automatically call `undo()` on Command 2, then Command 1.
--   Ensure "All or Nothing" behavior.
-
 ---
 
-### 6. Common Mistakes & Anti-Patterns
-
-| Mistake | Consequence |
-| :--- | :--- |
-| **Smart Command** | Putting too much business logic in the Command. Command should be thin glue; logic belongs in Receiver. |
-| **Ignoring Undo** | Designing commands that are irreversible (e.g., `DeleteFile`). If irreversible, warn user or do "Soft Delete". |
-| **No Cleanup** | Infinite Undo Stack causes Memory Leaks. Logic should limit stack size (e.g., max 50 Undos). |
-| **Thread Safety** | Invoking commands from UI thread that invoke long-running Receiver methods blocks the UI. Wrap execution in `CompletableFuture`. |
-
----
-
-### 7. Deep Dive: CQRS and Event Sourcing
+### 5. Deep Theory: CQRS & Event Sourcing
 
 **1. CQRS (Command Query Responsibility Segregation)**:
 Traditional CRUD uses the same model for Reads and Writes.
