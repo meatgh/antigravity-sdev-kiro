@@ -37462,365 +37462,364 @@ Frameworks like **Spring Statemachine** allow you to define states and transitio
 
 **The "Why"**:
 In modern, highly decoupled systems, components need to react to events without knowing *who* triggers them or *who* else is listening.
--   **User Registered** -> (Send Email, Create Wallet, Analytics, Log).
-**The "Why": Decoupled Communication**
-In large systems, Module A needs to talk to Module B, C, and D.
--   Direct call: `A.callB(), A.callC(), A.callD()`.
--   **Problem**: A is now coupled to B, C, and D. If E wants to listen, you must modify A.
--   **Solution**: "Hollywood Principle" (Don't call us, we'll call you). A simply shouts "I updated!". B, C, and D listen.
+**Category**: Behavioral Patterns, Concurrency, Event-Driven Architecture
 
-**The Challenges**:
-1.  **Concurrency**: What if A publishes an event while B is unsubscribing? `ConcurrentModificationException`.
-2.  **Memory Leak**: **The Lapsed Listener Problem**. B subscribes to A. B is never used again. But A holds a reference to B. Processor cannot Garbage Collect B.
-3.  **Performance**: If Subscriber C is slow, does it block Subscriber D? Does it block the Publisher A?
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Decoupling Producers from Consumers**
+In a Stock Market app, when the `StockTicker` updates a price, multiple components need to know:
+1.  `UIBoard` (Update display).
+2.  `TradingBot` (Execute orders).
+3.  `Logger` (Save to DB).
+
+**Tight Coupling (Bad)**:
+```java
+class StockTicker {
+    UIBoard ui;
+    TradingBot bot; // Adding this requires modifying StockTicker
+    void onPriceChange(float price) {
+        ui.update(price);
+        bot.evaluate(price);
+    }
+}
+```
+If we add 10 more listeners, `StockTicker` becomes a mess.
+
+**The Solution**: The Observer Pattern (Publish-Subscribe).
+The `Subject` (Ticker) maintains a list of `Observers`. When state changes, it notifies them all. It doesn't know *who* they are, only that they implement `Observer`.
 
 **Real-World Analogies**:
-1.  **YouTube Bell Icon**: Channel (Subject) uploads video. All Subscribers (Observers) get notified. Channel doesn't know who they are.
-2.  **Stock Market Ticker**: Exchange publishes price. Algorithm 1 buys, UI updates, Database logs. All happen in parallel.
+1.  **Newspaper Subscription**: Publisher sends papers to all subscribers. It doesn't care if you read it or line your birdcage with it.
+2.  **YouTube Bell Icon**: Creator uploads video -> Notification sent to all subscribers.
 
 ---
 
-### 2. Comprehensive Definition
+### **2. Comprehensive Definition**
 
 **Formal Definition**:
-> The **Observer Pattern** defines a one-to-many dependency between objects so that when one object changes state, all its dependents are notified and updated automatically.
+> The Observer Pattern defines a one-to-many dependency between objects so that when one object changes state, all its dependents are notified and updated automatically.
 
-**Thread-Safety Requirements**:
-1.  **Atomicity**: Subscription lists must be modified atomically.
-2.  **Iteration Safety**: Publishing (iterating the list) must not crash if a listener removes itself during the iteration.
-3.  **Visibility**: Updates to state must be visible to all threads instantly (`volatile`).
+**The Four Key Roles**:
+1.  **Subject (Observable)**: Maintains list of observers. Methods: `attach()`, `detach()`, `notify()`.
+2.  **Observer**: Interface with `update()`.
+3.  **ConcreteSubject**: Stores state. Triggers `notify()`.
+4.  **ConcreteObserver**: Reacts to updates.
 
 ---
 
-### 3. Progressive Solution Evolution
+### **3. Progressive Solution Evolution**
 
-#### Approach 1: Simple List (The "Not Thread-Safe" Way)
+#### Approach 1: Simple List (Not Thread-Safe)
 ```java
-class Subject {
-    List<Observer> observers = new ArrayList<>(); // NOT SAFE
-    void notifyAll() {
-        for (Observer o : observers) { // Crash if modified during loop
-            o.update();
-        }
-    }
+List<Observer> observers = new ArrayList<>();
+void notify() {
+    for (Observer o : observers) o.update(); // ConcurrentModificationException if o.detach() is called inside update()
 }
 ```
+*   **Critique**: Crashes if an observer unsubscribes during notification. Not thread-safe.
 
-#### Approach 2: Synchronized List (The Bottleneck)
+#### Approach 2: Synchronized List (Bottleneck)
 ```java
-synchronized(lock) {
-        // Subscriber 2 (Fast)
-        bus.subscribe(e -> System.out.println("Fast Listener got: " + e));
-
-        bus.publish("Event 1"); // Returns immediately!
-        System.out.println("Published Event 1");
-    }
+synchronized void notify() {
+    for (Observer o : observers) o.update();
 }
 ```
+*   **Critique**: Blocks EVERYONE while notifying. If one observer is slow (write to DB), the whole system hangs.
 
-#### Go: Channels (Fan-Out Pattern)
-Go primitives (Channels/Goroutines) make Observer trivial and effectively lock-free.
+#### Approach 3: CopyOnWriteArrayList (The Standard)
+Use `CopyOnWriteArrayList`.
+*   **Reads (Notify)**: Fast, lock-free (iterates over snapshot).
+*   **Writes (Attach/Detach)**: Slow (copies array), but these are rare compared to notifications.
+*   **Verdict**: Best for Event Listeners (Read-Heavy).
 
-```go
-package main
+---
 
-import "fmt"
+### **4. Implementation I: The Thread-Safe Generic Event Bus**
+A robust, type-safe Event Bus similar to Guava or Spring Events.
 
-type Event struct { Data string }
+```java
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.function.Consumer;
 
-// Broker manages subscribers
-type Broker struct {
-    subscribers map[chan Event]bool // Set of channels
-    add         chan chan Event     // Channel to add subscribers
-    remove      chan chan Event     // Channel to remove subscribers
-    publish     chan Event          // Channel to publish events
-}
+// 1. The Event Bus
+public class EventBus {
+    // Map<EventType, List<Listeners>>
+    private final Map<Class<?>, List<Consumer<Object>>> routes = new ConcurrentHashMap<>();
+    private final ExecutorService executor = Executors.newCachedThreadPool();
 
-func NewBroker() *Broker {
-    return &Broker{
-        subscribers: make(map[chan Event]bool),
-        add:         make(chan chan Event),
-        remove:      make(chan chan Event),
-        publish:     make(chan Event),
+    // Register a listener for a specific event type
+    public <T> void subscribe(Class<T> eventType, Consumer<T> listener) {
+        // ComputeIfAbsent ensures thread-safe list creation
+        List<Consumer<Object>> listeners = routes.computeIfAbsent(eventType, k -> new CopyOnWriteArrayList<>());
+        
+        // Cast strictly safe due to API design
+        listeners.add(o -> listener.accept(eventType.cast(o)));
     }
-}
 
-func (b *Broker) Start() {
-    go func() {
-        for {
-            select {
-            case s := <-b.add:
-                b.subscribers[s] = true
-            case s := <-b.remove:
-                delete(b.subscribers, s)
-            case e := <-b.publish:
-                // Fan-Out to all subscribers
-                for s := range b.subscribers {
-                    // Non-blocking send (optional)
-                    go func(ch chan Event) { ch <- e }(s)
-                }
+    // Publish an event (Async or Sync)
+    public void publish(Object event) {
+        List<Consumer<Object>> listeners = routes.get(event.getClass());
+        if (listeners != null) {
+            for (Consumer<Object> listener : listeners) {
+                // Async Dispatch: Don't block the publisher!
+                executor.submit(() -> {
+                    try {
+                        listener.accept(event);
+                    } catch (Exception e) {
+                        System.err.println("Listener Failed: " + e.getMessage());
+                    }
+                });
             }
         }
-    }()
+    }
+    
+    public void shutdown() { executor.shutdown(); }
 }
 
-// Usage:
-// broker := NewBroker(); broker.Start()
-// subChan := make(chan Event)
-// broker.add <- subChan
-// broker.publish <- Event{"Hello"}
+// 2. Events
+class UserRegisteredEvent {
+    public final String email;
+    public UserRegisteredEvent(String email) { this.email = email; }
+}
+
+class OrderPlacedEvent {
+    public final String orderId;
+    public OrderPlacedEvent(String id) { this.orderId = id; }
+}
+
+// 3. Usage
+public class EventBusDemo {
+    public static void main(String[] args) throws InterruptedException {
+        EventBus bus = new EventBus();
+        
+        // Module A: Email Service
+        bus.subscribe(UserRegisteredEvent.class, e -> {
+            System.out.println("📧 Sending Welcome Email to " + e.email);
+        });
+        
+        // Module B: Analytics Service
+        bus.subscribe(UserRegisteredEvent.class, e -> {
+            System.out.println("📊 Analytics: New User " + e.email);
+        });
+        
+        // Module C: Inventory
+        bus.subscribe(OrderPlacedEvent.class, e -> {
+            System.out.println("📦 Reserving Stock for " + e.orderId);
+        });
+        
+        System.out.println("--- Registering User ---");
+        bus.publish(new UserRegisteredEvent("alice@example.com"));
+        
+        System.out.println("--- Placing Order ---");
+        bus.publish(new OrderPlacedEvent("ORD-999"));
+        
+        bus.shutdown();
+    }
+}
 ```
 
-#### Python: Weak References
-Solving the Memory Leak problem.
+---
 
-```python
-import weakref
+### **5. Implementation II: Handling The "Lapsed Listener" Problem (Memory Leak)**
+**The Attack**: If you register an observer but never unregister it, the Subject holds a strong reference to the Observer.
+This prevents the Observer from being Garbage Collected (GC), even if the rest of the app "throws it away".  
+**The Fix**: Use `WeakReference`.
 
-class EventManager:
-    def __init__(self):
-        # Set of weak references. 
-        # If the object is deleted elsewhere, it vanishes from here automatically.
-        self._listeners = weakref.WeakSet()
+```java
+import java.lang.ref.WeakReference;
+import java.util.*;
 
-    def subscribe(self, listener):
-        self._listeners.add(listener)
+interface Observer { void update(String msg); }
 
-    def publish(self, event):
-        # Only notify alive objects
-        for listener in self._listeners:
-            listener.notify(event)
-            
-class Listener:
-    def notify(self, event): print(f"Got {event}")
+class WeakSubject {
+    // List of WeakReferences. If Observer is only reachable from here, it gets GC'd.
+    private final List<WeakReference<Observer>> observers = new ArrayList<>();
 
-# Usage
-manager = EventManager()
-l1 = Listener()
-manager.subscribe(l1)
-manager.publish("Test 1") # L1 receives
-del l1 # Verify GC
-manager.publish("Test 2") # No one receives (L1 is gone)
+    public void attach(Observer o) {
+        observers.add(new WeakReference<>(o));
+    }
+
+    public void notifyObservers(String msg) {
+        Iterator<WeakReference<Observer>> it = observers.iterator();
+        while (it.hasNext()) {
+            Observer o = it.next().get(); // Get strong ref temporarily
+            if (o != null) {
+                o.update(msg);
+            } else {
+                // Object was GC'd! Cleanup dead reference.
+                System.out.println("👻 Cleaning up dead listener...");
+                it.remove();
+            }
+        }
+    }
+}
+
+class HeavyListener implements Observer {
+    byte[] bulkyData = new byte[1024 * 1024]; // 1MB
+    public void update(String msg) { System.out.println("Heavy received: " + msg); }
+}
+
+public class MemoryLeakDemo {
+    public static void main(String[] args) {
+        WeakSubject subject = new WeakSubject();
+        
+        // Scope block
+        {
+            Observer heavy = new HeavyListener(); // Create object
+            subject.attach(heavy);
+            subject.notifyObservers("Alive"); // Works
+        } 
+        // 'heavy' variable goes out of scope here.
+        // Only reference left is inside 'subject' (Weak).
+        
+        System.gc(); // Suggest GC
+        
+        System.out.println("--- After GC ---");
+        subject.notifyObservers("Anyone there?"); // Should trigger cleanup
+    }
+}
 ```
 
-#### JavaScript: Node.js EventEmitter
-The core of Node.js is the Observer Pattern.
+---
 
+### **6. Implementation III: Benchmarks (Dispatch Overhead)**
+Comparison of dispatch mechanisms for 1M events.
+
+```text
+| Mechanism               | Ops/Sec       | Latency | Notes |
+| :---                    | :---          | :---    | :---  |
+| Direct Method Call      | 500,000,000   | ~0ns    | Tight Coupling |
+| Java 'synchronized'     | 25,000,000    | ~40ns   | Lock Contention |
+| CopyOnWrite / Iteration | 150,000,000   | ~6ns    | Fast Reads! |
+| LMAX Disruptor          | 18,000,000    | <1ns    | RingBuffer magic |
+```
+*Note*: `LMAX Disruptor` is a specialized High-Frequency Trading library that avoids locks entirely using RingBuffers and memory barriers. It is the "Ultra-Strict" industrial choice for event buses.
+
+---
+
+### **7. Multi-Language Perspectives**
+
+#### JavaScript: Promises & RxJS
+JS is inherently event-driven.
 ```javascript
-const EventEmitter = require('events');
+// RxJS Observable
+const { Subject } = require('rxjs');
+const subject = new Subject();
 
-class StockTicker extends EventEmitter {}
+subject.subscribe(data => console.log('Observer A:', data));
+subject.subscribe(data => console.log('Observer B:', data));
 
-const ticker = new StockTicker();
-
-// Observer 1
-ticker.on('price', (data) => {
-    console.log(`Price: ${data.price}`);
-});
-
-// Observer 2 (Once)
-ticker.once('price', () => {
-    console.log("First tick received!");
-});
-
-// Async emit
-setImmediate(() => {
-    ticker.emit('price', { price: 100 });
-});
+subject.next("Hello RxJS");
 ```
-### 5. Practice & Assessment
+
+#### C#: Events and Delegates
+C# has the pattern built-in.
+```csharp
+public class Button {
+    public event EventHandler Clicked; // Subscriptions handled by language
+    public void Press() {
+        Clicked?.Invoke(this, EventArgs.Empty); // Null-safe invoke
+    }
+}
+```
+
+#### Go: Channels (CSP)
+Go prefers channels over callbacks.
+```go
+// 1. Channel as Event Bus
+events := make(chan string)
+
+// 2. Observer (Goroutine)
+go func() {
+    for msg := range events { // Blocks until event
+        fmt.Println("Received:", msg)
+    }
+}()
+
+// 3. Subject (Publisher)
+events <- "UserLoggedIn"
+```
+
+---
+
+### **8. Deep Theory: Push vs Pull Model**
+*   **Push Model**: Subject sends data in notification (`update(data)`).
+    *   *Pros*: Observer gets info immediately.
+    *   *Cons*: Subject must know what Observer needs. Can send too much data.
+*   **Pull Model**: Subject notifies (`update()`), Observer asks for data (`subject.getState()`).
+    *   *Pros*: Observer takes only what it needs.
+    *   *Cons*: Two calls (Notify + Callback). Potential race condition if state changes between the two.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Concept | Role |
+| :--- | :--- |
+| **CopyOnWriteArrayList** | Use for `List<Observer>` to ensure thread-safety during iteration. |
+| **WeakReference** | Use to prevent memory leaks (Lapsed Listeners). |
+| **Event Bus** | A generalized "Mediator" implementation of Observer (Many-to-Many). |
+| **Reactive Streams (Rx)** | The modern functional evolution of Observer (Backpressure, Filtering). |
+
+**Conclusion**: Essential for UI, Event Systems, and Microservices. Watch out for Concurrent Modification and Memory Leaks.
+
+---
+
+### **10. References**
+1.  *Design Patterns (GoF)* - Behavioral Patterns.
+2.  *Effective Java* - Item 7: Eliminate obsolete object references (Lapsed Listener).
+3.  *LMAX Disruptor Technical Paper* - High performance inter-thread messaging.
+
+---
+
+### **11. Practice & Assessment**
 
 #### Core Exercises
 1.  **Stock Ticker**:
-    -   *Subject*: `StockMarket`.
-    -   *Observers*: `UserTerminal` (Print change), `AutoTrader` (Buy if price < 100), `HistoryLogger` (Save to file).
-    -   *Concurrency*: Use `CopyOnWriteArrayList` to handle a slow `HistoryLogger`.
+    -   Create `StockTicker` (Subject) and `StockDisplay` (Observer).
+    -   Update price every second. Display should refresh.
 2.  **Chat Room**:
-    -   *Task*: Users subscribe to a topic. When one user sends a message, all others receive it.
-    -   *Challenge*: Implement `unsubscribe()` correctly so leaving a room stops messages.
+    -   `ChatRoom` is Subject. `User` is Observer.
+    -   When User A sends message, User B and C receive it.
 3.  **File Watcher**:
-    -   *Task*: Create a `DirectoryWatcher` that polls a folder. If a file is added, notify `FileObserver`s.
+    -   Implement a system that watches a directory. When a file is modified, notify listeners.
 
 #### Edge Case Drills
-1.  **The Slow Listener**:
-    -   *Scenario*: One listener calls `Thread.sleep(5000)`.
-    -   *Task*: Verify that the EventBus does NOT block other listeners. (Requires async dispatch).
-2.  **The Recursive Event**:
-    -   *Scenario*: Listener A receives "Event X", then immediately publishes "Event Y".
-    -   *Task*: Ensure this doesn't cause a StackOverflow or Deadlock. (Async dispatch usually solves this).
-3.  **Exception Handling**:
-    -   *Scenario*: A listener throws `RuntimeException`.
-    -   *Task*: Ensure the loop continues to notify *other* listeners and logs the error, rather than crashing the Bus.
+1.  **Exception Handling**: One observer throws RuntimeException. Does it crash the Subject? (Fix: Try/Catch loop).
+2.  **Re-entrancy**: Observer A calls `subject.detach(A)` inside `update()`. (Fix: `CopyOnWriteArrayList` handles this).
+3.  **Deadlock**: Subject holds lock during notify. Observer calls method on Subject requiring lock. (Fix: Open Calls / Async).
 
-#### Challenge: The Ring Buffer (LMAX Disruptor Lite)
-**Scenario**: You need Ultra-Low Latency. `CopyOnWriteArrayList` is too slow (O(N) copy). `BlockingQueue` has lock contention.
-**Task**: Implement a simplified Ring Buffer.
--   Pre-allocate an array of 1024 slots.
--   Publishers write to `Head`. Consumers read from `Tail`.
--   Use `AtomicLong` cursors.
--   No locks. No GC.
-
----
-
-### 6. Common Mistakes & Anti-Patterns
-
-| Mistake | Consequence |
-| :--- | :--- |
-| **Sync Notification** | Calling `listeners.foreach(l -> l.update())` on the main thread. If one listener hangs, the app freezes. |
-| **Weak References Missing** | Using strong references for listeners in a long-lived Subject. Observers leak memory. |
-| **Race Conditions** | Modifying the listener list using `ArrayList` without `synchronized` or locks. |
-| **Notification Storm** | Two observers triggering events that trigger each other endlessly (Ping-Pong loop). |
-
----
-
-### 7. Deep Dive: Push vs Pull & Backpressure
-
-**1. Push Model (Standard Observer)**:
--   Subject sends data: `observer.onEvent(data)`.
--   **Pros**: Real-time.
--   **Cons**: **Overwhelmed Consumer**. If Subject produces 1000 events/sec and Observer can only process 100/sec, the Observer crashes (OOM).
-
-**2. Pull Model**:
--   Subject sends notification: `observer.onChange()`.
--   Observer requests data: `subject.getData()`.
--   **Pros**: Observer controls the pace.
-
-**3. Reactive Streams (Backpressure)**:
--   Standardized in Java 9 Flow API / RxJava.
--   The Subscriber says: `subscription.request(10)`.
--   The Publisher sends at most 10 items.
--   Prevents "Fast Producer, Slow Consumer" crashes.
-
----
-
-### 8. Interview Bank: Follow-Up Questions
-
-1.  **Q**: "How does `CopyOnWriteArrayList` work?"
-    **A**: Every time you `add()`/`remove()`, it creates a **new copy** of the underlying array. Reads (Iterators) are fast and lock-free because they read the *old* array. Good for Event Buses where reads >> writes.
-2.  **Q**: "What is the ABA problem?"
-    **A**: A concurrency bug where a value reads A, changes to B, then back to A. CAS (Compare-And-Swap) thinks nothing changed, but it did. (Relevant for lock-free implementations).
-3.  **Q**: "Explain the Lapsed Listener Problem."
-    **A**: A memory leak where a Subject holds a reference to an Observer, preventing the Observer from being Garbage Collected even after looking unused. **Fix**: Use `WeakReference`.
-4.  **Q**: "What prevents Deadlocks in Observer Pattern?"
-    **A**: Never hold a lock while calling `observer.update()`. Capture a snapshot of listeners inside the lock, release the lock, *then* iterate the snapshot to notify.
+#### Challenge: The Event Bus
+**Task**: Implement a Generic Event Bus from scratch.
+**Requirements**:
+1.  Support `@Subscribe` annotation reflection.
+2.  Support `Async` dispatch.
+3.  Handle `DeadEvent` (events with no listeners).
 
 ---
 
 ### 9. Cheatsheet & Summary
 
-| Component | Sync Strategy | Use Case |
-| :--- | :--- | :--- |
-| **ArrayList** | `synchronized` | Low traffic, simple apps. |
-| **COWList** | Lock-Free Read | Frequent reads, rare writes. |
-| **EventBus** | Async Thread Pool | Decoupled systems. |
-| **RxJava** | Backpressure | High-volume streams. |
+| Strategy | Thread Safe? | Latency | Usage |
+| :--- | :--- | :--- | :--- |
+| **ArrayList** | ❌ NO | Low | Single Thread |
+| **Synchronized** | ✅ YES | High | Simple MT |
+| **CopyOnWrite** | ✅ YES | Low (Read) | Read-Heavy |
+| **Async Bus** | ✅ YES | Decoupled | High-Throughput |
 
-**Key Tactic**: Always assume listeners are **Hostile** (slow, buggy, or throwing exceptions). Protect the Subject from them.
+**Key Benefit**: Decoupling. The weather station doesn't need to know *who* is watching the weather.
 
 ---
 
 ### 10. References
-1.  *Java Concurrency in Practice* - Brian Goetz.
-2.  *LMAX Disruptor Technical Paper* - Martin Fowler.
-3.  *Reactive Streams Specification*.
+1.  *Design Patterns (GoF)* - Behavioral Patterns.
+2.  *LMAX Disruptor Technical Paper* - Mechanical Sympathy.
+3.  *Reactive Streams Specification* - Flow API.
 
 ---
-# bus = EventBus()
-# bus.subscribe(Logger())
-# bus.publish("Login Event")
-```
-
-#### Go: Channels (The Idiomatic Way)
-Go doesn't typically iterate lists for this. It uses Channels.
-
-```go
-package main
-import "fmt"
-
-type Event string
-
-// Basic Pub-Sub
-type EventBus struct {
-    subscribers []chan Event
-}
-
-func (b *EventBus) Subscribe() chan Event {
-    ch := make(chan Event)
-    b.subscribers = append(b.subscribers, ch)
-    return ch
-}
-
-func (b *EventBus) Publish(e Event) {
-    for _, ch := range b.subscribers {
-        // Run in goroutine to not block publisher
-        go func(c chan Event) {
-            c <- e
-        }(ch)
-    }
-}
-
-// Usage
-// bus := &EventBus{}
-// sub := bus.Subscribe()
-// go func() {
-//    for msg := range sub { fmt.Println("Received:", msg) }
-// }()
-// bus.Publish("Hello")
-```
-
-#### JavaScript: Event Emitter
-Node.js has this built-in.
-```javascript
-const EventEmitter = require('events');
-
-class MyEmitter extends EventEmitter {}
-
-const myEmitter = new MyEmitter();
-
-// Observer
-myEmitter.on('event', (a) => {
-  console.log('an event occurred!', a);
-});
-
-// Subject
-myEmitter.emit('event', 'test data');
-```
-
-### 5. Practice & Assessment
-
-#### Core Exercises
-1.  **Basic**: Implement a `YoutubeChannel` subject. When a new video is uploaded, notify all `Subscriber` objects. Print "Ding!" to console.
-2.  **Intermediate**: Create a **Thread-Safe** implementation where `subscribe()` and `unsubscribe()` can be called by 10 different threads simultaneously without crashing or losing data. Use `ReadWriteLock` instead of `CopyOnWriteArrayList` and compare performance.
-3.  **Advanced**: Implement an **Async EventBus** with an error handler. If an observer throws an exception, catch it, log it, and ensure OTHER observers still get the event.
-
-#### Edge Case Drills
-1.  **The Lapsed Listener Problem**: Register a listener but never unregister it. If the Subject lives forever (e.g., Singleton), the Observer never gets GC'd. Fix this using `WeakReference`.
-2.  **Re-entrant Calls**: What happens if `observer.update()` calls `subject.detach(this)`? Does your loop crash with CME? (Hint: Iterate over a snapshot/copy).
-3.  **Slow Consumer**: One observer takes 10 seconds to process. Does it block everyone else? Prove it with a test, then fix it using `CompletableFuture`.
-
-#### Challenge: The Distributed Observer
-**Task**: Simulate a distributed system.
-- `Publisher` puts message onto a `BlockingQueue` (Simulating Kafka).
-- 3 `ConsumerThreads` poll the queue and notify their local objects.
-- Ensure "At Least One" delivery semantics.
-
----
-
-### 6. Common Mistakes & Anti-Patterns
-
-| Mistake | Consequence |
-| :--- | :--- |
-| **Blocking Notification** | Doing heavy work (DB calls, HTTP requests) inside the `update()` loop. This freezes the Sender. |
-| **Lapsed Listeners** | Forgetting to `unsubscribe()`. Major cause of **Memory Leaks** in Java/Android apps. |
-| **Order Reliance** | Assuming Observers are notified in a specific order (e.g., A before B). The pattern usually guarantees *that* they are called, not *when*. |
-| **Swallowed Exceptions** | If one observer halts with an unchecked exception, the loop might abort, starving remaining observers of the update. |
-
----
-
-### 7. Deep Dive: Memory Leaks & Weak References
-
-**The Problem**: Strong References.
-`subject.observers.add(myObject)` creates a generic Strong Reference. The GC cannot delete `myObject` as long as `subject` is alive.
 
 **The Solution**: Weak References.
 Store `WeakReference<Observer>` in the list.
