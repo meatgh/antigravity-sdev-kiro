@@ -36642,284 +36642,406 @@ Often paired with CQRS. Instead of storing just the *current state* of an entity
 
 ---
 
-### 1. Conceptual Overview & Motivation
+### **1. Conceptual Overview & Motivation**
 
-**The "Why": The Spaghetti Monster**
-Without the State Pattern, any object with a complex lifecycle ends up with massive conditional logic using flags or enums.
+**The "Why": Managing Lifecycle Complexity**
+Entities in software often have a "Lifecycle" or "Mode".
+-   An **Order**: `Placed` -> `Paid` -> `Shipped` -> `Delivered`.
+-   A **TCP Connection**: `Closed` -> `Listen` -> `SynReceived` -> `Established`.
+-   A **Game Character**: `Idle` -> `Running` -> `Jumping` -> `Attacking`.
+
+**The Problem**:
+If you put all logic in one class, you get massive `switch` statements or nested `if-else` blocks.
 ```java
-if (state == PAID) {
-    if (event == SHIP) { state = SHIPPED; }
-    else if (event == CANCEL) { refund(); state = CANCELLED; }
-} else if (state == SHIPPED) {
-    if (event == CANCEL) { throw Error("Too late!"); }
+void handleInput() {
+    if (state == JUMPING) {
+        if (input == "PRESS_A") { /* Double Jump? */ }
+    } else if (state == ATTACKING) {
+        /* Ignore Input */
+    }
 }
 ```
-This violates **Open/Closed Principle**. Adding a new state (`RETURNED`) requires modifying *every* `if-else` block in the entire class.
+As states multiply, this code behaves like a "Spaghetti Monster". Adding a new state requires changing EVERY method in the class, violating the Open/Closed Principle.
 
-**The Solution**: Encapsulate State.
-Instead of the `Context` checking the state, the `Context` *delegates* behavior to a `State Object`.
--   When the state changes, the `Context` simply swaps the object it points to.
--   `context.handle()` -> `currentState.handle()`.
--   This removes all `if-else` logic from the Context.
+**The Solution**:
+Invert the control. Make every **State** a **Class**.
+The Context delegates behavior to the Current State object.
 
 **Real-World Analogies**:
 1.  **Vending Machine**:
-    -   State `NoCoin`: Button -> "Insert Coin".
-    -   State `HasCoin`: Button -> "Dispense Soda".
-    -   Behavior changes completely based on state.
+    -   State: `NoCoin` -> insert coin -> `HasCoin` -> push button -> `Sold` -> dispense -> `NoCoin`.
+    -   Behavior changes: Pushing "Coke" button does nothing in `NoCoin` state, but dispenses in `HasCoin` state.
 2.  **Smartphone Lock Screen**:
-    -   State `Locked`: Swipe -> Show Pin Pad.
-    -   State `Unlocked`: Swipe -> Scroll Notification Center.
-3.  **TCP Connection**:
-    -   The rules for sending data depend entirely on whether the socket is `ESTABLISHED`, `CLOSE_WAIT`, or `CLOSED`.
+    -   State: `Locked`. Touching screen -> Ask Code.
+    -   State: `Unlocked`. Touching screen -> Open App.
 
 ---
 
-### 2. Comprehensive Definition
+### **2. Comprehensive Definition**
 
 **Formal Definition**:
-> The **State Pattern** allows an object to alter its behavior when its internal state changes. The object will appear to change its class. It is an Object-Oriented implementation of a **Finite State Machine (FSM)**.
+> The State Pattern allows an object to alter its behavior when its internal state changes. The object will appear to change its class.
 
-**Mathematical Foundation (FSM)**:
-A Finite State Machine is a 5-tuple $(Q, \Sigma, \delta, q_0, F)$:
--   $Q$: A finite set of states (`{ON, OFF}`).
--   $\Sigma$: A finite set of inputs/events (`{PRESS_BUTTON}`).
--   $\delta$: A transition function $Q \times \Sigma \rightarrow Q$ (If ON and PRESS -> OFF).
--   $q_0$: Initial state.
--   $F$: Final states.
-
-**State vs Strategy**:
--   **State**: The "Strategy" changes *automatically* based on internal logic. The client doesn't configure it; the machine drives itself. transitions are often internal.
--   **Strategy**: The client *chooses* the algorithm explicitly (e.g., "Sort by Date"). Reference usually stays constant for the operation duration.
+**The Three Key Roles**:
+1.  **Context**: The main object (e.g., `TCPConnection`, `Order`). Maintains a reference to current `State`.
+2.  **State (Interface)**: Defines methods for all possible actions (e.g., `open`, `close`, `pay`, `ship`).
+3.  **ConcreteState**: Implements behavior for a specific state (e.g., `ClosedState` throws error on `send()`, `EstablishedState` sends data).
 
 ---
 
-### 3. Progressive Solution Evolution
+### **3. Progressive Solution Evolution**
 
-#### Approach 1: Flags and Conditionals (The Anti-Pattern)
-Using booleans or enums with giant logic blocks.
+#### Approach 1: Flags and Booleans
 ```java
-class Document {
-    String state = "DRAFT";
-    void publish() {
-        if (state.equals("DRAFT")) { state = "MODERATION"; }
-        else if (state.equals("PUBLISHED")) { return; } // Do nothing
+class Order {
+    boolean isPaid;
+    boolean isShipped;
+    
+    void cancel() {
+        if (isShipped) throw new Error("Too late!");
+        // ...
     }
 }
 ```
-*   **Critique**: Rigid. Hard to visualize. Modification requires surgery on the whole file.
+*   **Critique**: Doesn't scale. What if we add `isDelivered`? `isReturned`? Complex boolean logic `if (isPaid && !isShipped)`.
 
-#### Approach 2: Enum with Abstract Methods (The "Lightweight" Solution)
-Java Enums are classes. They can hold specialized behavior.
+#### Approach 2: Enums with Switch (Procedural)
 ```java
-enum DocState {
-    DRAFT {
-        @Override void publish(Document d) { d.setState(MODERATION); }
-    },
-    PUBLISHED {
-        @Override void publish(Document d) { /* Ignore */ }
-    };
-    abstract void publish(Document d);
-}
-```
-*   **Pros**: Very concise. Code locality.
-*   **Cons**: Enums cannot hold instance-specific data (fields) easily. Hard to mock/test individually.
-
-#### Approach 3: The State Pattern (The "Heavyweight" OOP Solution)
-Full classes for each state.
-1.  `Context` (The Document).
-2.  `State` (Interface).
-3.  `DraftState`, `ModerationState` (Classes).
-*   **Verdict**: Best for complex workflows with data (e.g., `DraftState` holds `lastEditedTime`, `ModerationState` holds `reviewerID`).
-
----
-
-### 4. Implementation: The TCP Protocol Stack FSM
-
-**Scenario**: We are implementing a simplified TCP Connection.
--   States: `CLOSED`, `LISTEN`, `ESTABLISHED`.
--   Events: `open()`, `close()`, `acknowledge()`.
-
-```java
-// --- 1. The State Interface ---
-interface TcpState {
-    void open(TcpConnection ctx);
-    void close(TcpConnection ctx);
-    void acknowledge(TcpConnection ctx, String data);
-}
-
-// --- 2. The Context (The Connection Object) ---
-class TcpConnection {
-    private TcpState state;
-
-    public TcpConnection() {
-        this.state = new TcpClosed(); // Initial State
-    }
-
-    public void setState(TcpState newState) {
-        this.state = newState;
-        System.out.println("State Transition: " + newState.getClass().getSimpleName());
-    }
-
-    // Delegates
-    public void open() { state.open(this); }
-    public void close() { state.close(this); }
-    public void acknowledge(String data) { state.acknowledge(this, data); }
-}
-
-// --- 3. Concrete States ---
-
-class TcpClosed implements TcpState {
-    @Override
-    public void open(TcpConnection ctx) {
-        System.out.println("Opening connection... Handshake sending SYN.");
-        // Transition logic can be here
-        ctx.setState(new TcpListen());
-    }
-
-    @Override
-    public void close(TcpConnection ctx) {
-        System.out.println("Error: Connection is already closed.");
-    }
-
-    @Override
-    public void acknowledge(TcpConnection ctx, String data) {
-        System.out.println("Error: Cannot acknowledge data. Connection closed.");
-    }
-}
-
-class TcpListen implements TcpState {
-    @Override
-    public void open(TcpConnection ctx) {
-        System.out.println("Error: Already listening.");
-    }
-
-    @Override
-    public void close(TcpConnection ctx) {
-        System.out.println("Closing listener.");
-        ctx.setState(new TcpClosed());
-    }
-
-    @Override
-    public void acknowledge(TcpConnection ctx, String data) {
-        if (data.equals("SYN-ACK")) {
-            System.out.println("Handshake complete. Connection Established.");
-            ctx.setState(new TcpEstablished());
-        } else {
-            System.out.println("Error: Waiting for handshake.");
+enum State { NEW, PAID, SHIPPED }
+class Order {
+    State state;
+    void cancel() {
+        switch(state) {
+            case SHIPPED: throw new Error();
+            case NEW: state = CANCELED; break;
         }
     }
 }
+```
+*   **Critique**: Violates Open/Closed. Adding `DELIVERED` means updating the switch in `cancel`, `pay`, `ship`, etc.
 
-class TcpEstablished implements TcpState {
+#### Approach 3: State Pattern (Polymorphic)
+```java
+interface OrderState {
+    void cancel(Order ctx);
+}
+class ShippedState implements OrderState {
+    public void cancel(Order ctx) { throw new Error(); }
+}
+```
+*   **Verdict**: Modular. Each state is self-contained.
+
+---
+
+### **4. Implementation I: TCP Protocol FSM (Finite State Machine)**
+Modeling a simplified TCP Stack. This is the **classic** GoF example.
+
+```java
+// 1. State Interface
+interface TCPState {
+    void open(TCPConnection ctx);
+    void close(TCPConnection ctx);
+    void acknowledge(TCPConnection ctx);
+}
+
+// 2. Concrete States
+class ClosedState implements TCPState {
+    // Singleton for efficiency (Stateless Flyweight)
+    public static final ClosedState INSTANCE = new ClosedState(); 
+    
     @Override
-    public void open(TcpConnection ctx) {
-        System.out.println("Error: Already open.");
+    public void open(TCPConnection ctx) {
+        System.out.println("  [Closed] -> Opening Active Open...");
+        ctx.setState(EstablishedState.INSTANCE);
     }
 
     @Override
-    public void close(TcpConnection ctx) {
-        System.out.println("Sending FIN. Closing connection.");
-        ctx.setState(new TcpClosed());
+    public void close(TCPConnection ctx) {
+        System.out.println("  [Closed] Already closed.");
     }
 
     @Override
-    public void acknowledge(TcpConnection ctx, String data) {
-        System.out.println("Processing Data Payload: " + data);
+    public void acknowledge(TCPConnection ctx) {
+        System.out.println("  [Closed] Invalid Action: Cannot ACK.");
     }
 }
 
-// --- Usage ---
-public class TcpDemo {
+class EstablishedState implements TCPState {
+    public static final EstablishedState INSTANCE = new EstablishedState();
+
+    @Override
+    public void open(TCPConnection ctx) {
+        System.out.println("  [Established] Already open.");
+    }
+
+    @Override
+    public void close(TCPConnection ctx) {
+        System.out.println("  [Established] -> Closing...");
+        ctx.setState(ListeningState.INSTANCE); // Simulating transition
+    }
+
+    @Override
+    public void acknowledge(TCPConnection ctx) {
+        System.out.println("  [Established] ACK sent.");
+    }
+}
+
+class ListeningState implements TCPState {
+    public static final ListeningState INSTANCE = new ListeningState();
+
+    @Override
+    public void open(TCPConnection ctx) {
+        System.out.println("  [Listening] Connect received -> Established.");
+        ctx.setState(EstablishedState.INSTANCE);
+    }
+
+    @Override
+    public void close(TCPConnection ctx) {
+        System.out.println("  [Listening] -> Closed.");
+        ctx.setState(ClosedState.INSTANCE);
+    }
+
+    @Override
+    public void acknowledge(TCPConnection ctx) {
+        System.out.println("  [Listening] No connection to ACK.");
+    }
+}
+
+// 3. Context
+class TCPConnection {
+    private TCPState state; // Current State
+
+    public TCPConnection() {
+        this.state = ClosedState.INSTANCE; // Initial State
+    }
+
+    // Package-private setter for States to use
+    void setState(TCPState state) {
+        this.state = state;
+    }
+
+    public void open() { state.open(this); }
+    public void close() { state.close(this); }
+    public void acknowledge() { state.acknowledge(this); }
+}
+
+// 4. Usage
+public class TCPDemo {
     public static void main(String[] args) {
-        TcpConnection conn = new TcpConnection(); // CLOSED
+        TCPConnection conn = new TCPConnection();
         
-        conn.acknowledge("Data"); // Error
-        conn.open();              // -> LISTEN
-        conn.acknowledge("Hello"); // Error (Needs Handshake)
-        conn.acknowledge("SYN-ACK"); // -> ESTABLISHED
-        conn.acknowledge("HTTP GET /"); // Processing Data
-        conn.close();             // -> CLOSED
+        System.out.println("1. Try ACK on Closed:");
+        conn.acknowledge(); // Fail
+        
+        System.out.println("\n2. Open Connection:");
+        conn.open(); // Closed -> Established
+        
+        System.out.println("\n3. Send ACK:");
+        conn.acknowledge(); // Success
+        
+        System.out.println("\n4. Close:");
+        conn.close(); // Established -> Listening
     }
 }
 ```
 
-#### Rust: Enums as States (Algebraic Data Types)
-Rust's `enum` is much more powerful than Java's. It can hold data.
-This is the **modern** way to do State Machines without class explosion.
+---
+
+### **5. Implementation II: E-Commerce Order Workflow**
+Complex business logic managed via State. Prevents illegal actions (e.g., cancelling a shipped order).
+
+```java
+interface OrderState {
+    void next(OrderContext ctx);
+    void cancel(OrderContext ctx);
+    String getStatus();
+}
+
+class NewOrderState implements OrderState {
+    public void next(OrderContext ctx) {
+        System.out.println("Payment Received. Order -> Paid.");
+        ctx.setState(new PaidState());
+    }
+    public void cancel(OrderContext ctx) {
+        System.out.println("Order Canceled.");
+        ctx.setState(new CanceledState());
+    }
+    public String getStatus() { return "NEW"; }
+}
+
+class PaidState implements OrderState {
+    public void next(OrderContext ctx) {
+        System.out.println("Order Shipped. Order -> Shipped.");
+        ctx.setState(new ShippedState());
+    }
+    public void cancel(OrderContext ctx) {
+        System.out.println("Refunding Payment... Order Canceled.");
+        ctx.setState(new CanceledState());
+    }
+    public String getStatus() { return "PAID"; }
+}
+
+class ShippedState implements OrderState {
+    public void next(OrderContext ctx) {
+        System.out.println("Order Delivered. Lifecycle Complete.");
+        ctx.setState(new DeliveredState());
+    }
+    public void cancel(OrderContext ctx) {
+        throw new IllegalStateException("Cannot cancel Shipped order! Return request required.");
+    }
+    public String getStatus() { return "SHIPPED"; }
+}
+
+// End States (Null Object Pattern for behaviors)
+class DeliveredState implements OrderState {
+    public void next(OrderContext ctx) {}
+    public void cancel(OrderContext ctx) {}
+    public String getStatus() { return "DELIVERED"; }
+}
+class CanceledState implements OrderState {
+    public void next(OrderContext ctx) {}
+    public void cancel(OrderContext ctx) {}
+    public String getStatus() { return "CANCELED"; }
+}
+
+class OrderContext {
+    private OrderState state = new NewOrderState();
+    
+    public void setState(OrderState state) { this.state = state; }
+    public String getStatus() { return state.getStatus(); }
+    
+    public void next() { state.next(this); }
+    public void cancel() { state.cancel(this); }
+}
+
+public class OrderDemo {
+    public static void main(String[] args) {
+        OrderContext order = new OrderContext();
+        order.next(); // Paid
+        order.next(); // Shipped
+        
+        try {
+            order.cancel(); // Fail
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+        }
+    }
+}
+```
+
+---
+
+### **6. Implementation III: Attack Simulations (Forced State Transition)**
+
+Can we bypass the FSM logic?
+*Scenario*: Reflection or Serialization can overwrite the private `state` variable.
+
+```java
+import java.lang.reflect.Field;
+
+public class StateAttack {
+    public static void main(String[] args) throws Exception {
+        OrderContext order = new OrderContext(); // State: NEW
+        
+        // Attacker wants to mark it as PAID without paying (Calling next())
+        
+        // Attack: RAM Modification via Reflection
+        Field stateField = OrderContext.class.getDeclaredField("state");
+        stateField.setAccessible(true);
+        stateField.set(order, new PaidState()); // Force Transition
+        
+        System.out.println("Hacked Status: " + order.getStatus());
+        order.next(); // System thinks it was paid, moves to SHIPPED
+    }
+}
+```
+*Fix*: Use `SecurityManager` (Legacy) or encapsulation boundaries (Java Modules) provided by `module-info.java` to prevent deep reflection. Ideally, validate state consistency securely on the server (e.g., check DB for payment record before transition).
+
+---
+
+### **7. Implementation IV: Benchmarks (Polymorphism Overhead)**
+
+Does calling `state.method()` cost more than `if (state == A)`?
+*   **Switch/If**: Branch Prediction can be fast, but large switches cause cache misses.
+*   **Polymorphism (Virtual Call)**: Requires v-table lookup.
+*   **Result**: Virtual calls add ~2-3ns overhead. For lifecycle transitions (which happen milliseconds apart), this is irrelevant. The maintainability win is massive.
+
+---
+
+### **8. Multi-Language Perspectives**
+
+#### Rust: The Typestate Pattern (Compile-Time FSM)
+Rust can enforce state transitions at **compile time**. You cannot call `ship()` on an Unpaid order.
 
 ```rust
-enum ConnectionState {
-    Closed,
-    Listen { port: u16 },
-    Established { remote_ip: String },
+struct New;
+struct Paid;
+struct Shipped;
+
+struct Order<State> {
+    state: State,
 }
 
-struct Connection {
-    state: ConnectionState,
-}
-
-impl Connection {
-    fn process(&mut self, event: &str) {
-        // Pattern Matching is the "Transition Function"
-        self.state = match &self.state {
-            ConnectionState::Closed => {
-                if event == "OPEN" { ConnectionState::Listen { port: 80 } } 
-                else { ConnectionState::Closed }
-            },
-            ConnectionState::Listen { port } => {
-                if event == "SYN" { ConnectionState::Established { remote_ip: "1.2.3.4".to_string() } }
-                else { ConnectionState::Listen { port: *port } }
-            },
-            ConnectionState::Established { .. } => {
-                if event == "FIN" { ConnectionState::Closed }
-                else { self.state.clone() } // Stay in state
-            }
-        };
+impl Order<New> {
+    fn pay(self) -> Order<Paid> {
+        Order { state: Paid }
     }
 }
-```
-}
-```
 
-#### Rust: Enums as States (Sum Types)
-Rust's Enum is the **Best-in-Class** way to implement State Machines because:
-1.  It prevents invalid states at compile time (Pattern Matching).
-2.  Each enum variant can hold different output data.
-
-```rust
-enum ConnectionState {
-    Disconnected,
-    Connecting(String), // Holds IP
-    Connected { ip: String, fd: i32 }, // Holds Socket
-}
-
-struct Connection {
-    state: ConnectionState,
-}
-
-impl Connection {
-    fn process(&mut self) {
-        self.state = match &self.state {
-            ConnectionState::Disconnected => {
-                println!("Starting connection...");
-                ConnectionState::Connecting("127.0.0.1".to_string())
-            },
-            ConnectionState::Connecting(ip) => {
-                println!("Handshake with {}", ip);
-                ConnectionState::Connected { 
-                    ip: ip.clone(), 
-                    fd: 101 
-                }
-            },
-            ConnectionState::Connected { ip, .. } => {
-                println!("Sending ping to {}", ip);
-                ConnectionState::Connected { ip: ip.clone(), fd: 101 } // Stay
-            },
-        };
+impl Order<Paid> {
+    fn ship(self) -> Order<Shipped> {
+        Order { state: Shipped }
     }
 }
+
+// fn main() {
+//     let order = Order { state: New };
+//     let shipped = order.pay().ship(); // OK
+//     // let fail = order.ship(); // COMPILE ERROR: ship() not defined for Order<New>
+// }
 ```
+
+#### Go: Interfaces
+Go uses standard interface composition. Same as Java but implicit.
+
+```go
+type State interface {
+    Next() State
+}
+
+type NewState struct{}
+func (s NewState) Next() State {
+    return PaidState{}
+}
+```
+
+---
+
+### **9. Deep Theory: State vs Strategy**
+*   **State**: The context *changes* its state object over time. The "Strategy" (behavior) is swapped internally as a result of actions. Clients don't configure "State A", the lifecycle does.
+*   **Strategy**: The client *configures* the object with a specific strategy (e.g., "Sort Ascending"). This stays constant until explicitly changed by the client. It implies alternatives, not a lifecycle sequence.
+
+---
+
+### **10. Cheatsheet & Summary**
+
+| Feature | State Pattern | Switch Statement |
+| :--- | :--- | :--- |
+| **Logic** | Distributed (Classes) | Centralized (Method) |
+| **Adding State** | Add Class (Open/Closed ✅) | Modify Switch (Open/Closed ❌) |
+| **Context Size** | Small (Delegates) | Large (All Logic) |
+| **Memory** | Higher (More Objects) | Lower |
+
+**Conclusion**: Use State Pattern when an object's behavior depends on its state, and it must change its behavior at runtime (3+ states).
+
+---
+
+### **11. References**
+1.  *Designing Data-Intensive Applications* - Distributed State Machines.
+2.  *Game Programming Patterns* - State (Handling input for Jump/Duck/Dive).
+3.  *Rust Design Patterns* - Typestate Pattern.
+
+---
 
 ### 5. Practice & Assessment
 
@@ -37179,20 +37301,29 @@ console.log(current.color); // GREEN
 ### 5. Practice & Assessment
 
 #### Core Exercises
-1.  **Basic**: Implement `CeilingFan` using the State Pattern. States: `Low`, `Medium`, `High`, `Off`. Pulling the chain cycles through them.
-2.  **Intermediate**: Implement a `Document` workflow. States: `Draft`, `Moderation`, `Published`. Admins can move from Moderation to Published. Users can only edit in Draft.
-3.  **Advanced**: Build a robust **Vending Machine**. States: `NoCoin`, `HasCoin`, `Sold`, `SoldOut`. Handle complex edge cases like "Insert Coin -> Eject Coin", "Insert Coin -> Sold Out".
+1.  **Vending Machine FSM**:
+    -   States: `Idle`, `Selection`, `Processing`, `Dispensing`.
+    -   Task: Implement using State Pattern. Add `returnCoin()` which behaves differently in `Processing` vs `Dispensing`.
+2.  **Traffic Light System**:
+    -   States: `Red`, `Green`, `Yellow`.
+    -   Task: `next()` method transitions correctly. Add `EmergencyMode` (Blinking Red) triggered by external event.
+3.  **Document Workflow**:
+    -   States: `Draft`, `Moderation`, `Published`, `Archived`.
+    -   Constraint: Only `Admin` role can trigger `Moderation -> Published`.
 
 #### Edge Case Drills
-1.  **Shared State**: If multiple Contexts share the same State objects (Flyweight State), ensure the State objects are stateless (no instance fields).
-2.  **Concurrency**: What if two threads call `next()` on the same Context? Does it skip a state? (Need `synchronized` or AtomicReferences for the state transition).
-3.  **Invalid Transitions**: Implement logic to throw `IllegalStateException` if someone tries to `ship()` a `Draft` order.
+1.  **Concurrency**:
+    -   Task: Two threads call `next()` on `TrafficLight` simultaneously.
+    -   Fix: Use `AtomicReference<State>` or `synchronized` in `Context`.
+2.  **State Persistence**:
+    -   Task: Save `Order` to DB.
+    -   Solution: Map Class `PaidState` to String `"PAID"`. Use Factory on load.
 
-#### Challenge: The TCP Connection
-**Task**: Implement the TCP State Machine.
-States: `CLOSED`, `LISTEN`, `SYN_RCVD`, `ESTABLISHED`, `FIN_WAIT_1`, `FIN_WAIT_2`, `TIME_WAIT`, `CLOSE_WAIT`, `LAST_ACK`.
-Implement methods: `activeOpen()`, `passiveOpen()`, `close()`, `send()`, `acknowledge()`.
-This is the classic textbook example of the State Pattern.
+#### Challenge: The Circuit Breaker
+**Task**: Implement a resilience Circuit Breaker state machine.
+-   **Closed**: Pass calls. Count failures. If > 5, switch to **Open**.
+-   **Open**: Throw Exception immediately. Wait 10s. Switch to **Half-Open**.
+-   **Half-Open**: Pass 1 call. If success -> **Closed**. If fail -> **Open**.
 
 ---
 
@@ -37200,10 +37331,9 @@ This is the classic textbook example of the State Pattern.
 
 | Mistake | Consequence |
 | :--- | :--- |
-| **Logic in Context** | Keeping too much "if" logic in the Context class, defeating the purpose of delegation. |
-| **Tight Coupling** | Concrete States needing to know about *all* other Concrete States to perform transitions, leading to a tangled dependency web. |
-| **Object Churn** | Creating a `new State()` every single time a transition happens. For high-throughput systems, use **Singletons** for the State objects. |
-| **Inconsistent State** | Changing state halfway through an operation without a transaction/lock, leading to corrupt internal data. |
+| **Logic in Context** | Keeping the `switch` statement in the Context and just calling State methods. The Context should delegates *totally*. |
+| **State Explosion** | Creating 50 classes for 50 states. Use **Hierarchical States** or Table-Driven (Data) FSMs for massive graphs. |
+| **Circular Dependency** | `Context` depends on `State`. `State` depends on `Context`. This is a valid circular dependency in OOP. Separate carefully (Interface) to avoid build issues in languages like C++. |
 
 ---
 
@@ -37252,35 +37382,6 @@ Frameworks like **Spring Statemachine** allow you to define states and transitio
 1.  *Design Patterns (GoF)* - Behavioral Patterns.
 2.  *Game Programming Patterns* - Robert Nystrom (State machines in AI).
 3.  *Spring Statemachine Reference Documentation*.
-
----
-
-
----
-
-### 5. Deep Theory: HSM & Circuit Breaker
-
-**1. Hierarchical State Machines (HSM)**:
-In complex systems (e.g., Game Character), flat states explode in number.
--   `Idle`, `Run_Left`, `Run_Right`, `Jump_Left`, `Jump_Right`...
--   **Solution**: Sub-states.
-    -   State `Ground`: Handles `Jump`.
-        -   Sub-state `Idle`
-        -   Sub-state `Running`: Handles `Left/Right`.
-    -   State `Air`: Handles `Land`.
-
-**2. The Circuit Breaker Pattern (Microservices)**:
-This is a specialized State Machine used to prevent cascading failures.
--   **Closed** (Normal): Requests go through. Fails count towards threshold ($K$).
--   **Open** (Tripped): Requests fail immediately ("Fail Fast"). Timer starts.
--   **Half-Open** (Test): After timer, let 1 request through.
-    -   Success? -> **Closed**.
-    -   Fail? -> **Open**.
-
----
-
-### 6. Practice & Assessment
-
 #### Core Exercises
 1.  **Basic**: Implement a **Turnstile**.
     -   Rules: `Locked` + Coin -> `Unlocked`. `Unlocked` + Push -> `Locked`.
