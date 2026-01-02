@@ -1034,10 +1034,12 @@ This applies to:
 
 
     - [x] **Q54: Decorator Pattern**: I/O Stream processing example.
-    - [ ] **Q55: Circular Dependencies**: Architectural resolution strategies.
+    - [x] **Q55: Circular Dependencies**: Architectural resolution strategies.
 
-    - [ ] **Q56: Command Pattern**: Transactional Undo/Redo system.
+
+    - [x] **Q56: Command Pattern**: Transactional Undo/Redo system.
     - [ ] **Q57: State Pattern**: Order Fulfillment Lifecycle state machine.
+
     - [ ] **Q58: Thread-Safe Observer**: Async Event Bus implementation.
     - [ ] **Q59: Proxy Pattern**: Rate Limiting Proxy example.
     - [ ] **Q60: Facade Pattern**: Microservices Aggregator Facade.
