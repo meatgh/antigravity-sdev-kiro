@@ -1024,10 +1024,11 @@ This applies to:
   - _Requirements: 1.20.1-1.20.15, 2.1, 2.3_
   - **Time Estimate**: 4-5 hours
   - [ ] 2.3.1.2 Implement Phase 4b Interview Questions (Q51-Q60) ⏳ IN PROGRESS
-    - [ ] **Q51: Thread-Safe Singleton**:
-      - [ ] Layer 1-3: Concepts, Naive vs Optimized (Bill Pugh, Enum)
-      - [ ] Layer 4: Multi-language (Java/Python/JS/C++/Go)
-      - [ ] Layer 5-10: Practice, Interview Bank, Enterprise Example (`ConfigurationManager`)
+    - [x] **Q51: Thread-Safe Singleton**:
+      - [x] Layer 1-3: Concepts, Naive vs Optimized (Bill Pugh, Enum)
+      - [x] Layer 4: Multi-language (Java/Python/JS/C++/Go)
+      - [x] Layer 5-10: Practice, Interview Bank, Enterprise Example (`ConfigurationManager`)
+
     - [ ] **Q52: Generic Stack**: Implementation with Iterators and Stream support.
     - [ ] **Q53: Adapter Pattern**: Payment Gateway integration example.
     - [ ] **Q54: Decorator Pattern**: I/O Stream processing example.
