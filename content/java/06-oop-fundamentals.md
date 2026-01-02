@@ -34658,260 +34658,442 @@ Arrays are **reified** (they know their element type at runtime: `String[]` know
 
 
 #### Q53: How does the Adapter Pattern bridge incompatible interfaces in production?
-**Companies**: Apple, Google, Square, Stripe
-**Difficulty**: Medium
-**Category**: Structural Design Patterns
+**Companies**: Apple, Google, Square, Stripe, PayPal, Salesforce
+**Difficulty**: **Medium** (Core Structural Pattern)
+**Category**: Structural Design Patterns, System Integration, & Legacy Modernization
 
 ---
 
 ### 1. Conceptual Overview & Motivation
 
-**The "Why"**:
-In large enterprise systems, you rarely build everything from scratch. You integrate with existing legacy systems, third-party libraries, and external APIs.
-Often, these external components have interfaces that **do not match** what your application expects.
+**The "Why": The Reality of Heterogeneous Systems**
+In a perfect world, all software components would speak the same language (JSON, Protobuf) and use the same method signatures. In the real world (Enterprise Architecture), that never happens.
+Senior Engineers spend 30-50% of their time acting as digital plumbers, connecting Pipe A (Modern Microservice) to Pipe B (Legacy Mainframe) using adapters.
 
-**Scenario**:
-Your E-Commerce app expects a `PaymentProcessor` interface with `pay(int dollars)`.
-You want to switch from PayPal to Stripe. But Stripe's SDK provides `StripeClient` with `makePayment(int cents)`.
-You cannot change Stripe's code (it's a library). You don't want to change your entire app to use `makePayment`.
-
-**The Solution**:
-Create a "Wrapper" or **Adapter** class that implements your `PaymentProcessor` interface, but delegates the actual work to `StripeClient`, translating the data (dollars -> cents) in the process.
+**Core Problems**:
+1.  **Vendor Lock-In**: Your entire e-commerce platform calls `PayPal.sendMoney()`. Now business wants to switch to `Stripe.charge()`. If you hardcoded `PayPal` everywhere, you have to rewrite the whole app.
+2.  **Legacy Integration**: You have a 20-year-old COBOL system that expects XML over SOAP. Your new React frontend sends JSON over REST. You need a translation layer.
+3.  **Interface Incompatibility**:
+    -   System A expects `getUser(firstName, lastName)`.
+    -   System B provides `fetchUser(fullName)`.
+    -   **Solution**: An Adapter that concatenates `firstName + " " + lastName` before calling B.
 
 **Real-World Analogies**:
-1.  **Travel Adapter**: Your US laptop plug (3-prong) doesn't fit a European socket (2-hole). You use a physical adapter. It doesn't change the electricity; it just changes the *interface*.
-2.  **Memory Card Reader**: Your laptop has USB. Your camera has SD. The reader adapts SD to USB.
+1.  **Travel Plug Adapter**:
+    -   **Problem**: US Plug (Type B, 110V) vs UK Socket (Type G, 230V).
+    -   **Adapter**: A physical device that reshapes the pins. It does *not* generate electricity; it just passes it through in a compatible format.
+2.  **Memory Card Reader**:
+    -   **Problem**: Laptop has USB-C. Camera has SD Card.
+    -   **Adapter**: A dongle that has a USB-C male end and an SD female slot.
+3.  **HDMI to VGA**:
+    -   **Problem**: New Laptop (Digital HDMI) vs Old Projector (Analog VGA).
+    -   **Adapter**: Active converter that translates digital signals to analog waves.
 
 ---
 
 ### 2. Comprehensive Definition
 
 **Formal Definition**:
-> The Adapter Pattern allows objects with incompatible interfaces to collaborate. It acts as a wrapper between two objects, catching calls for one object and transforming them to format and interface recognizable by the second object.
+> The Adapter Pattern (also known as Wrapper) allows objects with incompatible interfaces to collaborate. It acts as a middleman that receives requests from a client and converts them into requests that the wrapped object works with.
 
-**Types**:
-1.  **Object Adapter** (Composition): The adapter *holds* an instance of the adaptee. (Preferred in Java/Composition over Inheritance).
-2.  **Class Adapter** (Inheritance): The adapter *extends* both the target and the adaptee. (Only possible in C++/Python with multiple inheritance, or extending Adaptee and implementing Target in Java).
+**The Actors**:
+1.  **Target**: The interface the Client *expects* to use (e.g., `PaymentProcessor`).
+2.  **Adaptee**: The existing class with the incompatible interface (e.g., `StripeSDK`).
+3.  **Adapter**: The class that implements `Target` and wraps `Adaptee`.
+4.  **Client**: The business logic that talks to `Target`.
+
+**Types of Adapters**:
+1.  **Object Adapter** (Composition): The Adapter *holds* an instance of the Adaptee.
+    -   *Implementation*: `class Adapter implements Target { private Adaptee a; }`
+    -   *Verdict*: **Preferred**. Flexible, works with final classes, allows swapping adaptees.
+2.  **Class Adapter** (Inheritance): The Adapter *inherits* from both Target and Adaptee.
+    -   *Implementation*: `class Adapter extends Adaptee implements Target`
+    -   *Verdict*: **Avoid in Java**. Breaks encapsulation, fragile base class problem, requires multiple inheritance (C++).
 
 ---
 
 ### 3. Progressive Solution Evolution
 
-#### Approach 1: Direct Usage (The Tight Coupling Anti-Pattern)
-Modification of client code to suit the library.
+#### Approach 1: Direct Dependency (The "Tight Coupling" Disaster)
+Hardcoding the vendor library into your business logic.
 ```java
-// BAD: Pollution of domain logic
-if (useStripe) {
-    stripeClient.makePayment(amount * 100); 
-} else {
-    paypalClient.pay(amount);
+public class CheckoutService {
+    // TIGHTLY COUPLED to Paypal!
+    private PayPalApi paypal = new PayPalApi();
+
+    public void checkout(int amount) {
+        // If we switch to Stripe, we must rewrite this class!
+        paypal.sendPayment(amount); 
+    }
 }
 ```
-**Critique**: Violates Open/Closed Principle. Adding a 3rd gateway requires changing all business logic.
+*   **Critique**: Violation of **Open/Closed Principle**. Changing vendors requires modifying tested code.
 
-#### Approach 2: Object Adapter (The Standard Solution)
-Uses composition.
+#### Approach 2: The Interface Abstraction (The "Target")
+First, define what YOUR application needs.
 ```java
-public class StripeAdapter implements PaymentProcessor {
-    private final StripeApi stripe; // Composition
+public interface PaymentGateway {
+    void process(double amount, String currency);
+}
+```
+Now `CheckoutService` depends on `PaymentGateway`, not `PayPalApi`. This is **Dependency Inversion**.
+
+#### Approach 3: The Object Adapter (The standard wrapper)
+```java
+public class PayPalAdapter implements PaymentGateway {
+    private final PayPalApi paypal; // Composition
     
-    public StripeAdapter(StripeApi stripe) {
-        this.stripe = stripe;
-    }
+    public PayPalAdapter() { this.paypal = new PayPalApi(); }
 
     @Override
-    public void pay(int dollars) {
-        int cents = dollars * 100; // Translation logic
-        stripe.makePayment(cents); // Delegation
+    public void process(double amount, String currency) {
+        // Translate "process" to "sendPayment"
+        // Adapt Data: double -> int (cents)
+        int cents = (int) (amount * 100);
+        paypal.sendPayment(cents);
     }
 }
 ```
-**Pros**: Decoupled. You can swap adapters at runtime.
+*   **Pros**:
+    1.  **Pluggable**: We can now create `StripeAdapter`, `SquareAdapter` without touching `CheckoutService`.
+    2.  **Testable**: We can create `MockGateway` for unit tests.
 
 ---
 
 ### 4. Multi-Language Implementations
 
-#### Java: Payment Gateway Integration
-Bridging a Legacy XML Bank API to a Modern JSON interface.
+#### Java: The "Universal Payment Gateway"
+Integrating multiple incompatible APIs under one unified standard.
 
 ```java
-// 1. Existing Interface (Target)
-interface ModernPaymentGateway {
-    void processPayment(String accountId, double amount);
+// --- 1. The Target Interface (Our Standard) ---
+interface PaymentProcessor {
+    void pay(String account, double amount);
 }
 
-// 2. Incompatible 3rd Party Lib (Adaptee)
-class LegacyBankCore {
-    public void transferFunds(String xmlPayload) {
-        System.out.println("Processing XML: " + xmlPayload);
+// --- 2. Incompatible Adaptees (3rd Party Libs) ---
+class StripeApi {
+    public void chargeCard(String token, long amountInCents) {
+        System.out.printf("Stripe: Charged %d cents to %s%n", amountInCents, token);
     }
 }
 
-// 3. The Adapter
-public class BankAdapter implements ModernPaymentGateway {
-    private final LegacyBankCore bankCore;
+class PayPalApi {
+    public void sendMoney(String email, double amountInDollars) {
+        System.out.printf("PayPal: Sent $%.2f to %s%n", amountInDollars, email);
+    }
+}
 
-    public BankAdapter(LegacyBankCore bankCore) {
-        this.bankCore = bankCore;
+// --- 3. The Adapters ---
+
+// Adapter for Stripe (Converts dollars to cents)
+class StripeAdapter implements PaymentProcessor {
+    private final StripeApi stripe;
+
+    public StripeAdapter(StripeApi stripe) {
+        this.stripe = stripe;
     }
 
     @Override
-    public void processPayment(String accountId, double amount) {
-        // Translate JSON/Object calls to XML
-        String xml = String.format(
-            "<transfer><account>%s</account><amt>%.2f</amt></transfer>", 
-            accountId, amount
-        );
-        // Delegate
-        bankCore.transferFunds(xml);
+    public void pay(String account, double amount) {
+        long cents = (long) (amount * 100); // Logic translation
+        stripe.chargeCard(account, cents);  // Method translation
     }
 }
+
+// Adapter for PayPal (Pass-through)
+class PayPalAdapter implements PaymentProcessor {
+    private final PayPalApi paypal;
+
+    public PayPalAdapter(PayPalApi paypal) {
+        this.paypal = paypal;
+    }
+
+    @Override
+    public void pay(String account, double amount) {
+        paypal.sendMoney(account, amount);
+    }
+}
+
+// --- 4. Factory/Strategy (Optional) ---
+class PaymentFactory {
+    public static PaymentProcessor getProcessor(String type) {
+        if ("stripe".equals(type)) return new StripeAdapter(new StripeApi());
+        if ("paypal".equals(type)) return new PayPalAdapter(new PayPalApi());
+        throw new IllegalArgumentException("Unknown provider");
+    }
+}
+
+// --- Usage ---
+// PaymentProcessor proc = PaymentFactory.getProcessor("stripe");
+// proc.pay("tok_123", 99.99); 
+// Output: Stripe: Charged 9999 cents to tok_123
 ```
 
-#### Python: Adapter via Composition
-Dynamic typing makes adapters easier but structure is still vital.
+#### Python: Adapter via Inheritance & Mixins
+Python's Multiple Inheritance makes Class Adapters easy (though Composition is still safer).
 
 ```python
-class MediaPlayer:
-    def play(self, file_type, file_name):
-        pass
+class Target:
+    def request(self) -> str:
+        return "Target: The default target's behavior."
 
-class AdvancedMediaPlayer:
-    def play_vlc(self, file_name):
-        print(f"Playing vlc: {file_name}")
+class Adaptee:
+    def specific_request(self) -> str:
+        return ".eetpadA eht fo roivaheb laicepS"
 
-    def play_mp4(self, file_name):
-        print(f"Playing mp4: {file_name}")
+class ObjectAdapter(Target):
+    def __init__(self, adaptee: Adaptee):
+        self._adaptee = adaptee
 
-class MediaAdapter(MediaPlayer):
-    def __init__(self, audio_type):
-        if audio_type == "vlc":
-            self.music_player = AdvancedMediaPlayer()
-        elif audio_type == "mp4":
-            self.music_player = AdvancedMediaPlayer()
+    def request(self) -> str:
+        # Adaptation logic: Reverse the string
+        return f"Adapter: (TRANSLATED) {self._adaptee.specific_request()[::-1]}"
 
-    def play(self, audio_type, file_name):
-        if audio_type == "vlc":
-            self.music_player.play_vlc(file_name)
-        elif audio_type == "mp4":
-            self.music_player.play_mp4(file_name)
-
-class AudioPlayer(MediaPlayer):
-    def play(self, audio_type, file_name):
-        if audio_type == "mp3":
-            print(f"Playing mp3: {file_name}")
-        elif audio_type in ["vlc", "mp4"]:
-            adapter = MediaAdapter(audio_type)
-            adapter.play(audio_type, file_name)
-        else:
-            print("Format not supported")
-```
-
-#### JavaScript: Wrapper Class
-```javascript
-// Old Interface
-class OldCalculator {
-    operations(t1, t2, operation) {
-        switch(operation) {
-            case 'add': return t1 + t2;
-            case 'sub': return t1 - t2;
-        }
-    }
-}
-
-// New Interface
-class NewCalculator {
-    add(t1, t2) { return t1 + t2; }
-    sub(t1, t2) { return t1 - t2; }
-}
-
-// Adapter
-class CalcAdapter {
-    constructor() {
-        this.calc = new OldCalculator();
-    }
-    
-    add(t1, t2) {
-        return this.calc.operations(t1, t2, 'add');
-    }
-    
-    sub(t1, t2) {
-        return this.calc.operations(t1, t2, 'sub');
-    }
-}
+# Usage
+# adaptee = Adaptee()
+# adapter = ObjectAdapter(adaptee)
+# print(adapter.request())
 ```
 
 #### C++: Class Adapter (Private Inheritance)
-C++ allows private inheritance to implement adapters (inheriting implementation but not interface).
+In C++, we can inherit implementation privately (so `specificRequest` isn't exposed) while inheriting interface publicly.
 
 ```cpp
-// Target
-class Rect {
+#include <iostream>
+
+// Target Interface
+class Rectangle {
 public:
     virtual void draw() = 0;
 };
 
-// Adaptee
-class LegacyRect {
+// Adaptee (Legacy Component)
+class LegacyRectangle {
 public:
-    void oldDraw(int x1, int y1, int x2, int y2) {
-        // Draw logic
+    LegacyRectangle(int x1, int y1, int x2, int y2) {
+        x1_ = x1; y1_ = y1; x2_ = x2; y2_ = y2;
     }
-};
-
-// Adapter (Multiple Inheritance)
-class RectAdapter : public Rect, private LegacyRect {
-public:
-    RectAdapter(int x, int y, int w, int h) 
-        : x(x), y(y), w(w), h(h) {}
-
-    void draw() override {
-        oldDraw(x, y, x + w, y + h);
+    void oldDraw() {
+        std::cout << "Legacy Drawing: " << x1_ << " " << y1_ << std::endl;
     }
 private:
-    int x, y, w, h;
+    int x1_, y1_, x2_, y2_;
+};
+
+// Class Adapter: Inherits Interface (public) AND Implementation (private)
+// This implements "Is-A Rectangle" and "Is-Implemented-In-Terms-Of LegacyRectangle"
+class RectangleAdapter : public Rectangle, private LegacyRectangle {
+public:
+    RectangleAdapter(int x, int y, int w, int h)
+        : LegacyRectangle(x, y, x + w, y + h) {}
+
+    void draw() override {
+        // Translation logic
+        std::cout << "Adapter: Converting coordinates..." << std::endl;
+        oldDraw(); // Calls private inherited method
+    }
 };
 ```
 
-#### Go: Interface Embedding
+#### Go: Using Interfaces implicitly
+Go interfaces are satisfied implicitly, making adapters very fluid.
+
 ```go
-package adapter
+package main
+import "fmt"
 
-type Target interface {
-    Request() string
+// Target Interface
+type Logger interface {
+    Log(message string)
 }
 
-type Adaptee struct{}
-
-func (a *Adaptee) SpecificRequest() string {
-    return "Specific request"
+// Adaptee (3rd party lib)
+type ZapLogger struct{}
+func (z *ZapLogger) Info(msg string, fields map[string]interface{}) {
+    fmt.Println("[ZAP]", msg, fields)
 }
 
-type Adapter struct {
-    *Adaptee
+// Adapter
+type ZapAdapter struct {
+    zap *ZapLogger
 }
 
-func (a *Adapter) Request() string {
-    return "Adapter: " + a.SpecificRequest()
+func (za *ZapAdapter) Log(message string) {
+    // Adopt simple string to complex structure
+    za.zap.Info(message, map[string]interface{}{"context": "adapter"})
 }
 ```
+
+#### JavaScript: Wrapping Old APIs
+Adapting Callback-based APIs to Promises (Promisify).
+
+```javascript
+// Old Callback API (Node.js style)
+const fs = require('fs');
+// fs.readFile('file.txt', (err, data) => { ... })
+
+// Adapter function (Promisify)
+function readFileAdapter(path) {
+    return new Promise((resolve, reject) => {
+        fs.readFile(path, 'utf8', (err, data) => {
+            if (err) reject(err);
+            else resolve(data);
+        });
+    });
+}
+
+// Usage (Async/Await)
+// const content = await readFileAdapter('file.txt');
+```
+
+#### C++: Class Adapter (Private Inheritance) vs Object Adapter
+C++ is unique because it supports **Multiple Inheritance** and **Private Inheritance**, allowing for the Class Adapter pattern (implementation inheritance) without exposing the Adaptee's public interface.
+
+**Scenario**: We have a strict `Shape` interface (Target) and a legacy `LegacyRect` (Adaptee) that calculates area differently.
+
+```cpp
+#include <iostream>
+#include <memory>
+
+// 1. Target Interface
+class Shape {
+public:
+    virtual void draw(int x1, int y1, int x2, int y2) const = 0;
+    virtual ~Shape() = default;
+};
+
+// 2. Adaptee (Third-Party Legacy Code)
+class LegacyRect {
+public:
+    void renderOld(int x, int y, int w, int h) const {
+        std::cout << "[LegacyRect] Draw at (" << x << "," << y 
+                  << ") size " << w << "x" << h << std::endl;
+    }
+};
+
+// 3. Class Adapter (Private Inheritance)
+// "Is-A Shape" (public), "Implemented-in-terms-of LegacyRect" (private)
+class ClassAdapter : public Shape, private LegacyRect {
+public:
+    void draw(int x1, int y1, int x2, int y2) const override {
+        std::cout << "[ClassAdapter] Transforming coordinates..." << std::endl;
+        int w = x2 - x1;
+        int h = y2 - y1;
+        // Call inherited private method
+        renderOld(x1, y1, w, h);
+    }
+};
+
+// 4. Object Adapter (Composition) - PREFERRED
+class ObjectAdapter : public Shape {
+private:
+    std::unique_ptr<LegacyRect> adaptee;
+public:
+    ObjectAdapter() : adaptee(std::make_unique<LegacyRect>()) {}
+    
+    void draw(int x1, int y1, int x2, int y2) const override {
+        std::cout << "[ObjectAdapter] Transforming coordinates..." << std::endl;
+        int w = x2 - x1;
+        int h = y2 - y1;
+        adaptee->renderOld(x1, y1, w, h);
+    }
+};
+```
+
+#### Go: Implicit Interface Satisfaction & Function Adapters
+Go's interfaces are satisfied structurally. We can also use **Function Adapters** (like `http.HandlerFunc`).
+
+```go
+package main
+
+import "fmt"
+
+// 1. Target Interface
+type PaymentProcessor interface {
+    Pay(amount float64)
+}
+
+// 2. Adaptee (3rd Party Struct)
+type AliPay struct{}
+
+func (a *AliPay) MakePayment(yuan int) {
+    fmt.Printf("AliPay: Paying %d Yuan\n", yuan)
+}
+
+// 3. Struct Adapter
+type AliPayAdapter struct {
+    aliPay *AliPay
+}
+
+func (a *AliPayAdapter) Pay(dollars float64) {
+    yuan := int(dollars * 7.2) // Exchange rate conversion
+    a.aliPay.MakePayment(yuan)
+}
+
+// 4. Function Adapter (The "Go Way")
+// If the interface has only one method, we can adapt a function directly.
+type PaymentFunc func(float64)
+
+func (f PaymentFunc) Pay(amount float64) {
+    f(amount)
+}
+
+func main() {
+    ali := &AliPay{}
+    
+    // Usage 1: Struct Adapter
+    var p1 PaymentProcessor = &AliPayAdapter{aliPay: ali}
+    p1.Pay(100.0)
+    
+    // Usage 2: Function Adapter
+    // Adapting a closure to the Interface
+    var p2 PaymentProcessor = PaymentFunc(func(amount float64) {
+        ali.MakePayment(int(amount * 7.2))
+    })
+    p2.Pay(50.0)
+}
+```
+
+---
 
 ### 5. Practice & Assessment
 
 #### Core Exercises
-1.  **Basic**: Create a `SquarePegAdapter` that allows a `SquarePeg` (width) to be inserted into a `RoundHole` (radius). (Classic structural exercise).
-2.  **Intermediate**: Implement an adapter that converts Java's legacy `Enumeration<E>` interface (methods: `hasMoreElements`, `nextElement`) to the modern `Iterator<E>` interface (methods: `hasNext`, `next`, `remove`).
-3.  **Advanced**: Create a **Two-Way Adapter** that allows an object to be treated as both `TargetA` and `TargetB` simultaneously.
+1.  **Basic**: Implement `IteratorToEnumerationAdapter`.
+    -   Target: `java.util.Enumeration` (methods: `hasMoreElements`, `nextElement`).
+    -   Adaptee: `java.util.Iterator` (methods: `hasNext`, `next`).
+    -   *Goal*: Allow legacy code expecting an Enumeration to iterate over a generic List.
+2.  **Intermediate**: Create a **Two-Way Adapter**.
+    -   Scenario: You have `SquarePeg` and `RoundPeg` interfaces.
+    -   Task: Create a class `PegAdapter` that implements *both* interfaces, allowing squares to fit in round holes (using diagonal distance) and circles in square holes (using diameter).
+3.  **Advanced**: Implement a **Lazy-Loading Database Adapter**.
+    -   Target: `Repository.findAll()`.
+    -   Adaptee: A raw JDBC `ResultSet` that is forward-only.
+    -   The adapter must iterate the `ResultSet` on-demand as the caller iterates the `List`, rather than loading all rows into RAM immediately. (Hint: Use a custom `Iterator` implementation inside the List).
 
 #### Edge Case Drills
-1.  **Null Adaptees**: Ensure your adapter constructor throws `IllegalArgumentException` if the passed adaptee instance is null.
-2.  **Exception Translation**: If the adaptee throws a checked `IOException`, catch it inside the adapter and rethrow it as an unchecked `RuntimeException` or a domain-specific exception mandated by the Target interface definition.
-3.  **Partial Adaptation**: What if the Target has 5 methods but the Adaptee only supports 3? Implement the missing ones by throwing `UnsupportedOperationException` and strictly document this limitation.
+1.  **Null Adaptee**:
+    -   *Task*: Verify what happens if the `StripeApi` passed to `StripeAdapter` is null.
+    -   *Fix*: Add `Objects.requireNonNull(stripeApi)` in the constructor. Fail fast.
+2.  **Partial Operation Support**:
+    -   *Task*: The `PaymentProcessor` interface has `refund()`, but `PayPalApi` (Adaptee) does *not* support refunds.
+    -   *Fix*: Throw `UnsupportedOperationException("Refunds not supported by PayPal")` in the adapter. Document this strictly.
+3.  **Exception Wrapping**:
+    -   *Task*: `StripeApi` throws `StripeNetworkException` (Checked). Your `PaymentProcessor` interface definition does not declare it.
+    -   *Fix*: Catch the exception in the Adapter, wrap it in a `PaymentFailedRuntimeException`, and rethrow. Never swallow exceptions!
 
-#### Challenge: The Logging Unifier
-**Scenario**: Your app uses 3 different logging libraries (Log4j, SLF4J, and a proprietary legacy logger). Each has different method names (`info()` vs `logInfo()` vs `writeLog()`).
-**Task**: Define a unified `Logger` interface. Create 3 adapters for the 3 libraries. Inject them into client code dynamically based on a configuration file.
+#### Challenge: The Microservice Anti-Corruption Layer (ACL)
+**Scenario**: You are building a modern "Order Management Service" (OMS). You need to fetch customer data from a monolithic "Legacy CRM" system (SOAP/XML). The Legacy CRM has confusing field names (`CUST_NM`, `ADDR_01`) and mixed concerns.
+**Goal**: Design a comprehensive Adapter Layer that sanitizes this data.
+**Requirements**:
+1.  **Target Domain Model**: Clean Record `Customer(id, fullName, address)`.
+2.  **Adaptee**: `LegacySoapClient.getCustomerXml(id)`.
+3.  **Logic**:
+    -   Convert XML to POJO.
+    -   Merge `ADDR_01`, `ADDR_02`, `CITY` into `Address` value object.
+    -   Cache the result to prevent hammering the legacy DB.
+    -   Implement a "Circuit Breaker" in the adapter: if the Legacy CRM fails 5 times, return fallback data or an empty optional.
 
 ---
 
@@ -34919,57 +35101,86 @@ func (a *Adapter) Request() string {
 
 | Mistake | Consequence |
 | :--- | :--- |
-| **Modifying Adaptee** | Changing the adaptee class directly instead of wrapping it breaks the Open/Closed Principle and might break other code awaiting the original interface. |
-| **Overuse** | Creating adapters for everything adds unnecessary indirection. Use only when interfaces are genuinely incompatible and unchangeable. |
-| **Too Much Logic** | Putting heavy business logic in the adapter violates Single Responsibility. The adapter should strictly *translate* calls, not execute complex domain rules. |
-| **Inheritance Abuse** | Using inheritance (Class Adapter) when composition (Object Adapter) would be more flexible (e.g., adapting subclasses) leads to brittle hierarchies. |
+| **Polluting Domain Logic** | Using `instanceof` checks (`if (service instanceof Stripe)`) in business logic defeats the purpose of the abstraction. Logic should only know about the Interface. |
+| **Logic Leaks** | Placing core business rules (e.g., "Apply 10% tax") inside the Adapter. The Adapter should ONLY translate data formats (dollars to cents). Business rules belong in Domain Services. |
+| **Over-Adapting** | Creating adapters for stable standard libraries (e.g., `String` or `List`). Only adapt what is *volatile* or *incompatible*. |
+| **Inheritance Abuse** | Using Class Adapters (Extends) when Object Adapter (Has-A) is sufficient. Inheritance locks you into the Adaptee's class hierarchy forever. |
+| **Ignoring Lifecycle** | If the Adaptee requires `start()` or `close()`, the Adapter must expose methods to handle these lifecycles, or manage them internally. |
 
 ---
 
-### 7. Deep Dive: JDK Examples & System Design
+### 7. Deep Dive: System Design & The Anti-Corruption Layer (ACL)
 
-**JDK Real-World Examples**:
-1.  `java.util.Arrays.asList(T[])`: Adapts an Array (which is not a Collection) to the `List` interface. It wraps the array and translates `get(i)` calls to `array[i]`.
-2.  `java.io.InputStreamReader(InputStream)`: A Bridge/Adapter that adapts a byte stream (`InputStream`) to a character stream (`Reader`), handling charset decoding.
-3.  `java.util.Collections.enumeration(Collection)`: Adapts a modern `Collection` to the legacy `Enumeration` interface for backward compatibility.
+**The ACL Pattern (Domain-Driven Design)**:
+In large-scale distributed systems, the Adapter pattern evolves into the **Anti-Corruption Layer**.
+When a downstream service (Modern) needs information from an upstream service (Legacy/Messy), we refuse to let the Legacy concepts "leak" into our clean domain.
 
-**System Design Implication**:
-In Microservices, the **Anti-Corruption Layer (ACL)** pattern is essentially the Adapter Pattern applied at architectural scale. It translates the domain model of an external subsystem (e.g., a Mainframe or SAP system) into the domain model of your microservice, preventing "corruption" of your clean architecture by external legacy concepts.
+**Architecture**:
+```
+[ Modern Domain Core ]  <-- (Interface) method: getCustomer(id)
+        ^
+        |
+[ Anti-Corruption Layer (Adapter) ]
+   1. Translator: Maps XML -> Domain Object
+   2. Facade: Simplifies complex legacy API calls
+   3. Adapter: Implements the Modern Interface
+        |
+        v
+[ Legacy System (XML/SOAP) ]
+```
+
+**Benefits**:
+1.  **Isolation**: If the Legacy system changes its XML schema, only the ACL changes. Your core domain logic remains untouched.
+2.  **Sanitization**: Invalid state from the legacy system (e.g., `age = -5`) is caught and rejected in the ACL.
+3.  **Migration Strategy**: You can replace the Legacy System with a New Microservice later. You only write a new Adapter for the ACL; the core domain never knows the backend changed.
+
+**Performance Cost**:
+Adapters add a layer of indirection. In high-frequency trading or real-time graphics (Game engines), virtual method calls and object pointer chasing through adapters can cause cache misses. In those cases, header-only templated solutions (C++) are preferred to compile away the abstraction overhead.
 
 ---
 
 ### 8. Interview Bank: Follow-Up Questions
 
-1.  **Q**: "Difference between Adapter and Decorator?"
-    **A**: **Adapter** changes the *interface* (makes things compatible) but keeps behavior/intent similar. **Decorator** enhances the *behavior* (adds features like buffering or encryption) without changing the interface.
-2.  **Q**: "Difference between Adapter and Proxy?"
-    **A**: **Proxy** has the *same* interface as the subject (controls access, lazy loading). **Adapter** has a *different* interface (converts incompatibility).
-3.  **Q**: "When would you use a Class Adapter over an Object Adapter?"
-    **A**: Rarely in Java (due to no multiple inheritance). In C++, implement Class Adapter (private inheritance) if you need to override the behavior of the Adaptee's *protected* methods to facilitate the adaptation.
-4.  **Q**: "Can an Adapter handle multiple Adaptees?"
-    **A**: Yes, a Facade-like Adapter can wrap multiple objects (e.g., First Name Provider and Last Name Provider) to present a single unified interface (e.g., Full Name Provider).
+1.  **Q**: "How do you handle an Adaptee that throws Checked Exceptions when the Target Interface expects none?"
+    **A**: Wrap the Checked Exception in a Runtime Exception or a Domain-Specific Exception.
+    ```java
+    try {
+        legacy.call();
+    } catch (IOException e) {
+        throw new PaymentException("Detailed error", e);
+    }
+    ```
+2.  **Q**: "What is the difference between Adapter and Facade?"
+    **A**: **Intent**. Adapter wraps *one* object to change its interface to match another. Facade wraps *many* complex objects to provide a *simpler* interface (but doesn't necessarily enforce polymorphism/compatibility).
+3.  **Q**: "Can you use Reflection to build a generic Adapter?"
+    **A**: Yes (e.g., Java's `DynamicProxy`). You can create a proxy that intercepts calls to `interface.method(args)` and creatively maps them to `legacyObject.call(args)`. This is how Retrofit/Spring Data implementation works.
+4.  **Q**: "Is the Adapter Pattern the same as the Decorator Pattern?"
+    **A**: No. Decorator *adds behavior* but keeps the interface the same. Adapter *changes the interface* but tries to keep the behavior (goal) the same.
+5.  **Q**: "Give a real-world example of an Adapter in the Java Standard Library."
+    **A**: `InputStreamReader` adapts an `InputStream` (byte-oriented) to a `Reader` (character-oriented). `Arrays.asList()` adapts an Array to the `List` interface.
 
 ---
 
 ### 9. Cheatsheet & Summary
 
-| Pattern | Interface | Behavior | Purpose |
+| Pattern | Role | Implementation | Key Benefit |
 | :--- | :--- | :--- | :--- |
-| **Adapter** | Changes | Preserves | Compatibility |
-| **Decorator** | Keeps | Enhances | Extensibility |
-| **Proxy** | Keeps | Controls | Access Control |
-| **Facade** | Simplifies | Aggregates | Usability |
+| **Object Adapter** | Wrapper | `class A implements I { B b; }` | **Composition**. Flexible. Can adapt subclasses of B. |
+| **Class Adapter** | Wrapper | `class A extends B implements I` | **Inheritance**. Less flexible. Can override B's protected methods. |
+| **Two-Way Adapter**| Chameleon | Implements `TargetA` AND `TargetB` | Allows object to be used in two different systems simultaneously. |
 
-**Key Tactic**: Always prefer **Object Adapter** (Composition) over Class Adapter for flexibility and testability.
+**Decision Matrix**:
+- Need to change interface? -> **Adapter**.
+- Need to add features? -> **Decorator**.
+- Need to simplify complex system? -> **Facade**.
+- Need to control access? -> **Proxy**.
 
 ---
 
 ### 10. References
-1.  *Design Patterns: Elements of Reusable Object-Oriented Software* (GoF) - The original definition.
-2.  *Head First Design Patterns* - "Being the round peg in a square hole".
-3.  *Refactoring to Patterns* - Joshua Kerievsky (How to refactor legacy code to use Adapter).
-
----
+1.  *Domain-Driven Design* - Eric Evans. (Chapter on Anti-Corruption Layer).
+2.  *Working Effectively with Legacy Code* - Michael Feathers. (Using Adapters to break dependencies for testing).
+3.  *Design Patterns* - GoF. (Structural Patterns).
 
 
 #### Q54: How does the Decorator Pattern enable dynamic functionality extension?
