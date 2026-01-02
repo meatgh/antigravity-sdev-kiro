@@ -35672,251 +35672,306 @@ Each middleware function wraps the next one. It can inspect/modify the `Request`
 ---
 
 #### Q55: How do you architecturally resolve Circular Dependencies in large systems?
-**Companies**: Google, Amazon, Netflix, Uber
-**Difficulty**: Hard
-**Category**: System Architecture & Design
+**Companies**: Google, Amazon, Netflix, Uber, Palantir
+**Difficulty**: **Hard** (Architectural Integrity)
+**Category**: System Architecture, Dependency Injection, & Graph Theory
 
 ---
 
 ### 1. Conceptual Overview & Motivation
 
-**The "Why"**:
-In a complex system, components often need to collaborate.
-- `CustomerService` needs `OrderService` to get order history.
-- `OrderService` needs `CustomerService` to validate customer details.
+**The "Why": The Acyclic Dependencies Principle (ADP)**
+Robert C. Martin (Uncle Bob) states in the *Stable Dependency Principle*: "The dependency structure of all released software components must be a Directed Acyclic Graph (DAG). There can be no cycles."
+When a cycle exists ($A \rightarrow B \rightarrow C \rightarrow A$), these components effectively become **one giant component**.
+-   **Testing**: You cannot unit test A without mocking B *and* C.
+-   **Reusability**: You cannot pull A into another project without dragging B and C along ("The Banana Problem": You wanted a banana, but you got the gorilla holding the banana and the entire jungle).
+-   **Build Time**: Compilation often fails or requires multi-pass linking.
+-   **Runtime**: Creation Deadlocks (Thread A holds Lock on Class A, Thread B holds Lock on Class B -> Deadlock).
 
-**The Problem**:
-2.  **Creation Deadlock**: To create A, you need B. To create B, you need A. Who comes first? (Chicken and Egg).
-3.  **Tight Coupling**: Use of A implies dragging in B, which drags in A again. Monoliths become "Big Balls of Mud".
-4.  **Infinite Recursion**: Naive calls might loop infinitely (`A.print() -> B.print() -> A.print() ...`), causing StackOverflow.
+**Scenario**:
+-   `UserManagementService` needs `PaymentService` to charge subscription fees.
+-   `PaymentService` needs `UserManagementService` to get the billing address.
+-   **Result**: Classic Catch-22. To create the Chicken, you need the Egg. To create the Egg, you need the Chicken.
 
 **Real-World Analogies**:
-1.  **Job Application**: You need "Experience" to get a "Job". You need a "Job" to get "Experience".
-2.  **Lock Deadlock**: Thread 1 holds Lock A, wants Lock B. Thread 2 holds Lock B, wants Lock A.
+1.  **Job Application**:
+    -   Employer: "We need someone with experience."
+    -   Candidate: "I need a job to get experience."
+    -   **Solution**: Internship (A third distinct state/interface to break the loop).
+2.  **Deadlock in Traffic**:
+    -   Car A blocks Car B. Car B blocks Car C. Car C blocks Car A. The intersection is gridlocked.
+    -   **Solution**: A Traffic Circle (Roundabout) or Traffic Light (External coordinator).
+3.  **Excel Formula**:
+    -   Cell A1 `= B1 + 1`.
+    -   Cell B1 `= A1 + 1`.
+    -   **Result**: Circular Reference Error (Excel detects this immediately).
 
 ---
 
 ### 2. Comprehensive Definition
 
 **Formal Definition**:
-> A Circular Dependency occurs when two or more modules (classes, packages, or systems) depend on each other directly or indirectly, forming a closed loop in the dependency graph.
+> A Circular Dependency (or Cyclic Dependency) is a relation between two or more modules which either directly or indirectly depend on each other to function properly. In Graph Theory terms, the Dependency Graph contains at least one cycle.
 
-**Types**:
-1.  **Direct**: A → B → A
-2.  **Indirect**: A → B → C → ... → A
-3.  **Self**: A → A (Recursion, usually intentional and handled by base case).
+**Mathematical Representation**:
+Given a Graph $G = (V, E)$.
+A cycle exists if there is a path $v_1, v_2, ..., v_k$ such that $(v_i, v_{i+1}) \in E$ for all $1 \le i < k$, and $v_k = v_1$.
+**Topological Sort** is only possible if the graph is a DAG (Directed Acyclic Graph). If a cycle exists, Topological Sort is undefined.
+
+**Types of Cycles**:
+1.  **Direct**: $A \rightarrow B \rightarrow A$.
+2.  **Transitive (Indirect)**: $A \rightarrow B \rightarrow C \rightarrow D \rightarrow A$. (Harder to spot).
+3.  **Self-Reference**: $A \rightarrow A$ (Recursive function or structure). Sometimes valid (e.g., `Node` class in a LinkedList), but dangerous in instantiation logic.
 
 ---
 
 ### 3. Progressive Solution Evolution
 
-#### Approach 1: Setter Injection (The "Lazy" Fix)
-Break the construction-time cycle by delaying one dependency injection.
+#### Approach 1: The "Band-Aid" (Setter Injection & Lazy Loading)
+Break the *creation-time* cycle by deferring one side of the relationship.
+Instead of "I need B to exist", you say "I will need B eventually".
+
 ```java
+// PROBLEM: Constructor Cycle
+class A { A(B b) { ... } }         // Needs B ready
+class B { B(A a) { ... } }         // Needs A ready -> DEADLOCK
+
+// SOLUTION: Setter Injection
 class A {
     B b;
-    A(B b) { this.b = b; } // CYCLE if B also needs A in constructor
+    A() {}                         // 1. Create A (empty)
+    void setB(B b) { this.b = b; } // 3. Inject B later
 }
 class B {
     A a;
-    B() {} // Construct B first WITHOUT A
-    void setA(A a) { this.a = a; } // Inject A later
+    B(A a) { this.a = a; }         // 2. Create B (using existing A)
 }
+// Wiring:
+// A a = new A();
+// B b = new B(a);
+// a.setB(b);
 ```
-**Critique**: Leaves object in a partially initialized state. Not thread-safe if accessed before setter is called.
+*   **Critique**: The object `A` exists in an **invalid state** (null `b`) between line 1 and 3. Not Thread-Safe.
 
-#### Approach 2: Interface Segregation (The Clean Fix)
-Invert the dependency.
-If A depends on B, and B depends on A:
-1.  Extract interface `I` from A.
-2.  Make B depend on `I` instead of A.
-3.  A implements `I`.
-**Result**: A → B → I (and A implements I). The cycle is broken at the type level.
+#### Approach 2: The Interface Segregation (Inversion of Control)
+If $A$ needs $B$ and $B$ needs $A$, it usually means they are violating SRP (Single Responsibility Principle).
+Extract an Interface $I$ from $A$. Make $B$ depend on $I$.
+1.  Current: $A \rightarrow B$ and $B \rightarrow A$.
+2.  Refactor: Extract `I_Action` from $A$.
+3.  Result: $A \rightarrow B$ and $B \rightarrow I\_Action$. ($A$ implements $I\_Action$).
+4.  Flow: $B$ calls $I\_Action$, it doesn't know about $A$.
+*   **Verdict**: **Best Architectural Fix**. Removes the cycle at the type level.
 
-#### Approach 3: Event-Driven Architecture (The Decoupled Fix)
-A sends an event. B listens. B sends an event. A listens.
-They depend on the `EventBus`, not each other.
-**Pros**: Ultimate decoupling.
-**Cons**: harder to debug flow of control.
+#### Approach 3: Event-Driven Architecture (Observer Pattern)
+Decouple fully.
+-   $A$ fires `UserCreatedEvent`.
+-   $B$ listens to `UserCreatedEvent`.
+-   $B$ fires `PaymentProcessedEvent`.
+-   $A$ listens to `PaymentProcessedEvent`.
+*   **Verdict**: Great for Microservices, but adds complexity (Event Bus).
 
-#### Approach 4: Extract Shared Component (The "Refactoring" Fix)
-If A and B share logic that causes the cycle, move that logic to a new component C.
-A → C
-B → C
-**Result**: No cycle.
+#### Approach 4: The Mediator / Shared Kernel
+Extract the shared logic that both need into a third component $C$.
+-   Before: $A \leftrightarrow B$ (Both contain logic for User Validation).
+-   After: $A \rightarrow C$ and $B \rightarrow C$.
+-   $C$ contains the definition of User.
+*   **Verdict**: Cleanest for code reuse.
 
 ---
 
 ### 4. Multi-Language Implementations
 
-#### Java: Spring Boot Solution
-Handling `BeanCurrentlyInCreationException`.
+#### Java: The "Three-Level Cache" (Spring Internals)
+How does Spring Framework solve `A -> B -> A`? It uses a clever caching mechanism for **Singleton** beans.
 
+**The Algorithm**:
+1.  Spring creates generic instance of `A` (raw pointer).
+2.  It places `A` in a "Early Singleton Cache" (Level 3).
+3.  It tries to populate properties of `A`. Needs `B`.
+4.  It creates `B`.
+5.  `B` needs `A`. Spring looks in "Early Cache". Finds `A`. Injects it.
+6.  `B` finishes creation.
+7.  Spring returns to `A`, finishes `A`.
+
+*Code Simulation*:
 ```java
-import org.springframework.stereotype.Service;
-import org.springframework.context.annotation.Lazy;
-import org.springframework.beans.factory.annotation.Autowired;
+public class SpringInternalsDemo {
+    // Level 1: Fully initialized beans
+    Map<String, Object> singletonObjects = new ConcurrentHashMap<>();
+    // Level 2: Early bean references (not fully populated)
+    Map<String, Object> earlySingletonObjects = new HashMap<>();
 
-// Scenario: UserService needs EmailService, EmailService needs UserService to enrich templates
+    public Object getBean(String beanName) {
+        // 1. Check fully created cache
+        Object bean = singletonObjects.get(beanName);
+        if (bean != null) return bean;
 
-@Service
-public class UserService {
-    private final EmailService emailService;
+        // 2. Check early cache (Cycle resolution happens here)
+        bean = earlySingletonObjects.get(beanName);
+        if (bean != null) {
+            System.out.println("RESOLVED CYCLE: Return early reference for " + beanName);
+            return bean;
+        }
 
-    // Normal Constructor Injection
-    public UserService(EmailService emailService) {
-        this.emailService = emailService;
+        // 3. Create Bean
+        System.out.println("Creating " + beanName);
+        if (beanName.equals("A")) {
+            A a = new A();
+            earlySingletonObjects.put("A", a); // Expose early!
+            a.b = (B) getBean("B"); // Inject B (triggers recursion)
+            singletonObjects.put("A", a); // Promote to full
+            earlySingletonObjects.remove("A");
+            return a;
+        }
+        if (beanName.equals("B")) {
+            B b = new B();
+            earlySingletonObjects.put("B", b);
+            b.a = (A) getBean("A"); // Inject A (finds in Early Cache)
+            singletonObjects.put("B", b);
+            earlySingletonObjects.remove("B");
+            return b;
+        }
+        return null;
     }
 
-    public String getUsername(String id) {
-        return "User" + id;
-    }
+    static class A { B b; }
+    static class B { A a; }
     
-    public void register() {
-        emailService.sendWelcomeEmail("123");
-    }
-}
-
-@Service
-public class EmailService {
-    private final UserService userService;
-
-    // CRITICAL: @Lazy proxies the dependency. 
-    // The real UserService is injected only when a method is effectively called.
-    // This breaks the construction-time deadlock.
-    public EmailService(@Lazy UserService userService) {
-        this.userService = userService;
-    }
-
-    public void sendWelcomeEmail(String userId) {
-        String name = userService.getUsername(userId); // Resolution happens here
-        System.out.println("Sending email to " + name);
+    public static void main(String[] args) {
+        new SpringInternalsDemo().getBean("A");
     }
 }
 ```
 
-#### Python: Import Cycles
-Python modules execute statements on import. Circular imports fail.
+#### Python: Import Strategies
+Python is strict about execution order at top-level.
 
 ```python
-# BAD (Module A)
-# import module_b
-# def func_a(): module_b.func_b()
+# --- file: user_service.py ---
+# from payment_service import charge # <--- CIRCULAR IMPORT ERROR if payment imports user
 
-# SOLUTION 1: Import Inside Function
-# Module A
-def func_a():
-    import module_b # Deferred Import
-    module_b.func_b()
+import payment_service # Better: Import Module, not function
 
-# SOLUTION 2: Typing `TYPE_CHECKING` block
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from module_b import ApiClient # Only for static analysis
+def create_user():
+    print("User Created")
+    # Late Binding: Resolve function at runtime
+    payment_service.charge()
 
-class DataService:
-    def __init__(self, client: "ApiClient"): # String forward reference
-        self.client = client
+# --- file: payment_service.py ---
+import user_service
+
+def charge():
+    print("Charging...")
+    user_service.notify_user()
+
+# Strategy: 
+# 1. Import modules, not names (namespace deferral).
+# 2. Import inside functions (runtime import).
+# 3. Use `typing.TYPE_CHECKING` for type hints.
+```
+
+#### Go: The Compiler Police
+Go fails at compile time with `import cycle not allowed`. You CANNOT have cycles.
+
+**Fix 1: Interface in Consumer**
+```go
+package orders
+// OrderService defines what it needs from User
+type UserProvider interface {
+    GetEmail(id string) string
+}
+
+type OrderService struct {
+    users UserProvider // Decoupled from "users" package
+}
+```
+
+**Fix 2: New Package "Models"**
+Move shared structs to a leaf package.
+```
+main
+ ├── users  (imports models)
+ ├── orders (imports models)
+ └── models (User, Order structs) - Has NO dependencies
 ```
 
 #### C++: Forward Declaration
-Header files inclusion separation.
+C++ separates memory allocation (header) from logic (cpp).
 
 ```cpp
-// file: A.h
-class B; // Forward declaration (Promise that B exists)
+// Header A.h
+class B; // Forward Declaration ("B exists, trust me")
+// Only B* (pointer) allowed here because sizeof(B*) is known (8 bytes).
+// B val; // ERROR: Creating instance requires knowing sizeof(B), which causes current recursion.
 
 class A {
-    B* b; // Pointer is allowed because size is known
+    B* b_ptr;
 public:
-    void setB(B* b);
+    void setB(B* b) { b_ptr = b; }
 };
 
-// file: B.h
-class A; // Forward declaration
-
-class B {
-    A* a;
-public:
-    void setA(A* a);
-};
-
-// file: main.cpp
-// #include "A.h"
-// #include "B.h"
-// Now implement logic.
+// Implementation A.cpp
+#include "A.h"
+#include "B.h" // Now we can include B to call methods on b_ptr
 ```
 
-#### Go: Illegal Import Cycles
-Go's compiler strictly forbids import cycles. You MUST refactor.
-
-```go
-// Package A
-package users
-// import "orders" // ERROR if orders imports users
-
-type User struct { 
-    ID string 
-}
-
-// Interfaces solve it
-type OrderFetcher interface {
-    GetOrders(userID string) []string
-}
-
-type Service struct {
-    fetcher OrderFetcher
-}
-
-// Package B
-package orders
-import "users" // One way is fine
-
-func GetOrders(u users.User) []string {
-    return []string{"Order1"}
-}
-```
-
-#### JavaScript: Module Loading (ESM vs CJS)
-ES Modules handle cycles better than CommonJS by using bindings.
+#### JavaScript: The Temporal Dead Zone (ESM)
+ES Modules support cycles via "Live Bindings", but variables might be uninitialized if accessed too early.
 
 ```javascript
 // a.js
-import { b } from './b.js';
-export function a() {
-    console.log('a calls b');
-    b();
-}
+import { b } from './b.js'; // b is a live binding (uninitialized yet)
+export const a = 'A';
+// usage of b() here would crash (ReferenceError) because b.js hasn't finished evaluating
+export function callB() { b(); } // Safe: executed later
 
 // b.js
 import { a } from './a.js';
-export function b() {
-    console.log('b calls a');
-    // a(); // Careful: Infinite recursion if unconditional
-}
-
-// CommonJS (Node.js legacy) will return an empty object {} 
-// if the cycle is hit before export is assigned.
+export const b = () => console.log(a); // 'a' will be resolved when called
 ```
 
 ### 5. Practice & Assessment
 
 #### Core Exercises
-1.  **Refactoring Drill**: Take two classes `A` and `B` that depend on each other via Constructor Injection. Refactor them using **Interface Segregation**.
-2.  **Spring Boot Debugging**: Create a Spring Boot app with a circular dependency. Observe the startup failure message. Fix it using `@Lazy` and then refactor it to remove the cycle entirely.
-3.  **Architecture Challenge**: Draw a dependency graph of a Monolith that has cycles. Identify the "God Class" causing the cycles. Propose a plan to split it into 3 microservices.
+1.  **Refactoring Drill (Interface Segregation)**:
+    -   *Input*: Class `A` injects `B`, Class `B` calls `A.validate()`. Constructor Cycle.
+    -   *Task*: Create interface `Validator`. Make `A` implement `Validator`. Inject `Validator` into `B`. Remove dependeny of `B` on `A` class.
+2.  **Spring Boot Debugging**:
+    -   *Task*: Create a Spring Boot app with `ServiceA` and `ServiceB`. Use Constructor Injection.
+    -   *Observation*: App fails to start with `BeanCurrentlyInCreationException`.
+    -   *Fix*: Apply `@Lazy` to one constructor parameter. Observe startup success.
+    -   *Refactor*: Remove `@Lazy` and use EventBus (ApplicationEventPublisher) to decouple logic.
+3.  **Algorithms Challenge (Cycle Detection)**:
+    -   *Task*: Implement a method `boolean hasCycle(Map<String, List<String>> graph)`.
+    -   *Method*: Use DFS with 3 states: `UNVISITED`, `VISITING` (Gray), `VISITED` (Black). If you encounter a `VISITING` node, you found a cycle.
 
 #### Edge Case Drills
-1.  **Serialization Loops**: If Class A has a reference to B, and B to A, standard JSON serialization (Jackson/Gson) will infinite loop and crash. Implement `@JsonIgnore` or `@JsonManagedReference`/`@JsonBackReference` to fix it.
-2.  **Database Foreign Keys**: Circular Foreign Keys (Table A has FK to B, Table B has FK to A) make `INSERT` impossible without setting one FK to NULL first. Write a transaction script to handle this safely.
-3.  **Build Tools**: Try to create a Maven Multi-Module project where Module A depends on B and B depends on A. Observe how Maven fails eagerly (it requires a DAG).
+1.  **Serialization Loops**:
+    -   *Scenario*: `User` has `List<Order>`. `Order` has `User`.
+    -   *Task*: Serialize `User` to JSON.
+    -   *Result*: `StackOverflowError` (User -> Order -> User -> Order...).
+    -   *Fix*: Use `@JsonManagedReference` on Parent and `@JsonBackReference` on Child (Jackson). Or use DTOs that break the cycle.
+2.  **Database Foreign Keys**:
+    -   *Scenario*: Table A has FK to B. Table B has FK to A. Both Non-Null.
+    -   *Task*: Insert a new pair of rows.
+    -   *Result*: Impossible in one statement.
+    -   *Fix*: Defer constraint checking (Postgres) or allow Nullable FKs, insert A (null FK), insert B (FK to A), update A (FK to B).
+3.  **Build Tools Multi-Module**:
+    -   *Scenario*: Maven Module A depends on B. B depends on A.
+    -   *Result*: Build fails immediately. Maven creates a DAG.
+    -   *Fix*: Extract "Common API" module C. A->C, B->C.
 
-#### Challenge: The Plugin System
-**Scenario**: You have a `Core` system and `Plugins`.
-- `Core` loads `Plugins`.
-- `Plugins` need to call `Core` API to register themselves.
-**Task**: Design an initialization sequence that avoids a cycle.
-**Hint**: `Core` initializes. `Core` loads `Plugin`. `Plugin.init(CoreContext)`. The dependency direction is `Plugin` -> `Core`. `Core` only knows `Plugin` INTERFACE.
+#### Challenge: The Plugin System Initialization
+**Scenario**: A `Core` kernel loads dynamic `Plugins`.
+-   `Core` discovers plugins.
+-   `Plugin` needs `Core` services to register.
+**Task**: Design the startup sequence.
+-   *Solution*:
+    1.  Core starts.
+    2.  Core scans for Plugins.
+    3.  Core instantiates Plugin (No-Args Constructor).
+    4.  Core calls `plugin.initialize(coreContext)`. (Method Injection / Post-Construct).
+    This avoids the Constructor Cycle while allowing full access.
 
 ---
 
@@ -35925,43 +35980,77 @@ export function b() {
 | Mistake | Consequence |
 | :--- | :--- |
 | **Ignoring Warnings** | Ignoring compiler/linter warnings about cycles until the build fails or StackOverflow occurs at runtime. |
-| **Overusing `@Lazy`** | Using `@Lazy` everywhere hides the structural problem. It's a band-aid, not a cure. The graph is still tangled. |
-| **God Classes** | Creating a `Utils` or `Common` class that depends on everything and everything depends on it. The hub of all cycles. |
-| **Static State** | Using `public static` variables to bypass dependency injection often creates hidden, untrackable cycles. |
+| **Overusing `@Lazy`** | Using `@Lazy` everywhere hides the structural problem. It's a band-aid, not a cure. The graph is still tangled ("Spaghetti Code"). |
+| **The "God Class"** | Creating a `Utils` or `Common` class that depends on everything and everything depends on it. This hub creates thousands of transitive cycles. |
+| **Static State Abuse** | Using `public static` variables to bypass dependency injection. This creates hidden, hard-to-track cycles that don't show up in the DI graph but cause initialization ordering bugs. |
 
 ---
 
-### 7. Deep Dive: Directed Acyclic Graphs (DAGs)
+### 7. Deep Dive: Dependency Graph Analysis (Cycle Detector)
 
-**Theory**:
-Well-designed software architectures are **Directed Acyclic Graphs (DAGs)**.
-- **Nodes**: Modules/Classes.
-- **Edges**: Dependencies.
-- **Acyclic**: You can never follow edges and return to the start.
+**Problem**: You are building a build tool (like Maven). You need to detect if the project dependency graph has a cycle.
 
-**Topological Sort**:
-Build tools (Maven, Gradle, Webpack) use **Topological Sort** to determine build order. If a cycle exists, Topological Sort is impossible, and the build fails.
+**Algorithm: DFS with 3-Color Coloring**
+-   **White**: Unvisited.
+-   **Gray**: Visiting (Currently in recursion stack).
+-   **Black**: Visited (Finished processing).
 
-**Spring's Internal Resolution**:
-Spring separates **Instantiation** from **Initialization**.
-1.  Instantiate A (empty wrapper).
-2.  Instantiate B (empty wrapper).
-3.  Inject A into B.
-4.  Inject B into A.
-This "Two-Phase Construction" allows cycles for Singleton scope (but not Prototype scope).
+**Implementation (Java)**:
+```java
+public class CycleDetector {
+    enum State { UNVISITED, VISITING, VISITED }
+
+    public static boolean hasCycle(Map<String, List<String>> graph) {
+        Map<String, State> states = new HashMap<>();
+        for (String node : graph.keySet()) {
+            if (hasCycleDFS(node, graph, states)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasCycleDFS(String node, Map<String, List<String>> graph, Map<String, State> states) {
+        State state = states.getOrDefault(node, State.UNVISITED);
+
+        if (state == State.VISITING) return true; // Cycle detected! Back edge to ancestor.
+        if (state == State.VISITED) return false; // Already checked this branch.
+
+        states.put(node, State.VISITING); // Mark Gray
+
+        for (String neighbor : graph.getOrDefault(node, Collections.emptyList())) {
+            if (hasCycleDFS(neighbor, graph, states)) return true;
+        }
+
+        states.put(node, State.VISITED); // Mark Black
+        return false;
+    }
+
+    public static void main(String[] args) {
+        Map<String, List<String>> graph = new HashMap<>();
+        graph.put("A", Arrays.asList("B"));
+        graph.put("B", Arrays.asList("C"));
+        graph.put("C", Arrays.asList("A")); // Cycle A->B->C->A
+
+        System.out.println("Has Cycle: " + hasCycle(graph)); // true
+    }
+}
+```
+
+**Complexity**:
+-   Time: $O(V + E)$ (Each node and edge processed once).
+-   Space: $O(V)$ (Recursion stack + State map).
 
 ---
 
 ### 8. Interview Bank: Follow-Up Questions
 
 1.  **Q**: "Why are Circular Dependencies considered a 'Code Smell'?"
-    **A**: High Coupling, Low Cohesion. You cannot test A without B. You cannot reuse A without B. The system becomes a fragile monolith.
+    **A**: High Coupling, Low Cohesion. You cannot test A without B. You cannot reuse A without B. The system becomes a fragile monolith. It also complicates Garbage Collection (though Tracing GCs handle it, Reference Counting GCs leak).
 2.  **Q**: "Can Garbage Collector handle Circular References?"
-    **A**: **Yes**. Modern GCs (Mark-and-Sweep) trace reachable objects from GC Roots. Isolated cycles (islands of isolation) that are not reachable from Roots are collected.
+    **A**: **Yes**. Modern GCs (Mark-and-Sweep) trace reachable objects from GC Roots. Isolated cycles (islands of isolation) that are not reachable from Roots are collected. (Note: Old Python/PHP versions using Ref Counting leaked memory here).
 3.  **Q**: "How does Microservices architecture handle this?"
-    **A**: By physically separating services. A cycle between Service A and Service B (HTTP calls) usually indicates wrong domain boundaries. One service should likely own the data, or an Event Bus should be used.
+    **A**: By physically separating services. A cycle between Service A and Service B (HTTP calls) usually indicates wrong domain boundaries. One service should likely own the data, or an Event Bus should be used for eventual consistency.
 4.  **Q**: "Difference between Constructor Injection and Field Injection regarding cycles?"
-    **A**: Constructor Injection **fails immediately** (creation deadlock). Field/Setter Injection **allows** cycles (because set happens after construction), but is risky.
+    **A**: Constructor Injection **fails immediately** (creation deadlock) - Fail Fast (Good). Field/Setter Injection **allows** cycles (because set happens after construction), allowing "Spaghetti execution" (Bad).
 
 ---
 
@@ -35969,12 +36058,12 @@ This "Two-Phase Construction" allows cycles for Singleton scope (but not Prototy
 
 | Strategy | Difficulty | Quality | When to use |
 | :--- | :--- | :--- | :--- |
-| **Refactor/Extract** | High | ⭐⭐⭐⭐⭐ | Always (Long term) |
-| **Interface** | Medium | ⭐⭐⭐⭐ | Decoupling needed |
-| **Event Bus** | High | ⭐⭐⭐⭐ | Async systems |
-| **@Lazy/Setter** | Low | ⭐ | Emergency hotfix |
+| **Refactor/Extract** | High | ⭐⭐⭐⭐⭐ | Always (Long term architecture). |
+| **Interface** | Medium | ⭐⭐⭐⭐ | Decoupling needed fast. |
+| **Event Bus** | High | ⭐⭐⭐⭐ | Async/Distributed systems. |
+| **@Lazy/Setter** | Low | ⭐ | Emergency hotfix only. |
 
-**Golden Rule**: Layers should flow **downwards**. Controller -> Service -> Repository. Repository should NEVER call Controller.
+**Golden Rule**: Layers should flow **downwards**. Controller -> Service -> Repository. Repository should NEVER call Controller. Service A should not call Service B if Service B calls Service A. Push common logic down to a shared layer.
 
 ---
 
