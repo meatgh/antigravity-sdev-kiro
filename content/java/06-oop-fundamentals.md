@@ -34828,7 +34828,7 @@ This is a question of **Amortized Complexity**.
 
 ---
 
-### 1. Conceptual Overview & Motivation
+### **1. Conceptual Overview & Motivation**
 
 **The "Why": The Reality of Heterogeneous Systems**
 In a perfect world, all software components would speak the same language (JSON, Protobuf) and use the same method signatures. In the real world (Enterprise Architecture), that never happens.
@@ -34849,13 +34849,10 @@ Senior Engineers spend 30-50% of their time acting as digital plumbers, connecti
 2.  **Memory Card Reader**:
     -   **Problem**: Laptop has USB-C. Camera has SD Card.
     -   **Adapter**: A dongle that has a USB-C male end and an SD female slot.
-3.  **HDMI to VGA**:
-    -   **Problem**: New Laptop (Digital HDMI) vs Old Projector (Analog VGA).
-    -   **Adapter**: Active converter that translates digital signals to analog waves.
 
 ---
 
-### 2. Comprehensive Definition
+### **2. Comprehensive Definition**
 
 **Formal Definition**:
 > The Adapter Pattern (also known as Wrapper) allows objects with incompatible interfaces to collaborate. It acts as a middleman that receives requests from a client and converts them into requests that the wrapped object works with.
@@ -34876,7 +34873,7 @@ Senior Engineers spend 30-50% of their time acting as digital plumbers, connecti
 
 ---
 
-### 3. Progressive Solution Evolution
+### **3. Progressive Solution Evolution**
 
 #### Approach 1: Direct Dependency (The "Tight Coupling" Disaster)
 Hardcoding the vendor library into your business logic.
@@ -34924,15 +34921,19 @@ public class PayPalAdapter implements PaymentGateway {
 
 ---
 
-### 4. Multi-Language Implementations
-
-#### Java: The "Universal Payment Gateway"
-Integrating multiple incompatible APIs under one unified standard.
+### **4. Implementation I: The Universal Payment Gateway**
+Integrating multiple incompatible APIs under one unified standard. This simulates a real FinTech Aggregator.
 
 ```java
+import java.util.*;
+
 // --- 1. The Target Interface (Our Standard) ---
 interface PaymentProcessor {
-    void pay(String account, double amount);
+    void pay(String account, double amount) throws PaymentFailedException;
+}
+
+class PaymentFailedException extends Exception { 
+    public PaymentFailedException(String m) { super(m); }
 }
 
 // --- 2. Incompatible Adaptees (3rd Party Libs) ---
@@ -34989,175 +34990,253 @@ class ECommerceApp {
 
     public void checkout(String user, double total) {
         System.out.println("Processing Checkout...");
-        processor.pay(user, total);
+        try {
+            processor.pay(user, total);
+        } catch (PaymentFailedException e) {
+            System.err.println("Checkout Failed: " + e.getMessage());
+        }
+    }
+}
+```
+
+---
+
+### **5. Implementation II: Legacy Database Adapter**
+
+In this scenario, we adapt a "Legacy SQL System" (returning `ResultSet` rows) to a modern "Repository Pattern" (returning clean Objects).
+
+```java
+import java.util.*;
+
+// --- Modern Interface ---
+record User(String id, String name) {}
+
+interface UserRepository {
+    Optional<User> findById(String id);
+}
+
+// --- Legacy System (Adaptee) ---
+class LegacySQLDriver {
+    // Simulates "SELECT * FROM users WHERE id = ?"
+    public Map<String, String> queryUserRow(String userId) {
+        if ("42".equals(userId)) {
+            Map<String, String> row = new HashMap<>();
+            row.put("col_id", "42");
+            row.put("col_fname", "John");
+            row.put("col_lname", "Doe");
+            return row;
+        }
+        return null; // Legacy returns null, not Optional
     }
 }
 
-// Usage
-public class AdapterDemo {
+// --- The Adapter ---
+class SqlToRepoAdapter implements UserRepository {
+    private final LegacySQLDriver driver;
+    
+    public SqlToRepoAdapter(LegacySQLDriver driver) {
+        this.driver = driver;
+    }
+    
+    @Override
+    public Optional<User> findById(String id) {
+        // 1. Call Legacy
+        Map<String, String> row = driver.queryUserRow(id);
+        
+        // 2. Adapt Null to Optional
+        if (row == null) return Optional.empty();
+        
+        // 3. Adapt Data (Map String->String to User Object)
+        // Also adapts "col_fname" + "col_lname" -> "name"
+        String fullName = row.get("col_fname") + " " + row.get("col_lname");
+        return Optional.of(new User(row.get("col_id"), fullName));
+    }
+}
+
+// --- Usage ---
+public class MigrationDemo {
     public static void main(String[] args) {
-        // Switch vendors by changing ONE line of code
-        PaymentProcessor stripe = new StripeAdapter(new StripeApi());
-        PaymentProcessor paypal = new PayPalAdapter(new PayPalApi());
-
-        ECommerceApp app = new ECommerceApp(stripe);
-        app.checkout("user_123", 49.99);
+        UserRepository repo = new SqlToRepoAdapter(new LegacySQLDriver());
+        repo.findById("42").ifPresentOrElse(
+            u -> System.out.println("Found: " + u),
+            () -> System.out.println("User not found")
+        );
     }
 }
+```
+
+---
+
+### **6. Implementation III: Attack Simulations (Exception Leaking)**
+
+Adapters often fail by leaking internal exceptions.
+
+```java
+public class AdapterAttacks {
+    
+    // Target Interface
+    interface ImageLoader {
+        void load(String path) throws IllegalStateException; // Our specific error
+    }
+    
+    // Adaptee (3rd Party)
+    static class ThirdPartyLib {
+        public void fetchBytes(String url) throws java.io.IOException {
+            throw new java.io.IOException("Socket Timeout");
+        }
+    }
+    
+    // BAD Adapter
+    static class BadAdapter implements ImageLoader {
+        private ThirdPartyLib lib = new ThirdPartyLib();
+        
+        @Override
+        public void load(String path) {
+            try {
+                lib.fetchBytes(path);
+            } catch (java.io.IOException e) {
+                // MISTAKE: Swallowing or throwing RuntimeException without context
+                throw new RuntimeException(e); // Leaks implementation detail wrapper
+            }
+        }
+    }
+    
+    // GOOD Adapter
+    static class GoodAdapter implements ImageLoader {
+        private ThirdPartyLib lib = new ThirdPartyLib();
+        
+        @Override
+        public void load(String path) throws IllegalStateException {
+            try {
+                lib.fetchBytes(path);
+            } catch (java.io.IOException e) {
+                // TRANSLATION: IO -> Domain Exception
+                throw new IllegalStateException("Failed to load image: " + path, e);
+            }
+        }
+    }
+    
+    public static void main(String[] args) {
+        try {
+            new GoodAdapter().load("img.png");
+        } catch (IllegalStateException e) {
+            System.out.println("✅ Correctly caught domain exception: " + e.getMessage());
+        }
+    }
+}
+```
+
+---
+
+### **7. Implementation IV: Performance Benchmarks (Overhead)**
+
+Does adding an Adapter layer slow down the system?
+
+```java
+public class AdapterBenchmark {
+    interface Worker { void work(); }
+    
+    static class RealWorker implements Worker {
+        public void work() { /* no-op */ }
+    }
+    
+    static class AdapterWorker implements Worker {
+        private final RealWorker delegate = new RealWorker();
+        public void work() { delegate.work(); }
+    }
+    
+    public static void run() {
+        long ops = 1_000_000_000L;
+        Worker direct = new RealWorker();
+        Worker adapter = new AdapterWorker();
+        
+        long start = System.nanoTime();
+        for(long i=0; i<ops; i++) direct.work();
+        long directTime = System.nanoTime() - start;
+        
+        start = System.nanoTime();
+        for(long i=0; i<ops; i++) adapter.work();
+        long adapterTime = System.nanoTime() - start;
+        
+        System.out.printf("Direct: %.2f ms%n", directTime / 1e6);
+        System.out.printf("Adapter: %.2f ms%n", adapterTime / 1e6);
+        System.out.println("Overhead per call: ~" + ((adapterTime - directTime)/ops) + " ns");
+    }
+}
+```
+*Result*: The JIT compiler often inlines the Adapter call, reducing overhead to **near zero** (0-1ns). Don't fear the adapter.
+
+---
+
+### **8. Multi-Language Perspectives**
 
 #### Python: Wrappers & Duck Typing
 In Python, if the Adaptee already has the method name, you don't even need an adapter! If it doesn't, you wrapper it.
-
 ```python
 class PDFRenderer:
     def render_pdf(self, file): print(f"Rendering PDF: {file}")
 
-class HTMLRenderer:
-    def render_html(self, file): print(f"Rendering HTML: {file}")
-
-# The Interface we want: 'render(file)'
-
 class HTMLAdapter:
-    def __init__(self, html_renderer):
-        self.renderer = html_renderer
+    def __init__(self, renderer):
+        self.renderer = renderer
         
     def render(self, file):
-        # Adapt method name
-        self.renderer.render_html(file)
+        # Adapt method name 'render' -> 'render_pdf'
+        self.renderer.render_pdf(file)
 
-# Client
-def main_render(renderer, filename):
-    # Relies on Duck Typing: expects .render()
-    renderer.render(filename)
-
-# Usage
-pdf = PDFRenderer()
-# Monkey Patching (Pythonic Hack -> "Adapter at Runtime")
-pdf.render = pdf.render_pdf 
-
-main_render(pdf, "doc.pdf") # Works!
+# Usage (Duck Typing)
+def client_code(renderer):
+    renderer.render("doc.pdf")
 ```
 
 #### Go: Implicit Interfaces
 Go interfaces are satisfied implicitly, making adapters lightweight.
-
 ```go
-package main
-import "fmt"
-
-// Target
 type LightningConnector interface {
-    PlugIntoLightningPort()
+    Plug()
 }
 
-// Adaptee
-type MicroUSBPhone struct {}
-func (m *MicroUSBPhone) PlugIntoMicroUSBPort() {
-    fmt.Println("Charging via MicroUSB...")
-}
+type MicroUSB struct {}
+func (m *MicroUSB) PlugMicro() {}
 
 // Adapter
-type LightningToMicroUSBAdapter struct {
-    device *MicroUSBPhone
+type Adapter struct {
+    device *MicroUSB
 }
-
-func (a *LightningToMicroUSBAdapter) PlugIntoLightningPort() {
-    fmt.Println("Adapter converting Lightning to MicroUSB...")
-    a.device.PlugIntoMicroUSBPort()
+// Automatically satisfies LightningConnector
+func (a *Adapter) Plug() {
+    a.device.PlugMicro()
 }
 ```
 
 #### C++: Class Adapter (Private Inheritance)
 C++ allows `Class Adapter` via multiple inheritance.
 ```cpp
-// Target
-class ITarget {
-public:
-    virtual void Request() = 0;
-};
-
-// Adaptee
-class Adaptee {
-public:
-    void SpecificRequest() { cout << "Called SpecificRequest" << endl; }
-};
+class ITarget { virtual void Request() = 0; };
+class Adaptee { public: void SpecificRequest() {} };
 
 // Adapter inherits implementation from Adaptee, interface from Target
 class Adapter : public ITarget, private Adaptee {
 public:
     void Request() override {
-        // Reuse code from Adaptee
-        SpecificRequest();
+        SpecificRequest(); // Call inherited method
     }
 };
 ```
 
 ---
 
-### 5. Deep Theory: Composition vs. Inheritance
+### **9. Deep Theory: Two-Way Adapters**
 
-**The "Object Adapter" (Composition)** uses delegation.
--   Holds reference: `private Adaptee adaptee;`
--   **Pros**: can adapt subclasses of `Adaptee`.
--   **Cons**: requires extra object indirection.
-
-**The "Class Adapter" (Inheritance)** uses subclassing.
--   Inherits: `extends Adaptee implements Target`
--   **Pros**: can override behavior of `Adaptee`.
--   **Cons**: cannot adapt subclasses; strictly tied to parent class.
-
-**Impedance Mismatch**:
-This pattern solves the "Impedance Mismatch" between two systems. It's not just about method names; it's about data formats (XML->JSON), error handling (Exceptions->Return Codes), and async models (Callback->Promise).
+A **Two-Way Adapter** implements *both* the Target and Adaptee interfaces.
+*   **Use Case**: When you have two legacy systems that need to call each other.
+*   **Design**: `class TwoWayAdapter implements InterfaceA, InterfaceB`.
+*   It holds references to the real implementations and routes `callA()` to `implB.callB()` and `callB()` to `implA.callA()`.
+*   Rare but powerful in complex integrations.
 
 ---
 
-### 6. Practice & Assessment
-
-#### Core Exercises
-1.  **Basic**: Write a `SquarePegAdapter` that fits a `SquarePeg` into a `RoundHole` by calculating the equivalent radius.
-2.  **Intermediate**: Implement an Adapter that converts a Java `Iterator` to an `Enumeration`. Method `next()` -> `nextElement()`.
-3.  **Advanced**: Build a "Two-Way Adapter" that implements **both** `TargetA` and `TargetB` interfaces, allowing two disparate systems to talk to each other bidirectionally.
-
-#### Edge Case Drills
-1.  **Stateful Adaptation**: Adapt a stateless functional interface to a stateful object. Ensure the adapter manages the state correctly (e.g., buffering stream data).
-2.  **Exception Translation**: Adaptee throws `SQLException` (Checked), Target expects `RuntimeException` (Unchecked). Your adapter MUST wrap/translate the exception, otherwise it violates the interface contract.
-3.  **NULL handling**: Adaptee returns `null`, Target expects `Optional<String>`. The adapter must handle this conversion to prevent NPEs in the client.
-
-#### Challenge: The Database Migrator
-**Scenario**: You are migrating from MySQL (JDBC) to MongoDB (NoSQL).
-**Task**: 
-1.  Create a generic `DatabaseInterface` (CRUD).
-2.  Implement `MySQLAdapter` (wraps JDBC constructs).
-3.  Implement `MongoAdapter` (wraps MongoCollection).
-4.  Write a script that copies data from Source to Dest using ONLY the interface.
-
----
-
-### 7. Common Mistakes & Anti-Patterns
-
-| Mistake | Consequence |
-| :--- | :--- |
-| **Logic in Adapter** | Putting complex business logic (e.g., tax calculation) in the adapter. An adapter should ONLY translate. Logic belongs in a Decorator or Service. |
-| **Over-Adapting** | Creating adapters for stable interfaces that verify rarely change. Adds complexity for no reason ("Speculative Generality"). |
-| **Revealing Implementation** | Throwing `MySQLException` from a generic `DatabaseAdapter`. The client shouldn't know it's MySQL! Wrap in `DatabaseException`. |
-| **Two-Way Coupling** | The Adaptee should NEVER know about the Adapter. It should be oblivious. |
-
----
-
-### 8. Interview Bank: Follow-Up Questions
-
-1.  **Q**: "Difference between Adapter and Decorator?"
-    **A**: **Adapter** changes the interface (Square -> Round). **Decorator** enhances the behavior (Square -> Red Square) without changing the interface.
-2.  **Q**: "Difference between Adapter and Proxy?"
-    **A**: **Proxy** provides the SAME interface (usually for access control or lazy loading). **Adapter** provides a DIFFERENT interface.
-3.  **Q**: "Difference between Adapter and Facade?"
-    **A**: **Adapter** wraps ONE class to fix incompatibility. **Facade** wraps MANY classes to simplify a complex subsystem.
-4.  **Q**: "Can you use Reflection to make a Universal Adapter?"
-    **A**: Yes, `java.lang.reflect.Proxy` can dynamically implement an interface and route calls to a handler, but it's slow and fragile (no compile-time safety).
-
----
-
-### 9. Cheatsheet & Summary
+### **10. Cheatsheet & Summary**
 
 | Pattern | Purpose | Interface Change? |
 | :--- | :--- | :--- |
@@ -35171,497 +35250,12 @@ This pattern solves the "Impedance Mismatch" between two systems. It's not just 
 
 ---
 
-### 10. References
+### **11. References**
 1.  *Design Patterns (GoF)* - The Structural Patterns chapter.
 2.  *Refactoring to Patterns* - Josh Kerievsky. (Move logic out of adapters).
 3.  *Head First Design Patterns* - Chapter 7: Adapters and Facades.
 
 ---
-// Feature: Authentication
-class AuthMiddleware extends BaseMiddleware {
-    public AuthMiddleware(RequestHandler next) { super(next); }
-
-    @Override
-    public String handle(String request) {
-        if (!request.contains("AuthToken=123")) {
-            return "HTTP 401 Unauthorized"; // Blocking logic (Short-circuit)
-        }
-        System.out.println("[AUDIT] User Authorized");
-        return super.handle(request); // Delegate to next
-    }
-}
-
-// Feature: Logging
-class LoggingMiddleware extends BaseMiddleware {
-    private static final Logger LOGGER = Logger.getLogger("Server");
-
-    public LoggingMiddleware(RequestHandler next) { super(next); }
-
-    @Override
-    public String handle(String request) {
-        long start = System.nanoTime();
-        System.out.println("[LOG] Request started: " + request);
-        
-        String response = super.handle(request); // Delegate
-        
-        long duration = (System.nanoTime() - start) / 1000;
-        System.out.println("[LOG] Request finished in " + duration + "us");
-        return response;
-    }
-}
-
-// Feature: Response Compression (GZIP)
-class GzipMiddleware extends BaseMiddleware {
-    public GzipMiddleware(RequestHandler next) { super(next); }
-
-    @Override
-    public String handle(String request) {
-        String originalResponse = super.handle(request); // Delegate
-        return compress(originalResponse); // Post-processing behavior
-    }
-
-    private String compress(String input) {
-        return "{GZIP " + input + "}";
-    }
-}
-
-// --- Usage ---
-public class DecoratorDemo {
-    public static void main(String[] args) {
-        // Chain Construction:
-        // Request -> Gzip -> Log -> Auth -> Controller
-        // Wait! Wrappers are executed Outside-In.
-        
-        // Correct Order: 
-        // 1. Client calls Gzip.handle()
-        // 2. Gzip calls Log.handle()
-        // 3. Log calls Auth.handle()
-        // 4. Auth calls Basic.handle()
-        
-        RequestHandler server = new GzipMiddleware(
-                                    new LoggingMiddleware(
-                                        new AuthMiddleware(
-                                            new BasicController()
-                                        )
-                                    )
-                                );
-        
-        System.out.println("--- Test 1: Valid Request ---");
-        String response = server.handle("GET /home?AuthToken=123");
-        System.out.println("Client received: " + response);
-        
-        System.out.println("\n--- Test 2: Invalid Request ---");
-        // AuthMiddleware will short-circuit; Controller never runs.
-        String error = server.handle("GET /admin"); 
-        System.out.println("Client received: " + error);
-    }
-}
-
-#### Python: Function Decorators (Syntactic Sugar)
-Python has built-in support, but it's important to distinguish **Design Pattern** (Object wrapping) from **Language Feature** (Function wrapping).
-
-```python
-# The "Pattern" using a Class
-class TextTag:
-    def __init__(self, text): self._text = text
-    def render(self): return self._text
-
-class BoldWrapper:
-    def __init__(self1, wrapped): self._wrapped = wrapped
-    def render(self): return f"<b>{self._wrapped.render()}</b>"
-
-# The "Syntax" (@decorator)
-def audit_log(func):
-    def wrapper(*args, **kwargs):
-        print(f"Calling {func.__name__}...")
-        return func(*args, **kwargs)
-    return wrapper
-
-@audit_log
-def save_user(id):
-    print(f"User {id} saved.")
-```
-
-#### React (JS): High Order Components (HOC)
-In React, a HOC is a function that takes a component and returns a new component (Decorator).
-```javascript
-const withRouter = (WrappedComponent) => {
-    return (props) => {
-        // Inject extra prop 'router'
-        return <WrappedComponent {...props} router={new Router()} />;
-    };
-};
-
-const UserPage = (props) => <div>User: {props.router.id}</div>;
-export default withRouter(UserPage);
-```
-
-#### Go: Middleware Pattern
-Go uses functions wrapping functions.
-```go
-type Handler func(string) string
-
-func LoggingMiddleware(next Handler) Handler {
-    return func(req string) string {
-        fmt.Println("Log start")
-        res := next(req)
-        fmt.Println("Log end")
-        return res
-    }
-}
-```
-
----
-
-### 5. Deep Theory: Implementation Details & Sorting
-
-**The Order Matters**:
-In our Java example, `Gzip(Auth(Basic))` behaves differently from `Auth(Gzip(Basic))`.
--   **Case A**: `Gzip` wraps `Auth`. If Auth fails, it returns "401". Gzip compresses "401" -> "{GZIP 401}". Client gets compressed error.
--   **Case B**: `Auth` wraps `Gzip`. If Auth fails, it returns "401" immediately. Gzip never runs. Client gets raw error.
--   **Security Rule**: Auth should usually be the *outermost* layer (first to execute) to protect inner resources from processing overhead (Denial of Service).
-
-**Decorator vs Adapter vs Proxy**:
--   **Adapter**: Changes interface.
--   **Proxy**: Same interface. Controls access (lazy loading, permissions). Does NOT typically add "functional" behavior like compression/logging visibly.
--   **Decorator**: Same interface. Adds *additive* behavior (stackable).
-
----
-
-### 6. Practice & Assessment
-
-#### Core Exercises
-1.  **Basic**: Implement a `Shape` interface and concrete `Circle`. Add `RedBorderDecorator`.
-2.  **Intermediate**: Create an `InputStream` decorator called `CaesarCipherInputStream` that rotates every byte read by N positions.
-3.  **Advanced**: System Design Challenge. Design a "Pizza Ordering System" using Decorators where users can add unlimited toppings (`Cheese`, `Pepperoni`, `Olives`), calculating the total cost dynamically.
-
-#### Edge Case Drills
-1.  **Identity Crisis**: Write a test that checks `decorator instanceof ConcreteComponent`. It will fail. Explain why this breaks code relying on specific types (e.g., casting `InputStream` to `FileInputStream`).
-2.  **Double Wrapping**: What happens if you wrap: `new Gzip(new Gzip(new Data()))`? It gzips twice. Is this desired? How to prevent it? (Introspection).
-3.  **Lifecycle**: If `BaseComponent` has a `close()` method, ensure your decorator calls `super.close()` (delegate), otherwise you get resource leaks.
-
-#### Challenge: The Fluent Builder
-**Problem**: "Constructor Hell". `new A(new B(new C(new D())))` is ugly.
-**Task**: Create a Fluent API Builder to make it clean:
-```java
-Handler h = HandlerBuilder.start(new BasicController())
-                          .withAuth()
-                          .withLogging()
-                          .withGzip()
-                          .build();
-```
-
----
-
-### 7. Common Mistakes & Anti-Patterns
-
-| Mistake | Consequence |
-| :--- | :--- |
-| **Broken Identity** | Relying on `==` or `instanceof` checks on the wrapped object. The client sees the wrapper, not the core. |
-| **Constructor Hell** | Creating chains is syntactically painful. Use a Builder or Factory to hide the `new A(new B())` mess. |
-| **Order Dependency** | Creating decorators that crash if placed in the wrong order (e.g., Compression needing Encryption metadata). Decorators should ideally be independent. |
-| **Bloated Interface** | Component interface has 50 methods? The Decorator has to implement/delegate ALL 50. Decorator works best with small, focused interfaces. |
-
----
-
-### 8. Interview Bank: Follow-Up Questions
-
-1.  **Q**: "Why not just use Inheritance (Subclassing)?"
-    **A**: Inheritance is static. You can't add/remove features at runtime. Also, Inheritance leads to class explosion (Combinatorial types).
-2.  **Q**: "Does a Decorator know about the concrete component it wraps?"
-    **A**: No! It only knows about the `Component` interface. This is crucial for decoupling.
-3.  **Q**: "How does `java.io.BufferedInputStream` work?"
-    **A**: It wraps an `InputStream`. When you call `read()`, it reads a big chunk (8KB) from the underlying stream into a RAM buffer, then serves bytes from RAM, reducing execution context switches (Native Calls).
-4.  **Q**: "What is the difference between Decorator and Strategy?"
-    **A**: **Decorator** changes the "skin" (adds outside behavior). **Strategy** changes the "guts" (replaces inside algorithm). You usually have *one* strategy but *many* decorators.
-
----
-
-### 9. Cheatsheet & Summary
-
-| Pattern | Key characteristic | Metaphor |
-| :--- | :--- | :--- |
-| **Decorator** | Wrapping, Additive, Dynamic | Russian Nesting Dolls |
-| **Adapter** | Interface Conversion | Travel Plug |
-| **Inheritance**| Static, Is-A, Rigid | Family DNA |
-
-**Verdict**: Use Decorator when you need "Pyramid" behavior (layers of functionality) or when inheritance is not viable due to existing class explosions.
-
----
-
-### 10. References
-1.  *Design Patterns (GoF)* - Structural Patterns.
-2.  *Head First Design Patterns* - Chapter 3: "The Starbuzz Coffee Problem".
-3.  *Effective Java* - Item 18: Favor Composition over Inheritance.
-
----
-    zap *ZapLogger
-}
-
-func (za *ZapAdapter) Log(message string) {
-    // Adopt simple string to complex structure
-    za.zap.Info(message, map[string]interface{}{"context": "adapter"})
-}
-```
-
-#### JavaScript: Wrapping Old APIs
-Adapting Callback-based APIs to Promises (Promisify).
-
-```javascript
-// Old Callback API (Node.js style)
-const fs = require('fs');
-// fs.readFile('file.txt', (err, data) => { ... })
-
-// Adapter function (Promisify)
-function readFileAdapter(path) {
-    return new Promise((resolve, reject) => {
-        fs.readFile(path, 'utf8', (err, data) => {
-            if (err) reject(err);
-            else resolve(data);
-        });
-    });
-}
-
-// Usage (Async/Await)
-// const content = await readFileAdapter('file.txt');
-```
-
-#### C++: Class Adapter (Private Inheritance) vs Object Adapter
-C++ is unique because it supports **Multiple Inheritance** and **Private Inheritance**, allowing for the Class Adapter pattern (implementation inheritance) without exposing the Adaptee's public interface.
-
-**Scenario**: We have a strict `Shape` interface (Target) and a legacy `LegacyRect` (Adaptee) that calculates area differently.
-
-```cpp
-#include <iostream>
-#include <memory>
-
-// 1. Target Interface
-class Shape {
-public:
-    virtual void draw(int x1, int y1, int x2, int y2) const = 0;
-    virtual ~Shape() = default;
-};
-
-// 2. Adaptee (Third-Party Legacy Code)
-class LegacyRect {
-public:
-    void renderOld(int x, int y, int w, int h) const {
-        std::cout << "[LegacyRect] Draw at (" << x << "," << y 
-                  << ") size " << w << "x" << h << std::endl;
-    }
-};
-
-// 3. Class Adapter (Private Inheritance)
-// "Is-A Shape" (public), "Implemented-in-terms-of LegacyRect" (private)
-class ClassAdapter : public Shape, private LegacyRect {
-public:
-    void draw(int x1, int y1, int x2, int y2) const override {
-        std::cout << "[ClassAdapter] Transforming coordinates..." << std::endl;
-        int w = x2 - x1;
-        int h = y2 - y1;
-        // Call inherited private method
-        renderOld(x1, y1, w, h);
-    }
-};
-
-// 4. Object Adapter (Composition) - PREFERRED
-class ObjectAdapter : public Shape {
-private:
-    std::unique_ptr<LegacyRect> adaptee;
-public:
-    ObjectAdapter() : adaptee(std::make_unique<LegacyRect>()) {}
-    
-    draw(int x1, int y1, int x2, int y2) const override {
-        std::cout << "[ObjectAdapter] Transforming coordinates..." << std::endl;
-        int w = x2 - x1;
-        int h = y2 - y1;
-        adaptee->renderOld(x1, y1, w, h);
-    }
-};
-```
-
-#### Go: Implicit Interface Satisfaction & Function Adapters
-Go's interfaces are satisfied structurally. We can also use **Function Adapters** (like `http.HandlerFunc`).
-
-```go
-package main
-
-import "fmt"
-
-// 1. Target Interface
-type PaymentProcessor interface {
-    Pay(amount float64)
-}
-
-// 2. Adaptee (3rd Party Struct)
-type AliPay struct{}
-
-func (a *AliPay) MakePayment(yuan int) {
-    fmt.Printf("AliPay: Paying %d Yuan\n", yuan)
-}
-
-// 3. Struct Adapter
-type AliPayAdapter struct {
-    aliPay *AliPay
-}
-
-func (a *AliPayAdapter) Pay(dollars float64) {
-    yuan := int(dollars * 7.2) // Exchange rate conversion
-    a.aliPay.MakePayment(yuan)
-}
-
-// 4. Function Adapter (The "Go Way")
-// If the interface has only one method, we can adapt a function directly.
-type PaymentFunc func(float64)
-
-func (f PaymentFunc) Pay(amount float64) {
-    f(amount)
-}
-
-func main() {
-    ali := &AliPay{}
-    
-    // Usage 1: Struct Adapter
-    var p1 PaymentProcessor = &AliPayAdapter{aliPay: ali}
-    p1.Pay(100.0)
-    
-    // Usage 2: Function Adapter
-    // Adapting a closure to the Interface
-    var p2 PaymentProcessor = PaymentFunc(func(amount float64) {
-        ali.MakePayment(int(amount * 7.2))
-    })
-    p2.Pay(50.0)
-}
-```
-
----
-
-### 5. Practice & Assessment
-
-#### Core Exercises
-1.  **Basic**: Implement `IteratorToEnumerationAdapter`.
-    -   Target: `java.util.Enumeration` (methods: `hasMoreElements`, `nextElement`).
-    -   Adaptee: `java.util.Iterator` (methods: `hasNext`, `next`).
-    -   *Goal*: Allow legacy code expecting an Enumeration to iterate over a generic List.
-2.  **Intermediate**: Create a **Two-Way Adapter**.
-    -   Scenario: You have `SquarePeg` and `RoundPeg` interfaces.
-    -   Task: Create a class `PegAdapter` that implements *both* interfaces, allowing squares to fit in round holes (using diagonal distance) and circles in square holes (using diameter).
-3.  **Advanced**: Implement a **Lazy-Loading Database Adapter**.
-    -   Target: `Repository.findAll()`.
-    -   Adaptee: A raw JDBC `ResultSet` that is forward-only.
-    -   The adapter must iterate the `ResultSet` on-demand as the caller iterates the `List`, rather than loading all rows into RAM immediately. (Hint: Use a custom `Iterator` implementation inside the List).
-
-#### Edge Case Drills
-1.  **Null Adaptee**:
-    -   *Task*: Verify what happens if the `StripeApi` passed to `StripeAdapter` is null.
-    -   *Fix*: Add `Objects.requireNonNull(stripeApi)` in the constructor. Fail fast.
-2.  **Partial Operation Support**:
-    -   *Task*: The `PaymentProcessor` interface has `refund()`, but `PayPalApi` (Adaptee) does *not* support refunds.
-    -   *Fix*: Throw `UnsupportedOperationException("Refunds not supported by PayPal")` in the adapter. Document this strictly.
-3.  **Exception Wrapping**:
-    -   *Task*: `StripeApi` throws `StripeNetworkException` (Checked). Your `PaymentProcessor` interface definition does not declare it.
-    -   *Fix*: Catch the exception in the Adapter, wrap it in a `PaymentFailedRuntimeException`, and rethrow. Never swallow exceptions!
-
-#### Challenge: The Microservice Anti-Corruption Layer (ACL)
-**Scenario**: You are building a modern "Order Management Service" (OMS). You need to fetch customer data from a monolithic "Legacy CRM" system (SOAP/XML). The Legacy CRM has confusing field names (`CUST_NM`, `ADDR_01`) and mixed concerns.
-**Goal**: Design a comprehensive Adapter Layer that sanitizes this data.
-**Requirements**:
-1.  **Target Domain Model**: Clean Record `Customer(id, fullName, address)`.
-2.  **Adaptee**: `LegacySoapClient.getCustomerXml(id)`.
-3.  **Logic**:
-    -   Convert XML to POJO.
-    -   Merge `ADDR_01`, `ADDR_02`, `CITY` into `Address` value object.
-    -   Cache the result to prevent hammering the legacy DB.
-    -   Implement a "Circuit Breaker" in the adapter: if the Legacy CRM fails 5 times, return fallback data or an empty optional.
-
----
-
-### 6. Common Mistakes & Anti-Patterns
-
-| Mistake | Consequence |
-| :--- | :--- |
-| **Polluting Domain Logic** | Using `instanceof` checks (`if (service instanceof Stripe)`) in business logic defeats the purpose of the abstraction. Logic should only know about the Interface. |
-| **Logic Leaks** | Placing core business rules (e.g., "Apply 10% tax") inside the Adapter. The Adapter should ONLY translate data formats (dollars to cents). Business rules belong in Domain Services. |
-| **Over-Adapting** | Creating adapters for stable standard libraries (e.g., `String` or `List`). Only adapt what is *volatile* or *incompatible*. |
-| **Inheritance Abuse** | Using Class Adapters (Extends) when Object Adapter (Has-A) is sufficient. Inheritance locks you into the Adaptee's class hierarchy forever. |
-| **Ignoring Lifecycle** | If the Adaptee requires `start()` or `close()`, the Adapter must expose methods to handle these lifecycles, or manage them internally. |
-
----
-
-### 7. Deep Dive: System Design & The Anti-Corruption Layer (ACL)
-
-**The ACL Pattern (Domain-Driven Design)**:
-In large-scale distributed systems, the Adapter pattern evolves into the **Anti-Corruption Layer**.
-When a downstream service (Modern) needs information from an upstream service (Legacy/Messy), we refuse to let the Legacy concepts "leak" into our clean domain.
-
-**Architecture**:
-```
-[ Modern Domain Core ]  <-- (Interface) method: getCustomer(id)
-        ^
-        |
-[ Anti-Corruption Layer (Adapter) ]
-   1. Translator: Maps XML -> Domain Object
-   2. Facade: Simplifies complex legacy API calls
-   3. Adapter: Implements the Modern Interface
-        |
-        v
-[ Legacy System (XML/SOAP) ]
-```
-
-**Benefits**:
-1.  **Isolation**: If the Legacy system changes its XML schema, only the ACL changes. Your core domain logic remains untouched.
-2.  **Sanitization**: Invalid state from the legacy system (e.g., `age = -5`) is caught and rejected in the ACL.
-3.  **Migration Strategy**: You can replace the Legacy System with a New Microservice later. You only write a new Adapter for the ACL; the core domain never knows the backend changed.
-
-**Performance Cost**:
-Adapters add a layer of indirection. In high-frequency trading or real-time graphics (Game engines), virtual method calls and object pointer chasing through adapters can cause cache misses. In those cases, header-only templated solutions (C++) are preferred to compile away the abstraction overhead.
-
----
-
-### 8. Interview Bank: Follow-Up Questions
-
-1.  **Q**: "How do you handle an Adaptee that throws Checked Exceptions when the Target Interface expects none?"
-    **A**: Wrap the Checked Exception in a Runtime Exception or a Domain-Specific Exception.
-    ```java
-    try {
-        legacy.call();
-    } catch (IOException e) {
-        throw new PaymentException("Detailed error", e);
-    }
-    ```
-2.  **Q**: "What is the difference between Adapter and Facade?"
-    **A**: **Intent**. Adapter wraps *one* object to change its interface to match another. Facade wraps *many* complex objects to provide a *simpler* interface (but doesn't necessarily enforce polymorphism/compatibility).
-3.  **Q**: "Can you use Reflection to build a generic Adapter?"
-    **A**: Yes (e.g., Java's `DynamicProxy`). You can create a proxy that intercepts calls to `interface.method(args)` and creatively maps them to `legacyObject.call(args)`. This is how Retrofit/Spring Data implementation works.
-4.  **Q**: "Is the Adapter Pattern the same as the Decorator Pattern?"
-    **A**: No. Decorator *adds behavior* but keeps the interface the same. Adapter *changes the interface* but tries to keep the behavior (goal) the same.
-5.  **Q**: "Give a real-world example of an Adapter in the Java Standard Library."
-    **A**: `InputStreamReader` adapts an `InputStream` (byte-oriented) to a `Reader` (character-oriented). `Arrays.asList()` adapts an Array to the `List` interface.
-
----
-
-### 9. Cheatsheet & Summary
-
-| Pattern | Role | Implementation | Key Benefit |
-| :--- | :--- | :--- | :--- |
-| **Object Adapter** | Wrapper | `class A implements I { B b; }` | **Composition**. Flexible. Can adapt subclasses of B. |
-| **Class Adapter** | Wrapper | `class A extends B implements I` | **Inheritance**. Less flexible. Can override B's protected methods. |
-| **Two-Way Adapter**| Chameleon | Implements `TargetA` AND `TargetB` | Allows object to be used in two different systems simultaneously. |
-
-**Decision Matrix**:
-- Need to change interface? -> **Adapter**.
-- Need to add features? -> **Decorator**.
-- Need to simplify complex system? -> **Facade**.
-- Need to control access? -> **Proxy**.
-
----
-
-### 10. References
-1.  *Domain-Driven Design* - Eric Evans. (Chapter on Anti-Corruption Layer).
-2.  *Working Effectively with Legacy Code* - Michael Feathers. (Using Adapters to break dependencies for testing).
-3.  *Design Patterns* - GoF. (Structural Patterns).
-
-
 #### Q54: How does the Decorator Pattern enable dynamic functionality extension?
 **Companies**: Microsoft, Meta, Starbucks, Amazon, Adobe
 **Difficulty**: **Medium** (Core Structural Pattern)
