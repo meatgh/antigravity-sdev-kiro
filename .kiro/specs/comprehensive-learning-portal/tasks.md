@@ -1038,10 +1038,12 @@ This applies to:
 
 
     - [x] **Q56: Command Pattern**: Transactional Undo/Redo system.
-    - [ ] **Q57: State Pattern**: Order Fulfillment Lifecycle state machine.
+    - [x] **Q57: State Pattern**: Order Fulfillment Lifecycle state machine.
 
-    - [ ] **Q58: Thread-Safe Observer**: Async Event Bus implementation.
+
+    - [x] **Q58: Thread-Safe Observer**: Async Event Bus implementation.
     - [ ] **Q59: Proxy Pattern**: Rate Limiting Proxy example.
+
     - [ ] **Q60: Facade Pattern**: Microservices Aggregator Facade.
     - _Requirements: 1.20.16_
 
