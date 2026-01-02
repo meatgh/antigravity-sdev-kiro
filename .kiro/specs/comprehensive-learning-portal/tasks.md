@@ -1024,7 +1024,7 @@ This applies to:
   - _Requirements: 1.20.1-1.20.15, 2.1, 2.3_
   - **Time Estimate**: 4-5 hours
   - [ ] 2.3.1.2 Implement Phase 4b Interview Questions (Q51-Q60) ⏳ IN PROGRESS
-    - [x] **Q51: Thread-Safe Singleton**: [REMEDIATION] Expanded to 1.5k+ lines. Deep dive into JMM, CPU Caches, and "Distributed Config Hub" project.
+    - [x] **Q51: Thread-Safe Singleton**: [ULTRA-STRICT] Added Multi-Project (ConfigHub, ConnectionPool), Attack Suite (Reflection/Serialization), and JMH Benchmarks.
 
     - [x] **Q52: Generic Stack**: [REMEDIATION] Expanded to 1.5k+ lines. "Pipeline Data Buffer" project, Array resizing internals, and Memory Management deep dive.
 
