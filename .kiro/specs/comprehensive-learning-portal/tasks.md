@@ -1029,8 +1029,9 @@ This applies to:
       - [x] Layer 4: Multi-language (Java/Python/JS/C++/Go)
       - [x] Layer 5-10: Practice, Interview Bank, Enterprise Example (`ConfigurationManager`)
 
-    - [ ] **Q52: Generic Stack**: Implementation with Iterators and Stream support.
+    - [x] **Q52: Generic Stack**: Implementation with Iterators and Stream support.
     - [ ] **Q53: Adapter Pattern**: Payment Gateway integration example.
+
     - [ ] **Q54: Decorator Pattern**: I/O Stream processing example.
     - [ ] **Q55: Circular Dependencies**: Architectural resolution strategies.
     - [ ] **Q56: Command Pattern**: Transactional Undo/Redo system.
