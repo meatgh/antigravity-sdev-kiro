@@ -1030,10 +1030,12 @@ This applies to:
       - [x] Layer 5-10: Practice, Interview Bank, Enterprise Example (`ConfigurationManager`)
 
     - [x] **Q52: Generic Stack**: Implementation with Iterators and Stream support.
-    - [ ] **Q53: Adapter Pattern**: Payment Gateway integration example.
+    - [x] **Q53: Adapter Pattern**: Payment Gateway integration example.
 
-    - [ ] **Q54: Decorator Pattern**: I/O Stream processing example.
+
+    - [x] **Q54: Decorator Pattern**: I/O Stream processing example.
     - [ ] **Q55: Circular Dependencies**: Architectural resolution strategies.
+
     - [ ] **Q56: Command Pattern**: Transactional Undo/Redo system.
     - [ ] **Q57: State Pattern**: Order Fulfillment Lifecycle state machine.
     - [ ] **Q58: Thread-Safe Observer**: Async Event Bus implementation.

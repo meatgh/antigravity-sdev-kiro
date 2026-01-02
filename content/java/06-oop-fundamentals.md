@@ -34801,9 +34801,362 @@ In Microservices, the **Anti-Corruption Layer (ACL)** pattern is essentially the
 ---
 
 
-**Q54: What is the decorator pattern?**  
-**Companies**: Microsoft, Meta  
-**Answer**: Adds new functionality to objects dynamically without altering their structure. Example: Java I/O streams (BufferedReader wrapping FileReader).
+#### Q54: How does the Decorator Pattern enable dynamic functionality extension?
+**Companies**: Microsoft, Meta, Starbucks, Amazon
+**Difficulty**: Medium
+**Category**: Structural Design Patterns
+
+---
+
+### 1. Conceptual Overview & Motivation
+
+**The "Why"**:
+Imagine you are building a **Coffee Shop** ordering system.
+You have a base `Coffee`.
+Customers want add-ons: `Milk`, `Sugar`, `Whip`, `Caramel`.
+If you use **Inheritance**, you end up with a class explosion:
+- `CoffeeWithMilk`
+- `CoffeeWithMilkAndSugar`
+- `CoffeeWithMilkAndWhip`
+- `CoffeeWithSugarAndCaramel`
+- ... (Factorial complexity!)
+
+**The Solution**:
+The **Decorator Pattern** allows you to "wrap" the main object with layers of behavior at runtime.
+`Coffee c = new Whip(new Milk(new Coffee()));`
+It solves the "Class Explosion" problem by favoring Composition over Inheritance.
+
+**Real-World Analogies**:
+1.  **Matryoshka Dolls (Russian Dolls)**: You place a small doll inside a bigger doll. The outer doll "decorates" the inner one.
+2.  **Clothing**: You act as the base object. You put on a shirt (decorator). Then a jacket (decorator). Then a scarf. You are still "You", but with added layers of warmth/style.
+3.  **Pizza**: Base functionality is "Dough + Sauce". Toppings are decorators.
+
+---
+
+### 2. Comprehensive Definition
+
+**Formal Definition**:
+> The Decorator Pattern attaches additional responsibilities to an object dynamically. Decorators provide a flexible alternative to subclassing for extending functionality.
+
+**Structure**:
+1.  **Component (Interface)**: The common interface (e.g., `Coffee`).
+2.  **ConcreteComponent**: The base object (e.g., `Espresso`).
+3.  **Decorator (Abstract)**: Implements `Component` AND holds a `Component`.
+4.  **ConcreteDecorator**: Adds specific behavior (e.g., `Milk`).
+
+---
+
+### 3. Progressive Solution Evolution
+
+#### Approach 1: Inheritance (The Explosion Anti-Pattern)
+Defining subclasses for every combination.
+```java
+class CoffeeWithMilkAndSugar extends Coffee { ... }
+```
+**Critique**: Rigid. Static. Cannot add new toppings without recompiling.
+
+#### Approach 2: "God Class" with Flags
+```java
+class Coffee {
+    boolean hasMilk;
+    boolean hasSugar;
+    double cost() {
+        double total = 2.0;
+        if (hasMilk) total += 0.5;
+        if (hasSugar) total += 0.2;
+        return total;
+    }
+}
+```
+**Critique**: Violates Single Responsibility. What if we want "Double Milk"? Flags don't handle quantity well. Adding "Soy Milk" requires modifying the base class.
+
+#### Approach 3: Decorator Pattern (The Composition Solution)
+Wraps objects.
+```java
+// 1. Interface
+interface Coffee { double getCost(); String getDescription(); }
+
+// 2. Base
+class SimpleCoffee implements Coffee {
+    public double getCost() { return 2.0; }
+    public String getDescription() { return "Coffee"; }
+}
+
+// 3. Abstract Decorator
+abstract class CoffeeDecorator implements Coffee {
+    protected Coffee decoratedCoffee;
+    public CoffeeDecorator(Coffee c) { this.decoratedCoffee = c; }
+    public double getCost() { return decoratedCoffee.getCost(); }
+    public String getDescription() { return decoratedCoffee.getDescription(); }
+}
+
+// 4. Concrete Decorator
+class Milk extends CoffeeDecorator {
+    public Milk(Coffee c) { super(c); }
+    public double getCost() { return super.getCost() + 0.5; }
+    public String getDescription() { return super.getDescription() + ", Milk"; }
+}
+```
+
+---
+
+### 4. Multi-Language Implementations
+
+#### Java: Enterprise I/O Streams
+Java's I/O library IS the Decorator pattern.
+`new BufferedReader(new InputStreamReader(new FileInputStream("file.txt")))`
+
+**Custom Enterprise Example**:
+A `DataSource` that reads/writes data. We want to optionally add **Encryption** and **Compression**.
+
+```java
+// 1. Component
+interface DataSource {
+    void writeData(String data);
+    String readData();
+}
+
+// 2. Concrete Component (Disk File)
+class FileDataSource implements DataSource {
+    private String filename;
+    public FileDataSource(String filename) { this.filename = filename; }
+
+    public void writeData(String data) {
+        System.out.println("Writing to file: " + data);
+    }
+    public String readData() {
+        return "raw_data";
+    }
+}
+
+// 3. Base Decorator
+class DataSourceDecorator implements DataSource {
+    private DataSource wrappee;
+    public DataSourceDecorator(DataSource source) { this.wrappee = source; }
+    public void writeData(String data) { wrappee.writeData(data); }
+    public String readData() { return wrappee.readData(); }
+}
+
+// 4. Encryption Decorator
+class EncryptionDecorator extends DataSourceDecorator {
+    public EncryptionDecorator(DataSource source) { super(source); }
+
+    @Override
+    public void writeData(String data) {
+        String encrypted = "ENCRYPTED(" + data + ")";
+        super.writeData(encrypted);
+    }
+    
+    @Override
+    public String readData() {
+        String data = super.readData();
+        return data.replace("ENCRYPTED(", "").replace(")", ""); // Decrypt
+    }
+}
+
+// 5. Compression Decorator
+class CompressionDecorator extends DataSourceDecorator {
+    public CompressionDecorator(DataSource source) { super(source); }
+
+    @Override
+    public void writeData(String data) {
+        super.writeData("COMPRESSED(" + data + ")");
+    }
+    
+    @Override
+    public String readData() {
+        String data = super.readData();
+        return data.replace("COMPRESSED(", "").replace(")", "");
+    }
+}
+
+// Usage
+// DataSource source = new CompressionDecorator(
+//                          new EncryptionDecorator(
+//                              new FileDataSource("out.dat")));
+// source.writeData("Sensitive Info"); 
+// // Writes: PROF-COMPRESSED(ENCRYPTED(Sensitive Info))
+```
+
+#### Python: Function Decorators vs Pattern
+Python has built-in `@decorators` for functions, but the OOP pattern is also useful.
+
+```python
+# The OOP Pattern (for Classes)
+class TextRenderer:
+    def render(self): return "Hello World"
+
+class HtmlDecorator:
+    def __init__(self, renderer):
+        self._renderer = renderer
+    
+    def render(self):
+        return f"<b>{self._renderer.render()}</b>"
+
+class ItalicDecorator:
+    def __init__(self, renderer):
+        self._renderer = renderer
+    
+    def render(self):
+        return f"<i>{self._renderer.render()}</i>"
+
+# Usage
+text = ItalicDecorator(HtmlDecorator(TextRenderer()))
+print(text.render()) # <i><b>Hello World</b></i>
+```
+
+#### JavaScript: Wrapping
+```javascript
+class User {
+    getPermissions() { return ['read']; }
+}
+
+class AdminDecorator {
+    constructor(user) { this.user = user; }
+    getPermissions() {
+        const perms = this.user.getPermissions();
+        perms.push('write', 'delete');
+        return perms;
+    }
+}
+
+// Usage
+let user = new User();
+user = new AdminDecorator(user);
+console.log(user.getPermissions()); // ['read', 'write', 'delete']
+```
+
+#### C++: Constructor Wrapping
+```cpp
+class Widget {
+public:
+    virtual void draw() = 0;
+};
+
+class TextField : public Widget {
+public:
+    void draw() override { /* draw text field */ }
+};
+
+class Decorator : public Widget {
+protected:
+    Widget* widget;
+public:
+    Decorator(Widget* w) : widget(w) {}
+    void draw() override { widget->draw(); }
+};
+
+class BorderDecorator : public Decorator {
+public:
+    BorderDecorator(Widget* w) : Decorator(w) {}
+    void draw() override {
+        Decorator::draw();
+        // draw border
+    }
+};
+```
+
+#### Go: Interface Composition
+```go
+package decorator
+
+type Notifier interface {
+    Send(msg string)
+}
+
+type EmailNotifier struct{}
+func (e *EmailNotifier) Send(msg string) {
+    // Send email
+}
+
+type SMSDecorator struct {
+    wraps Notifier
+}
+
+func (s *SMSDecorator) Send(msg string) {
+    s.wraps.Send(msg)
+    // Send SMS
+}
+```
+
+### 5. Practice & Assessment
+
+#### Core Exercises
+1.  **Basic**: Implement a `Shape` interface with `draw()`. Create `Circle` and `Rectangle`. Add a `RedBorderDecorator` that prints "Border: Red" after drawing the shape.
+2.  **Intermediate**: Create a `TextEditor` that writes strings. Use decorators to add functionality: `UpperCaseDecorator`, `TrimDecorator`, `Base64Decorator`. Stack them in different orders (e.g., Trim -> Uppercase -> Base64) and observe the output differences.
+3.  **Advanced**: Implement a `CachingDataSource` decorator that caches read results in a `HashMap`. If data exists in cache for a given key, return it; otherwise delegate to the wrapped source and cache the new result.
+
+#### Edge Case Drills
+1.  **Order Sensitivity**: Prove that `new EncryptionDecorator(new CompressionDecorator(ds))` produces different binary output than `new CompressionDecorator(new EncryptionDecorator(ds))`. (Compressing encrypted random data is highly inefficient!).
+2.  **Identity Crisis**: Create a test case checking `decorator instanceof ConcreteComponent`. It returns false (usually). Discuss why this breaks code relying on specific type checks.
+3.  **Multiple Wrapping**: What happens if you wrap the same object twice with the same decorator? `new Milk(new Milk(coffee))`. Ensure your logic handles this (e.g., cost adds up correctly, $2 + $0.5 + $0.5 = $3).
+
+#### Challenge: The RBAC System
+**Scenario**: You have a `User` object.
+**Task**: Use decorators to dynamically add permissions.
+- `BaseUser`: ["READ"]
+- `AdminDecorator`: Adds ["WRITE", "DELETE"]
+- `SuperUserDecorator`: Adds ["ROOT_ACCESS"]
+- Implementation must allow `new SuperUserDecorator(new AdminDecorator(user))` to accumulate all permissions (Union of sets).
+
+---
+
+### 6. Common Mistakes & Anti-Patterns
+
+| Mistake | Consequence |
+| :--- | :--- |
+| **Identity Dependency** | Relying on `==` or `instanceof` checks on the wrapped object. The decorator is a *different* object instance, breaking identity equality. |
+| **Order Dependency** | If decorators depend on a specific execution order (e.g., Decrypt before Decompress), the client must know this internal coupling, which increases fragility. |
+| **Complex Initialization** | Creating a 10-layer deep decorator `new A(new B(new C(new D(...))))` is ugly/unreadable. Use a **Builder** or **Factory** to construct complex chains. |
+| **Broken Methods** | Forgetting to delegate a method in the abstract decorator means the chain breaks for that specific operation (the call stops there). |
+
+---
+
+### 7. Deep Dive: JDK Examples & System Design
+
+**JDK Real-World Examples**:
+1.  `java.util.Collections.synchronizedList(List<T>)`: Returns a Decorator that wraps the original list and adds `synchronized` keyword (locking) to every method call.
+2.  `java.util.Collections.unmodifiableList(List<T>)`: Returns a Decorator that throws `UnsupportedOperationException` on all mutator methods (`add`, `remove`), effectively making the list read-only view.
+3.  `javax.servlet.http.HttpServletRequestWrapper`: Allows Filter classes to wrap the incoming HTTP request and modify headers/parameters transparently before they reach the servlet.
+
+**System Design Implication**:
+**Middleware Chains** in Web Frameworks (Express.js, Django, Spring Security Filters) are effectively implementations of the Decorator or Chain of Responsibility pattern. Each middleware wraps the next one, performing actions before and after the downstream processing.
+
+---
+
+### 8. Interview Bank: Follow-Up Questions
+
+1.  **Q**: "Difference between Decorator and Proxy?"
+    **A**: **Decorator** adds behavior (smart/enhancement). **Proxy** controls access (protective/lazy/remote). Decorators are typically chained (many layers); Proxies are usually 1:1.
+2.  **Q**: "Difference between Decorator and Builder?"
+    **A**: **Builder** is a *creational* pattern (compiles an object step-by-step). **Decorator** is a *structural* pattern (wraps an already created object to change behavior).
+3.  **Q**: "Difference between Decorator and Chain of Responsibility?"
+    **A**: **Decorator** ensures *all* wrappers execute (additive behavior). **Chain of Responsibility** passes the request until *one* handler processes it (alternative/handling behavior).
+4.  **Q**: "Why is Java I/O so complex with so many classes?"
+    **A**: It prioritizes flexibility via the Decorator pattern. Instead of a monolithic `GzipEncryptedBufferedFileInputStream`, you compose small, focused classes `GzipInputStream`, `BufferedInputStream`, etc., allowing any combination.
+
+---
+
+### 9. Cheatsheet & Summary
+
+| Pattern | Inheritance | Composition | Dynamic? | Complexity |
+| :--- | :--- | :--- | :--- | :--- |
+| **Inheritance** | **YES** | NO | ❌ Static | Explodes (N!) |
+| **Decorator** | NO | **YES** | ✅ Runtime | Linear (N) |
+
+**When to use**:
+- When you need to add responsibilities to individual objects, not classes.
+- When extension by subclassing is impractical (too many combinations).
+
+---
+
+### 10. References
+1.  *Design Patterns (GoF)* - Structural Patterns.
+2.  *Head First Design Patterns* - "The Starbuzz Coffee Example".
+3.  *Thinking in Java* - Bruce Eckel (I/O System analysis).
+
+---
+
 
 **Q55: How do you handle circular dependencies in OOP?**  
 **Companies**: Google, Amazon  
