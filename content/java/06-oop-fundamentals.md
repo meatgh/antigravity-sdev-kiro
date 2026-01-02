@@ -33772,355 +33772,311 @@ public class StrategyPatternDemo {
 
 #### Q51: How do you design a thread-safe Singleton pattern efficiently?
 **Companies**: Google, Meta, Amazon, Apple, Netflix, Uber, LinkedIn, Stripe
-**Difficulty**: **Hard** (Deep System Design Level)
-**Category**: Design Patterns, Concurrency, & JVM Internals
+**Difficulty**: **Hard** (Principal Engineer Level)
+**Category**: Design Patterns, JVM Internals, Concurrency & Hardware Architecture
 
 ---
 
 ### 1. Conceptual Overview & Motivation
 
-**The "Why": The Danger of Global State vs. The Necessity of Coordination**
-In modern distributed systems, "Global State" is generally considered harmful because it hides dependencies and complicates testing. However, **Coordination** is essential.
-Imagine a high-frequency trading platform or a massive multiplayer game server. You have thousands of threads processing events.
--   **Hardware Access**: You have exactly one GPU or one Network Interface Card (NIC). You need *one* driver object to serialize commands to it. Two drivers writing to the same memory address simultaneously causes a kernel panic.
--   **Configuration Management**: Your app has a `secrets.json` file. If 500 threads each parse this file into 500 different objects, you waste massive memory and CPU. Worse, if the file changes, Thread A might see "Version 1" while Thread B sees "Version 2", leading to "Split-Brain" logic errors that are impossible to debug.
--   **Logging**: A `LogManager` must serialize writes to `server.log`. Concurrent writes without coordination result in garbled text (interleaved lines).
+**The "Why": The Physics of Global State**
+In software architecture, "Global State" is the enemy of testing and modularity. However, **Single Points of Truth** are physical necessities in computing. The Singleton pattern is not just a coding trick; it is a mechanism to model physical constraints.
 
-**The Core Engineering Problem: The Race for Initialization**
-The fundamental challenge of the Singleton in a multi-threaded environment is the **Initialization Race Condition**.
-In a single-threaded world, logic is linear:
+1.  **Hardware Constraints**: Your server has exactly **one** Network Interface Card (NIC) with **one** physical transmission buffer. If two objects try to write to the NIC memory address (`0xA1B2...`) simultaneously, the voltage levels on the bus collide, causing data corruption or a kernel panic. You need *one* driver instance to serialize access.
+2.  **The "Split-Brain" Problem**: Distributed Systems often face "Split-Brain" where two nodes think they are the leader. Inside a single JVM, if you have two `ConfigurationManager` instances, and one loads `v1.config` while the other loads `v2.config`, your application enters an undefined state. Thread A sees "Feature X is OFF", Thread B sees "Feature X is ON". This leads to Heisenbugs.
+3.  **Connection Pooling**: Establishing a TCP handshake with a Database takes ~50ms. To handle 10k RPS, you need a pool of open connections. If you accidentally create *two* pools, you double the database load and potential exhaust file descriptors, crashing the DB.
+
+**The Failure Mode: The Initialization Race**
+The core difficulty is atomic initialization in a multi-core environment.
 ```java
-if (instance == null) instance = new Singleton();
+if (instance == null) {
+    // 50ms gaps here due to Context Switch
+    instance = new Singleton();
+}
 ```
-In a multi-threaded world (e.g., Spring Boot handling 10,000 requests/sec), two threads can execute line 1 at the *exact same nanosecond*.
-1.  Thread A checks `instance == null`. It is TRUE.
-2.  Thread A gets suspended by the OS scheduler.
-3.  Thread B checks `instance == null`. It is ALSO TRUE (because A hasn't created it yet).
-4.  Thread B creates an instance.
-5.  Thread A resumes and *also* creates an instance.
-**Catastrophe**: You now have TWO "Singletons". If this class manages a database connection pool, you might corrupt the transaction log.
-
-**Real-World Analogies**:
-1.  **Air Traffic Control Tower**: An airport can have many planes (threads), but only **one** Control Tower (Singleton) directing them. If there were two towers giving conflicting orders, planes would crash.
-2.  **The Highlander Principle**: "There can be only one."
-3.  **The President's Nuclear Football**: There is only one authentication code. If two exist, the security protocol is compromised.
+In modern CPUs, this operation involves L1/L2 caches, Store Buffers, and Instruction Reordering. Two threads on different Cores might see `instance` as `null` simultaneously due to cache incoherence, leading to the creation of duplicate instances.
 
 ---
 
-### 2. Comprehensive Definition & Rules
+### 2. Comprehensive Definition & Strict Invariants
 
 **Formal Definition**:
-> The Singleton Pattern is a creational design pattern that guarantees a class has exactly one instance and provides a global point of access to it. This invariant must hold true across all threads, classloaders, and serialization boundaries.
+> The Singleton Pattern ensures a class has strictly one instance and provides a global, thread-safe access point to it, preserving this uniqueness across Threads, ClassLoaders, and Serialization boundaries.
 
-**The Seven Strict Rules of an Enterprise Singleton**:
-To call a Singleton "Production-Ready" in a FAANG environment, it must satisfy all 7 constraints:
-1.  **Single Instance**: No matter how many threads call `getInstance()`, they receive the same memory address.
-2.  **Lazy Loading (Optional but Preferred)**: The instance should purely be created when needed, saving startup time and RAM, especially for heavy objects (e.g., DB Connections).
-3.  **Thread Safety**: It must be safe to use from `Executors.newFixedThreadPool(100)`.
-4.  **Performance**: The safety mechanism (locks) must not become a bottleneck. Using `synchronized` on every read is unacceptable latency.
-5.  **Reflection Immunity**: A hacker cannot call `setAccessible(true)` on the private constructor to create a second instance.
-6.  **Serialization Immunity**: Deserializing a saved Singleton must return the existing instance, not a new clone.
-7.  **Cloning Immunity**: `clone()` must throw an exception or return the singleton interaction.
+**The 7 Strict Requirements for Production Code**:
+To pass a Senior SDE interview, your Singleton must handle:
+1.  **Lazy Loading**: Do not allocate 500MB of memory on startup if the feature isn't used.
+2.  **Thread Safety**: Safe for concurrent access by 1000+ threads.
+3.  **High Throughput**: No `synchronized` locks on the "read" path (after initialization).
+4.  **Serialization Safety**: `readResolve()` must prevent `ObjectInputStream` from creating new instances.
+5.  **Reflection Safety**: The private constructor must greedily throw an exception if called a second time.
+6.  **Clone Safety**: `clone()` must be disabled.
+7.  **Crash Safety**: If initialization fails, it must not leave the class in an unstable state.
 
 ---
 
-### 3. Progressive Solution Evolution
+### 3. Progressive Solution Evolution (The Historical Arc)
 
-**Understanding the Evolution**: We will move from the "Naive" approach to the "Perfect" approach, analyzing the memory model implications of each.
+We traverse 20 years of Java history to arrive at the correct solution.
 
-#### Approach 1: Eager Initialization (The "Classloader Lock")
-The simplest thread-safe approach.
+#### Approach 1: Eager Initialization (The "safe but wasteful")
 ```java
 public class EagerSingleton {
-    // JVM guarantees this static init is thread-safe!
-    private static final EagerSingleton INSTANCE = new EagerSingleton();
-    
+    // JVM guarantees static initializers are thread-safe and run once.
+    private static final EagerSingleton INSTANCE = new EagerSingleton(); 
     private EagerSingleton() {}
     public static EagerSingleton getInstance() { return INSTANCE; }
 }
 ```
-*   **Pros**: 100% Thread-safe without locks. Simple.
-*   **Cons**: **Memory Waste**. If `EagerSingleton` is heavy (100MB startup data) and your app *never uses it*, you wasted that RAM. It also slows down application startup time.
+*   **Deep Dive**: How does the JVM guarantee safety here? It uses a **Class Initialization Lock** (LC). When the ClassLoader loads `EagerSingleton`, it acquires a lock. Other threads attempting to use the class block until initialization completes.
+*   **Critique**: No Lazy Loading. If `new EagerSingleton()` connects to S3 (taking 5 seconds), your generic app startup is delayed by 5 seconds even if you never call `getInstance()`.
 
-#### Approach 2: Naive Lazy Initialization (The "Race Condition")
-*   **Verdict**: **BROKEN**. Do not usage.
+#### Approach 2: Synchronized Method (The "Throughput Killer")
 ```java
-public class LazyFail {
-    private static LazyFail instance;
-    private LazyFail() {}
-    public static LazyFail getInstance() {
-        if (instance == null) { // CRITICAL RACE CONDITION
-            instance = new LazyFail();
-        }
-        return instance;
-    }
-}
-```
-*   **Analysis**: As explained in "Motivation", two threads can pass the null check simultaneously.
-
-#### Approach 3: Coarse-Grained Synchronization (The "Performance Killer")
-*   **Verdict**: **Safe but Slow**.
-```java
-public static synchronized SafeSingleton getInstance() {
-    if (instance == null) instance = new Loading();
+public static synchronized Singleton getInstance() {
+    if (instance == null) instance = new Singleton();
     return instance;
 }
 ```
-*   **Analysis**: This works, but `synchronized` puts a lock on the method.
-    *   **The Cost**: Every time you call `getInstance()`, the thread must acquire a monitor lock.
-    *   **The Waste**: We only technically need the lock for the *first* 10ms of the app lifecycle (creation). For the next 10 years of runtime, we are just reading a variable. Locking here reduces throughput by ~100x under contention.
+*   **Critique**: This puts a `MONITOR_ENTER` and `MONITOR_EXIT` instruction on *every usage*.
+    *   **Cost**: Uncontended lock ~50ns. Contended lock ~1000ns + Context Switch.
+    *   **Impact**: If this singleton is a `Logger`, your app throughput drops by 90%.
 
-#### Approach 4: Double-Checked Locking (DCL) - The "Subtle Beast"
-*   **Verdict**: **Standard Legacy Pattern**.
-This pattern tries to fix Approach 3 by only locking if necessary.
+#### Approach 3: Double-Checked Locking (DCL) - The "Broken Pattern" (Pre-Java 5)
 ```java
-public class DCLSingleton {
-    // VOLATILE IS MANDATORY. WITHOUT IT, THIS CODE IS BROKEN.
-    private static volatile DCLSingleton instance;
-
-    private DCLSingleton() {}
-
-    public static DCLSingleton getInstance() {
-        if (instance == null) {                 // Check 1: Speed
-            synchronized (DCLSingleton.class) {  // Lock
-                if (instance == null) {         // Check 2: Safety
-                    instance = new DCLSingleton();
-                }
-            }
+if (instance == null) {
+    synchronized (Singleton.class) {
+        if (instance == null) {
+            instance = new Singleton();
         }
-        return instance;
     }
 }
 ```
-*   **Deep Dive on `volatile`**: Why is it mandatory?
-    *   `instance = new DCLSingleton()` is NOT atomic. It happens in 3 steps:
-        1.  **Allocate** memory for the object.
-        2.  **Initialize** the object (call constructor).
-        3.  **Assign** the memory address to the `instance` variable.
-    *   **Reordering Attack**: The CPU/JIT is allowed to reorder these to **1 -> 3 -> 2**.
-    *   **The Crash**: Thread A executes 1 and 3. `instance` is now NON-NULL, but points to an empty, uninitialized block of memory. Thread B checks `if (instance == null)`, sees it is NOT null, and returns the broken object. Application crashes with `NullPointerException` on fields.
-    *   **The Fix**: `volatile` imposes a **Happens-Before** relationship, preventing this reordering (JSR-133).
+*   **The Horror Story**: Without `volatile`, this is famously broken.
+    *   **Instruction Reordering**: The statement `instance = new Singleton()` is not atomic. It compiles to:
+        1.  `mem = allocate()` (Allocate memory)
+        2.  `ctor(mem)` (Run constructor - initialize fields)
+        3.  `instance = mem` (Publish reference)
+    *   **The Bug**: The Compiler/CPU is allowed to reorder this to **1 -> 3 -> 2**.
+    *   **The Crash**:
+        *   Thread A executes 1 (allocate) and 3 (publish). `instance` is now non-null but points to *blank memory*.
+        *   Thread A gets preempted before step 2 (constructor).
+        *   Thread B checks `if (instance == null)`, sees it is NOT null.
+        *   Thread B tries to use `instance.connectionString`. **CRASH**. NullPointerException or garbage data.
 
-#### Approach 5: Initialization-on-demand Holder Idiom (The "Bill Pugh")
-*   **Verdict**: **Excellent / Gold Standard**.
-Leverages the JVM's strict class loading guarantees.
+#### Approach 4: DCL with Volatile (The "Fixed" Pattern)
 ```java
-public class BillPughSingleton {
-    private BillPughSingleton() {}
+private static volatile Singleton instance;
+// ... same code ...
+```
+*   **Why it works**: In Java 5 (JSR-133), `volatile` introduces a **Memory Barrier**. It forbids reordering writes to the volatile variable with strict "Happens-Before" semantics. Step 2 (Constructor) *must* finish before Step 3 (Write to instance).
 
-    // Static inner class - Not loaded until referenced!
+#### Approach 5: Bill Pugh Singleton (The "Gold Standard")
+Leverages ClassLoader guarantees for lazy loading *without* locks.
+```java
+public class BillPugh {
+    private BillPugh() {}
+    
+    // Inner static class is NOT loaded when BillPugh is loaded.
+    // It is only loaded when Holder.INSTANCE is referenced.
     private static class Holder {
-        private static final BillPughSingleton INSTANCE = new BillPughSingleton();
+        private static final BillPugh INSTANCE = new BillPugh();
     }
-
-    public static BillPughSingleton getInstance() {
-        return Holder.INSTANCE; // Triggers class loading here
+    
+    public static BillPugh getInstance() {
+        return Holder.INSTANCE;
     }
 }
 ```
-*   **Why it works**: The inner class `Holder` is not loaded when the outer class is loaded. It is only loaded when `getInstance()` accesses `Holder.INSTANCE`.
-*   **Thread Safety**: The JVM guarantees that Class Initialization is serial/atomic. We get lazy loading AND implementation-free thread safety.
+*   **Verdict**: Best for broad compatibility. 100% Lazy, 100% Lock-Free on access.
 
-#### Approach 6: The Enum Singleton (The "Unbreakable")
-*   **Verdict**: **Best Practice (Joshua Bloch)**.
+#### Approach 6: The Enum (The "Unbreakable")
+Joshua Bloch's recommendation.
 ```java
 public enum EnumSingleton {
     INSTANCE;
-    public void businessLogic() { ... }
+    public void doWork() { ... }
 }
 ```
-*   **Pros**:
-    *   **Serialization**: Handled automatically.
-    *   **Reflection**: `Constructor.newInstance()` throws exception for Enums.
-    *   **Conciseness**: 3 lines of code.
+*   **Magic**: Java Enums are compiled to classes where `INSTANCE` is a `public static final` field. Data serialization and uniqueness are handled by the JVM natively. You cannot attack it with Reflection.
 
 ---
 
-### 4. Multi-Language Implementations
+### 4. Implementation: The Enterprise "Distributed Configuration Hub"
 
-#### Java: The "Distributed Configuration Hub"
-A production-grade Singleton handling hot-reloads and preventing instantiation attacks.
+We will implement a robust **Configuration Manager** that acts as a central nervous system for a microservice.
+**Features**:
+1.  **Bill Pugh Implementation** for efficiency.
+2.  **Hot-Reloading**: Watches a file on disk (`app.properties`) and updates config without restart.
+3.  **Reflection Guard**: Throws exception if `setAccessible(true)` is used.
+4.  **Serialization Guard**: `readResolve`.
+5.  **JMX Integration**: Allows Ops teams to view config at runtime.
 
 ```java
-import java.io.Serializable;
-import java.util.Properties;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import javax.management.*;
+import java.lang.management.ManagementFactory;
 
 /**
- * Enterprise ConfigHub
- * - Uses Bill Pugh for Lazy Loading
- * - Prevents Reflection Attacks
- * - Prevents Serialization Attacks
- * - Handles Async Property Updates
+ * Enterprise-Grade Distributed Configuration Hub.
+ * Pattern: Thread-Safe Singleton with Hot-Reload & JMX monitoring.
  */
-public class ConfigHub implements Serializable {
+public class DistributedConfigHub implements Serializable, DistributedConfigHubMBean {
+
     private static final long serialVersionUID = 1L; // Version control
+    private static final String CONFIG_FILE = "application.properties";
     
-    private final ConcurrentHashMap<String, String> configCache;
-    private final BlockingQueue<String> updateLog;
+    // Thread-Safe wrapper for properties
+    private final ConcurrentHashMap<String, String> configStore;
+    private final List<Runnable> listeners;
+    private final AtomicInteger reloadCount = new AtomicInteger(0);
 
-    // 1. Private Constructor with Reflection Guard
-    private ConfigHub() {
-        // Protect against reflection (setAccessible=true)
+    // 1. REFLECTION GUARD
+    private DistributedConfigHub() {
+        // Guard against Reflection Attacks
         if (Holder.INSTANCE != null) {
-            throw new IllegalStateException("Singleton instance already exists! Use getInstance().");
+            throw new IllegalStateException("ALREADY_INIT: Use getInstance()! Reflection Attack Detected.");
         }
+
+        this.configStore = new ConcurrentHashMap<>();
+        this.listeners = new CopyOnWriteArrayList<>();
         
-        System.out.println("Initializing ConfigHub (Expensive I/O)...");
-        this.configCache = new ConcurrentHashMap<>();
-        this.updateLog = new LinkedBlockingQueue<>();
-        
-        // Simulate loading props
-        loadInitialProperties();
+        System.out.println("[ConfigHub] Initializing subsystem...");
+        loadFromDisk();
+        startFileWatcher();
+        registerJMX();
     }
 
-    // 2. Bill Pugh Holder
+    // 2. BILL PUGH HOLDER (Lazy Loading)
     private static class Holder {
-        private static final ConfigHub INSTANCE = new ConfigHub();
+        private static final DistributedConfigHub INSTANCE = new DistributedConfigHub();
     }
 
-    // 3. Global Access Point
-    public static ConfigHub getInstance() {
+    public static DistributedConfigHub getInstance() {
         return Holder.INSTANCE;
     }
 
-    // Business Methods
-    private void loadInitialProperties() {
-        configCache.put("db.url", "jdbc:postgresql://prod-db:5432");
-        configCache.put("max.threads", "200");
+    /**
+     * Loads properties from disk. Thread-safe via ConcurrentHashMap.
+     */
+    private synchronized void loadFromDisk() {
+        Properties props = new Properties();
+        File file = new File(CONFIG_FILE);
+
+        if (!file.exists()) {
+            System.err.println("[ConfigHub] Config file not found, using defaults.");
+            configStore.put("db.url", "jdbc:h2:mem:default");
+            return;
+        }
+
+        try (FileInputStream fis = new FileInputStream(file)) {
+            props.load(fis);
+            for (String key : props.stringPropertyNames()) {
+                String oldVal = configStore.put(key, props.getProperty(key));
+                if (oldVal != null && !oldVal.equals(props.getProperty(key))) {
+                    notifyListeners(key);
+                }
+            }
+            reloadCount.incrementAndGet();
+            System.out.println("[ConfigHub] Loaded " + props.size() + " properties.");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
-    public String getProperty(String key) {
-        return configCache.getOrDefault(key, "default");
+    /**
+     * Background thread to watch for file changes (Hot Reload).
+     */
+    private void startFileWatcher() {
+        Thread watcherThread = new Thread(() -> {
+            try (WatchService watcher = FileSystems.getDefault().newWatchService()) {
+                Path dir = Paths.get(".");
+                dir.register(watcher, StandardWatchEventKinds.ENTRY_MODIFY);
+                
+                while (!Thread.currentThread().isInterrupted()) {
+                    WatchKey key = watcher.take(); // block until event
+                    for (WatchEvent<?> event : key.pollEvents()) {
+                        Path changed = (Path) event.context();
+                        if (changed.endsWith(CONFIG_FILE)) {
+                            System.out.println("[ConfigHub] File change detected. Reloading...");
+                            // Debounce logic could go here
+                            Thread.sleep(100); 
+                            loadFromDisk();
+                        }
+                    }
+                    key.reset();
+                }
+            } catch (Exception e) {
+                System.err.println("[ConfigHub] File watcher died: " + e.getMessage());
+            }
+        });
+        watcherThread.setDaemon(true); // Don't block JVM exit
+        watcherThread.setName("ConfigHub-Watcher");
+        watcherThread.start();
     }
 
-    public void hotReload(String key, String value) {
-        configCache.put(key, value);
-        updateLog.offer("Updated " + key + " at " + System.currentTimeMillis());
+    // --- Public API ---
+
+    public String getProperty(String key, String defaultValue) {
+        return configStore.getOrDefault(key, defaultValue);
+    }
+    
+    public void addListener(Runnable listener) {
+        listeners.add(listener);
     }
 
-    // 4. Serialization Guard
-    // When deserializing, return the EXISTING instance instead of the new blob
+    private void notifyListeners(String key) {
+        // In real app, run listeners in separate Executor to avoid blocking
+        for (Runnable r : listeners) {
+            try { r.run(); } catch (Exception e) { e.printStackTrace(); }
+        }
+    }
+
+    // --- Safeguards ---
+
+    // 3. SERIALIZATION GUARD
+    // This method is called during deserialization.
+    // We strictly return the compile-time INSTANCE, ignoring the deserialized stream.
     protected Object readResolve() {
         return getInstance();
     }
-}
-```
 
-#### Python: Metaclass Magic vs Decorators
-Python lacks strict access modifiers (private constructor), so we use Metaclasses.
-
-```python
-import threading
-
-# Method 1: The Metaclass (Best for library code)
-class SingletonMeta(type):
-    """
-    A thread-safe implementation of Singleton using a metaclass.
-    """
-    _instances = {}
-    _lock = threading.Lock()
-
-    def __call__(cls, *args, **kwargs):
-        # Double-Checked Locking in Python
-        if cls not in cls._instances:
-            with cls._lock:
-                if cls not in cls._instances:
-                    cls._instances[cls] = super().__call__(*args, **kwargs)
-        return cls._instances[cls]
-
-class Database(metaclass=SingletonMeta):
-    def __init__(self, url):
-        self.url = url
-    
-    def connect(self):
-        print(f"Connecting to {self.url}")
-
-# Method 2: The Module (Best for app code)
-# db_module.py
-# db = Database("url")
-# In other files: 'from db_module import db' -> Imports are singletons cached by sys.modules
-```
-
-#### C++: The "Meyers Singleton"
-C++11 mandates that static, local variables are initialized thread-safely. This replaced complex locking.
-
-```cpp
-#include <iostream>
-#include <string>
-
-class LogManager {
-public:
-    // Delete copy constructor & assignment operator to prevent cloning
-    LogManager(const LogManager&) = delete;
-    void operator=(const LogManager&) = delete;
-
-    static LogManager& Get() {
-        // Safe in C++11 and later (Magic Statics)
-        // The compiler injects a lock/guard around this initialization.
-        static LogManager instance;
-        return instance;
+    // 4. CLONE GUARD
+    @Override
+    protected Object clone() throws CloneNotSupportedException {
+        throw new CloneNotSupportedException("Singleton cloning forbidden");
     }
 
-    void Log(std::string msg) {
-        std::cout << "[LOG] " << msg << std::endl;
+    // --- JMX Management (Ops) ---
+    private void registerJMX() {
+        try {
+            MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
+            ObjectName name = new ObjectName("com.enterprise:type=ConfigHub");
+            if (!mbs.isRegistered(name)) {
+                mbs.registerMBean(this, name);
+            }
+        } catch (Exception e) { e.printStackTrace(); }
     }
 
-private:
-    LogManager() { std::cout << "LogManager Initialized" << std::endl; } // Private
-};
-
-// Usage
-// LogManager::Get().Log("Hello");
-```
-
-#### Go: `sync.Once`
-Go provides a specific primitive for this.
-
-```go
-package manager
-
-import (
-    "fmt"
-    "sync"
-)
-
-type Config struct {
-    APIKey string
+    @Override
+    public int getReloadCount() { return reloadCount.get(); } // JMX exposed
+    @Override
+    public Map<String, String> getAllConfig() { return new HashMap<>(configStore); } // JMX exposed
 }
 
-var instance *Config
-var once sync.Once // The Guard
-
-func GetConfig() *Config {
-    // once.Do guarantees the closure runs EXACTLY once,
-    // even if 1000 goroutines call GetConfig() simultaneously.
-    once.Do(func() {
-        fmt.Println("Initializing Config...")
-        instance = &Config{APIKey: "secret_123"}
-    })
-    return instance
+// JMX Interface
+interface DistributedConfigHubMBean {
+    int getReloadCount();
+    Map<String, String> getAllConfig();
 }
 ```
 
-#### JavaScript (Node.js): CommonJS Caching
-Node.js caches `require()` calls.
+---
 
-```javascript
-class Logger {
-    constructor() {
-        this.logs = [];
-    }
-    log(msg) { this.logs.push(msg); }
-}
-
-// logger.js
-// Creating the instance HERE makes it a singleton.
-// Every 'require("./logger")' gets this SAME object instance.
-module.exports = new Logger();
-```
 
 ### 5. Practice & Assessment
 
@@ -34224,7 +34180,6 @@ Thread B checks `instance`, sees it's non-null, and returns it.
 4.  *JSR-133: Java Memory Model and Thread Specification*.
 
 ---
-
 
 #### Q52: How do you implement a robust, generic Stack from scratch?
 **Companies**: Amazon, Microsoft, LinkedIn, Uber, Tesla, SpaceX
