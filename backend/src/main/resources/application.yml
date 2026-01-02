@@ -37,7 +37,7 @@ spring:
     time-zone: UTC
 
 server:
-  port: 9095
+  port: 2025
   error:
     include-message: always
     include-binding-errors: always
