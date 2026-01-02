@@ -36205,6 +36205,27 @@ public class SpringInternalsDemo {
 }
 ```
 
+#### Go: Compiler Enforcement
+Go is extremely strict. `import cycle not allowed` is a compile-time error.
+Go forces you to architect correctly (Approach 2 or 4) *before* you can even run the code.
+```go
+// package a
+import "b" // Error if b imports a
+```
+
+#### C++: Forward Declarations
+C++ allows cycles via pointers/references if you use Forward Declaration.
+```cpp
+// A.h
+class B; // Forward declaration
+class A { B* b; };
+
+// B.h
+class A;
+class B { A* a; };
+```
+*   **Risk**: If you try to access `b->method()` in `A`'s constructor, and `B` isn't fully constructed, you get Undefined Behavior (Segfault).
+
 #### Python: Import Strategies
 Python is strict about execution order at top-level.
 
