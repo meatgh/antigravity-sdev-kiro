@@ -37975,303 +37975,237 @@ void notify() {
 
 ---
 #### Q59: How does the Proxy Pattern control access to sensitive or expensive resources?
-**Companies**: Google, Apple, LinkedIn, Cloudflare, SpringSource (AOP)
+**Companies**: Google (RPC), LinkedIn (Lazy Loading), SpringSource (AOP), Hibnernate (Lazy Fetch)
 **Difficulty**: **Medium** (Core Structural Pattern / AOP Basis)
 **Category**: Structural Patterns, Meta-Programming
 
 ---
 
-### 1. Conceptual Overview & Motivation
+### **1. Conceptual Overview & Motivation**
 
-**The "Why": Interception & Control**
-Sometimes, you cannot or should not talk to an object directly.
--   **Security**: The object contains sensitive data (SalaryService). Only Admins should read it.
--   **Performance**: The object is huge (HighResImage). You don't want to load it into RAM until someone specifically asks to `display()` it (Virtual Proxy).
--   **Networking**: The object lives on another server (gRPC/RMI). The client needs a local "stub" that looks like the object but sends network packets (Remote Proxy).
--   **Logging/Auditing**: You want to log every method call without cluttering the business logic.
+**The "Why": Intercepting Access**
+Sometimes, you cannot (or should not) access an object directly.
+1.  **It's Remote**: The object lives on a server in Tokyo (RPC/gRPC).
+2.  **It's Heavy**: The object is a 2GB Video File. Loading it freezes the UI.
+3.  **It's Sensitive**: You need `ADMIN` role to call `deleteUser()`.
 
-**The Solution**:
-Create a **Proxy** class that implements the *same interface* as the Real Object.
-The Client talks to the Proxy. The Proxy "intercepts" the call, does some work (Check Role, Lazy Load, Rate Limit), and *then* delegates to the Real Object.
+**The Solution**: A **Substitute** (Proxy).
+The Proxy looks *exactly* like the Real Object (implements same Interface).
+It intercepts the call, performs some logic (Lazy Load / Auth Check / Network Call), and *then* delegates to the Real Object.
 
 **Real-World Analogies**:
-1.  **Secretary**: You want to meet the CEO (Real Subject). You call the Secretary (Proxy). The Secretary checks your calendar availability (Access Control) and filters spam calls.
-2.  **Credit Card**: You want to spend money from your Bank Account (Real Subject). The Card (Proxy) represents the account but handles validation (PIN) and limits.
-3.  **Spring `@Transactional`**: When you annotate a method, Spring wraps your class in a Proxy. The Proxy opens the transaction, calls your method, and then commits/rollbacks.
+1.  **Credit Card**: It is a proxy for the Cash in your Bank Account. You use the card, the bank checks funds, then executes the transaction.
+2.  **Cheque**: A piece of paper representing money.
 
 ---
 
-### 2. Comprehensive Definition
+### **2. Comprehensive Definition**
 
 **Formal Definition**:
-> The **Proxy Pattern** provides a surrogate or placeholder for another object to control access to it. It allows you to perform operational logic either *before* or *after* the request gets to the real object.
+> The Proxy Pattern provides a surrogate or placeholder for another object to control access to it.
 
-**Major Types**:
-1.  **Remote Proxy**: Represents an object in a different address space (e.g., RMI, gRPC stubs).
-2.  **Virtual Proxy**: Creates expensive objects on demand (Lazy Loading Hibernate Entities).
-3.  **Protection Proxy**: Controls access based on permissions (Security ACLs).
-4.  **Smart Reference**: Performs additional actions like reference counting (C++ `shared_ptr`) or locking.
-
----
-
-### 3. Progressive Solution Evolution
-
-#### Approach 1: Direct Access (No Protection)
-Client `new BankAccount()`. `account.withdraw(1M)`.
-**Critique**: No checks. Anyone can do anything.
-
-#### Approach 2: Inheritance (The Rigid Solution)
-```java
-class SecureAccount extends BankAccount {
-    @Override void withdraw(int amount) {
-        if (!isAdmin) throw error;
-        super.withdraw(amount);
-    }
-}
-```
-**Critique**: Using Inheritance restricts you. You cannot proxy a `final` class easily. Also, if `BankAccount` changes, `SecureAccount` might break.
-
-#### Approach 3: The Proxy Pattern (Composition & Interface)
-Both implement `Account`.
-```java
-class SecurityProxy implements Account {
-    private Account realAccount;
-    public void withdraw(int amount) {
-        if (!isAdmin) throw error;
-        realAccount.withdraw(amount);
-    }
-}
-```
-**Verdict**: Flexible. You can chain proxies: `LoggingProxy(SecurityProxy(RealAccount))`.
+**The Three Variants**:
+1.  **Remote Proxy**: Represents an object in a different address space (e.g., REST Client, RMI).
+2.  **Virtual Proxy**: Creates expensive objects on demand (Lazy Loading).
+3.  **Protection Proxy**: Controls access based on permissions (Auth/ACL).
 
 ---
 
-### 4. Implementation: The "RPC Framework Client Stub"
+### **3. Progressive Solution Evolution**
 
-**Scenario**: We are building a Remote Procedure Call (RPC) framework.
-The Client thinks it's calling `DatabaseService.getData()`, but actually, it's sending a JSON request over TCP to a server.
+#### Approach 1: Direct Access (The Problem)
+```java
+// Loading Profile loads everything
+class UserProfile {
+    HighResImage avatar = new HighResImage(); // Validates 50MB immediately!
+}
+```
+*   **Critique**: Slow startup. Wastes RAM if user never views the avatar.
+
+#### Approach 2: Static Proxy (Manual Wrapper)
+```java
+class ImageProxy implements Image {
+    RealImage real;
+    void display() {
+        if (real == null) real = new RealImage(); // Lazy
+        real.display();
+    }
+}
+```
+*   **Verdict**: Excellent for specific classes. Tedious if you have 100 classes to proxy.
+
+#### Approach 3: Dynamic Proxy (The Framework Way)
+Generate the Proxy Class at **Runtime** using Reflection (`java.lang.reflect.Proxy`).
+*   **Verdict**: Used by Spring, Hibernate, Mybatis. Harder to debug but infinitely scalable.
+
+---
+
+### **4. Implementation I: The Protection Proxy (Security)**
+Simulating a "Role-Based Access Control" (RBAC) system.
 
 ```java
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
-
-// --- 1. The Service Interface ---
-interface DatabaseService {
-    String getData(int id);
+interface Database {
+    void deleteUser(int id);
+    void readData();
 }
 
-// --- 2. The Real Service (On the Server usually) ---
-class RealDatabaseService implements DatabaseService {
+// 1. The Real Subject (Sensitive)
+class RealDatabase implements Database {
     @Override
-    public String getData(int id) {
-        // Imagine this takes 100ms
-        return "Record Payload for ID " + id;
+    public void deleteUser(int id) {
+        System.out.println("🔥 DELETING USER " + id);
+    }
+    
+    @Override
+    public void readData() {
+        System.out.println("📄 Reading Data...");
     }
 }
 
-// --- 3. The Invocation Handler (The Brain of JDK Dynamic Proxy) ---
-// This generic handler can proxy ANY interface.
-class RpcInvocationHandler implements InvocationHandler {
-    private final Object target; // Optional: If we have a local target
-    private final String serverIp;
-
-    public RpcInvocationHandler(String serverIp) {
-        this.target = null;
-        this.serverIp = serverIp;
+// 2. The Proxy (The Bouncer)
+class SecurityProxy implements Database {
+    private final RealDatabase realDB;
+    private final String userRole;
+    
+    public SecurityProxy(String role) {
+        this.realDB = new RealDatabase();
+        this.userRole = role;
     }
+    
+    @Override
+    public void deleteUser(int id) {
+         if (!"ADMIN".equals(userRole)) {
+             throw new SecurityException("⛔ ACCESS DENIED: Requires ADMIN");
+         }
+         realDB.deleteUser(id);
+    }
+    
+    @Override
+    public void readData() {
+        // Everyone can read
+        realDB.readData();
+    }
+}
 
+// 3. Usage
+public class SecurityDemo {
+    public static void main(String[] args) {
+        Database adminDB = new SecurityProxy("ADMIN");
+        adminDB.readData();
+        adminDB.deleteUser(101); // Works
+        
+        Database guestDB = new SecurityProxy("GUEST");
+        guestDB.readData(); // Works
+        try {
+            guestDB.deleteUser(999); // Throws Exception
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
+        }
+    }
+}
+```
+
+---
+
+### **5. Implementation II: The Virtual Proxy (Lazy Loading)**
+Loading a huge image only when `render()` is called.
+
+```java
+interface Graphic {
+    void render();
+}
+
+class HeavyImage implements Graphic {
+    private final String filename;
+    
+    public HeavyImage(String filename) {
+        this.filename = filename;
+        loadFromDisk(); // Expensive operation happens in Constructor!
+    }
+    
+    private void loadFromDisk() {
+        try {
+            System.out.println("... Loading 500MB file: " + filename);
+            Thread.sleep(1000); // Simulate I/O
+        } catch(InterruptedException e){}
+    }
+    
+    public void render() {
+        System.out.println("🖼️ Displaying " + filename);
+    }
+}
+
+// The Proxy
+class ImageProxy implements Graphic {
+    private final String filename;
+    private HeavyImage realImage; // Null initially
+    
+    public ImageProxy(String filename) { this.filename = filename; }
+    
+    @Override
+    public void render() {
+        if (realImage == null) {
+            realImage = new HeavyImage(filename); // Just-in-Time Loading
+        }
+        realImage.render();
+    }
+}
+
+public class VirtualProxyDemo {
+    public static void main(String[] args) {
+        System.out.println("--- App Startup ---");
+        // Lightweight - No loading occurs here
+        Graphic img1 = new ImageProxy("Photo_4K.jpg"); 
+        Graphic img2 = new ImageProxy("Blueprint.png");
+        
+        System.out.println("--- User Scrolls to Image 1 ---");
+        img1.render(); // Loads now
+        
+        System.out.println("--- User Scrolls to Image 1 Again (Cached) ---");
+        img1.render(); // No load
+        
+        // Image 2 is never loaded (RAM Saved!)
+    }
+}
+```
+
+---
+
+### **6. Implementation III: Dynamic Proxy (Generic Logging)**
+Using `java.lang.reflect.Proxy` to create a logger for **any** interface without writing a specific wrapper class.
+
+```java
+import java.lang.reflect.*;
+
+// Generic Invocation Handler
+class AuditHandler implements InvocationHandler {
+    private final Object target;
+    
+    public AuditHandler(Object target) { this.target = target; }
+    
     @Override
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-        System.out.println("--- [RPC Proxy] Intercepted call to: " + method.getName() + " ---");
+        System.out.println("📝 AUDIT: Calling " + method.getName());
         
-        // 1. Serialize Arguments
-        String jsonArgs = serialize(args);
+        long start = System.nanoTime();
+        Object result = method.invoke(target, args); // Forward to Real Object
+        long end = System.nanoTime();
         
-        // 2. Network Layout (Simulated)
-        System.out.println(">>> Sending to " + serverIp + ": " + jsonArgs);
-        Thread.sleep(50); // Sim latency
-        String response = "<<< Response from Server";
-        
-        // 3. Return (or call real object if this was a logging proxy)
-        if (method.getReturnType().equals(String.class)) {
-            return "RemoteResult: " + args[0]; 
-        }
-        return null;
-    }
-
-    private String serialize(Object[] args) {
-        if (args == null) return "[]";
-        return "[" + args[0].toString() + "]";
+        System.out.println("✅ DONE in " + (end - start) + "ns");
+        return result;
     }
 }
 
-// --- Usage ---
-public class RpcDemo {
+public class DynamicProxyDemo {
     public static void main(String[] args) {
-        // Create the Proxy
-        // We do NOT instantiate RealDatabaseService. We create a Dynamic Proxy on the fly.
-        DatabaseService service = (DatabaseService) Proxy.newProxyInstance(
-            DatabaseService.class.getClassLoader(),
-            new Class<?>[] { DatabaseService.class },
-            new RpcInvocationHandler("192.168.1.10")
+        Database realDB = new RealDatabase(); // From previous example
+        
+        // Create Proxy at Runtime
+        Database auditedDB = (Database) Proxy.newProxyInstance(
+            DynamicProxyDemo.class.getClassLoader(),
+            new Class<?>[] { Database.class },
+            new AuditHandler(realDB)
         );
-```javascript
-const sensitiveData = {
-    secret: "The nuclear codes",
-    publicInfo: "Hello World"
-};
-
-const handler = {
-    // Intercept 'get' (Read) operations
-    get: function(target, prop, receiver) {
-        if (prop === 'secret') {
-            const user = getCurrentUser(); // Hypothetical global
-            if (!user.isAdmin) {
-                throw new Error("Access Denied: 403 Forbidden");
-            }
-        }
-        return Reflect.get(target, prop, receiver);
-    },
-    
-    // Intercept 'set' (Write) operations
-    set: function(target, prop, value) {
-        if (typeof value !== 'string') {
-            throw new Error("Data must be a string");
-        }
-        console.log(`Setting ${prop} to ${value}`);
-        return Reflect.set(target, prop, value);
-    }
-};
-
-const proxy = new Proxy(sensitiveData, handler);
-
-// Usage
-console.log(proxy.publicInfo); // "Hello World"
-// console.log(proxy.secret); // Error if not admin
-```
-
-#### Python: Decorators and `__getattr__`
-Python makes it easy to wrap objects.
-
-```python
-class RealImage:
-    def __init__(self, filename):
-        self.filename = filename
-        self.load_from_disk() # Expensive!
-
-    def load_from_disk(self):
-        print(f"Loading {self.filename} from disk...")
-
-    def display(self):
-        print(f"Displaying {self.filename}")
-
-class ProxyImage:
-    def __init__(self, filename):
-        self.filename = filename
-        self.real_image = None # Lazy!
-    
-    def display(self):
-        if self.real_image is None:
-            self.real_image = RealImage(self.filename)
-        self.real_image.display()
-
-# Usage
-# img = ProxyImage("photo.jpg") # Instant
-# img.display() # Loads now.
-# img.display() # Already loaded.
-```
-
-### 5. Practice & Assessment
-
-#### Core Exercises
-1.  **Basic**: Create a `MathService` with a method `add(int x, int y)`. Create a `LoggingProxy` that prints "Added x and y" before calling the real service.
-2.  **Intermediate**: Implement a **Lazy Loading Proxy** for a `VideoPlayer` class. The `Video` object should only load the 500MB file from disk when `play()` is called, not when `new Video()` is called.
-3.  **Advanced**: Build a **Generic Retry Proxy**. It takes ANY interface. If a method throws an `IOException`, it retries 3 times before failing. (Use `java.lang.reflect.InvocationHandler`).
-
-#### Edge Case Drills
-1.  **Circular Proxies**: What happens if Proxy A calls Proxy B, and B calls A? StackOverflow. How do you detect this?
-2.  **equals() and hashCode()**: Does `proxy.equals(realObject)`? This is a notorious trap in Hibernate. Proxies usually break identity equality.
-3.  **Final Classes**: Try to create a Proxy for a `final` class in Java. It fails (cannot subclass). Understanding this limitation is key for frameworks like Spring.
-
-#### Challenge: The Mini-AOP Framework
-**Scenario**: You want to emulate Spring's `@Transactional`.
-**Task**:
-1.  Create an annotation `@Transactional`.
-2.  Create a `ServiceFactory.create(Class<T> interface, T realImpl)`.
-3.  The factory returns a Dynamic Proxy.
-4.  The `InvocationHandler` checks if the method has `@Transactional`.
-5.  If yes: `beginTransaction()`, `realMethod()`, `commit()`.
-6.  If exception: `rollback()`.
-
----
-
-### 6. Common Mistakes & Anti-Patterns
-
-| Mistake | Consequence |
-| :--- | :--- |
-| **Proxy vs Decorator** | Confusing the two. **Proxy** controls access/lifecycle. **Decorator** adds behavior/features. |
-| **Heavy Proxy** | Putting too much business logic in the Proxy. It should be a thin wrapper. |
-| **Reflection Overhead** | Using Dynamic Proxies in a tight loop (millions of calls/sec). Reflection is slower than direct calls. |
-| **Self-Invocation** | Calling `this.method()` inside the RealObject bypasses the Proxy (and its transactions/security). Known as the "Spring Self-Invocation Problem". |
-
----
-
-### 7. Deep Dive: JDK Dynamic Proxy vs. CGLIB
-
-**The Two Types of Proxies in Spring**:
-
-1.  **JDK Dynamic Proxy**:
-    -   **Requirement**: Target object MUST implement an `Interface`.
-    -   **Mechanism**: Reflection (`java.lang.reflect.Proxy`).
-    -   **Pros**: Built-in, standard.
-    -   **Cons**: Cannot proxy classes without interfaces.
-
-2.  **CGLIB (Code Generation Library)**:
-    -   **Requirement**: Target class must NOT be `final`.
-    -   **Mechanism**: Bytecode generation (ASM). It creates a **subclass** of the target at runtime.
-    -   **Pros**: Can proxy any non-final class.
-    -   **Cons**: Startup is slightly slower (generating bytecode).
-
-**Why it matters**: If you put `@Transactional` on a class that has no interface, Spring automatically switches from JDK Proxy to CGLIB.
-
----
-
-### 8. Interview Bank: Follow-Up Questions
-
-1.  **Q**: "Difference between Proxy and Adapter?"
-    **A**: **Adapter** changes the interface (makes Square peg fit Round hole). **Proxy** implements the *same* interface (controls access to the Round hole).
-2.  **Q**: "Difference between Proxy and Decorator?"
-    **A**: **Intent**. Decorator adds *features* (e.g., scrollbars, borders). Proxy controls *access* (e.g., lazy load, security). Decorators are often chained; Proxies usually aren't.
-3.  **Q**: "What is the N+1 Select Problem in Hibernate?"
-    **A**: Caused by **Lazy Loading Proxies**. You load a list of `User` proxies. When you iterate and access `user.getAddress()` (which is lazily loaded), it triggers N separate SQL queries.
-4.  **Q**: "How does Mockito create mocks?"
-    **A**: It uses CGLIB (or ByteBuddy) to create a dynamic proxy of the class you are mocking, intercepting all calls to record interactions.
-
----
-
-### 9. Cheatsheet & Summary
-
-| Proxy Type | Purpose | Example |
-| :--- | :--- | :--- |
-| **Remote** | Hide network complexity | gRPC Stub |
-| **Virtual** | Delay heavy object creation | Lazy Loading Images |
-| **Protection** | Access control | Spring Security |
-| **Smart** | Add housekeeping | Reference Counting |
-
-**Key Benefit**: Transparently adds control layers (Security, Logging, Transaction) without modifying the core business code.
-
----
-
-### 10. References
-1.  *Design Patterns (GoF)* - Structural Patterns.
-2.  *Spring Framework Internals* - AOP and Proxies.
-3.  *Hibernate Documentation* - Lazy Loading and Proxies.
-
----
-class RealSubject : public Subject {
-public:
-    void request() override { std::cout << "Real Request" << std::endl; }
 };
 
 class Proxy : public Subject {
