@@ -33897,253 +33897,252 @@ public enum EnumSingleton {
     INSTANCE;
     public void doWork() { ... }
 }
+*   **Pros**: Thread-safe lazy loading.
+*   **Cons**: **Disastrous Performance**. 100 threads calling this serialize into a line. Throughput drops by 100x.
+
+#### Approach 3: Double-Checked Locking (Volatile)
+```java
+// Requires 'volatile' to prevent instruction reordering
+private static volatile Singleton instance; 
 ```
-*   **Magic**: Java Enums are compiled to classes where `INSTANCE` is a `public static final` field. Data serialization and uniqueness are handled by the JVM natively. You cannot attack it with Reflection (Constructor is not exposed).
+*   **Pros**: High performance. Lock only happens once.
+*   **Cons**: Verbose. Easy to screw up (forgetting `volatile`).
+
+#### Approach 4: Bill Pugh (Static Holder) - **THE STANDARD**
+```java
+class Singleton {
+    private Singleton() {}
+    
+    // Inner static class is NOT loaded until referenced!
+    private static class Holder {
+        static final Singleton INSTANCE = new Singleton();
+    }
+    
+    public static Singleton getInstance() {
+        return Holder.INSTANCE;
+    }
+}
+```
+*   **Pros**: Lazy, Thread-Safe, Zero Synchronization overhead.
+*   **Cons**: None.
 
 ---
 
-### **4. Implementation I: The Enterprise "Distributed Configuration Hub"**
+### **4. Implementation I: The Distributed Cluster Manager**
 
-We will implement a robust **Configuration Manager** that acts as a central nervous system for a microservice.
+We will implement a simulation of a **Zookeeper-like Coordination Service**.
+This Singleton manages the state of the entire node in a distributed cluster. It MUST be consistent.
+
 **Features**:
-1.  **Bill Pugh Implementation** for efficiency.
-2.  **Hot-Reloading**: Watches a file on disk (`app.properties`) and updates config without restart.
-3.  **Reflection Guard**: Throws exception if `setAccessible(true)` is used.
-4.  **Serialization Guard**: `readResolve`.
-5.  **JMX Integration**: Allows Ops teams to view config at runtime.
+1.  **Singleton `ClusterManager`**: The brain.
+2.  **Double-Checked Locking**: For robust lazy loading.
+3.  **Heartbeat Monitor**: Background thread managed by the Singleton.
+4.  **Service Registry**: Managing microservice discovery.
 
 ```java
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
+import java.io.*;
+
 /**
- * Enterprise-Grade Distributed Configuration Hub.
- * Pattern: Thread-Safe Singleton with Hot-Reload & JMX monitoring.
+ * ============================================================================
+ * THE SINGLETON (Cluster Manager)
+ * ============================================================================
+ * Manages Node Lifecycle, Leader Election, and Service Discovery.
  */
-public class DistributedConfigHub implements Serializable, DistributedConfigHubMBean {
-
-    private static final long serialVersionUID = 1L; // Version control
-    private static final String CONFIG_FILE = "application.properties";
+public class ClusterManager implements Serializable {
     
-    // Thread-Safe wrapper for properties
-    private final ConcurrentHashMap<String, String> configStore;
-    private final List<Runnable> listeners;
-    private final AtomicInteger reloadCount = new AtomicInteger(0);
-    private static final AtomicInteger INSTANCE_COUNT = new AtomicInteger(0);
-
-    // 1. REFLECTION GUARD
-    private DistributedConfigHub() {
-        // Guard against Reflection Attacks
-        if (INSTANCE_COUNT.incrementAndGet() > 1) {
-            throw new IllegalStateException("ALREADY_INIT: Use getInstance()! Reflection Attack Detected.");
+    private static final long serialVersionUID = 1L;
+    
+    // 1. VOLATILE: Ensures visibility across cores
+    private static volatile ClusterManager instance;
+    
+    // State
+    private final String nodeId;
+    private final ConcurrentHashMap<String, String> serviceRegistry;
+    private final AtomicReference<NodeState> currentState;
+    private final ScheduledExecutorService heartbeatScheduler;
+    
+    public enum NodeState { STARTING, FOLLOWER, LEADER, SHUTDOWN }
+    
+    // 2. PRIVATE CONSTRUCTOR: Prevent instantiation
+    private ClusterManager() {
+        // Guard against Reflection
+        if (instance != null) {
+            throw new IllegalStateException("Singleton already initialized!");
         }
         
-        // Double check against Holder (if accessible)
-        if (Holder.INSTANCE != null) {
-             throw new IllegalStateException("Already initialized");
-        }
-
-        this.configStore = new ConcurrentHashMap<>();
-        this.listeners = new CopyOnWriteArrayList<>();
+        System.out.println("[ClusterManager] Initializing Core Systems...");
         
-        System.out.println("[ConfigHub] Initializing subsystem...");
-        loadFromDisk();
-        startFileWatcher();
-        registerJMX();
-    }
-
-    // 2. BILL PUGH HOLDER (Lazy Loading)
-    private static class Holder {
-        private static final DistributedConfigHub INSTANCE = new DistributedConfigHub();
-    }
-
-    public static DistributedConfigHub getInstance() {
-        return Holder.INSTANCE;
-    }
-
-    /**
-     * Loads properties from disk. Thread-safe via ConcurrentHashMap.
-     */
-    private synchronized void loadFromDisk() {
-        Properties props = new Properties();
-        File file = new File(CONFIG_FILE);
-
-        if (!file.exists()) {
-            System.err.println("[ConfigHub] Config file not found, using defaults.");
-            configStore.put("db.url", "jdbc:h2:mem:default");
-            return;
-        }
-
-        try (FileInputStream fis = new FileInputStream(file)) {
-            props.load(fis);
-            for (String key : props.stringPropertyNames()) {
-                String oldVal = configStore.put(key, props.getProperty(key));
-                if (oldVal != null && !oldVal.equals(props.getProperty(key))) {
-                    notifyListeners(key);
-                }
-            }
-            reloadCount.incrementAndGet();
-            System.out.println("[ConfigHub] Loaded " + props.size() + " properties.");
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    /**
-     * Background thread to watch for file changes (Hot Reload).
-     */
-    private void startFileWatcher() {
-        Thread watcherThread = new Thread(() -> {
-            try (WatchService watcher = FileSystems.getDefault().newWatchService()) {
-                Path dir = Paths.get(".");
-                dir.register(watcher, StandardWatchEventKinds.ENTRY_MODIFY);
-                
-                while (!Thread.currentThread().isInterrupted()) {
-                    WatchKey key = watcher.take(); // block until event
-                    for (WatchEvent<?> event : key.pollEvents()) {
-                        Path changed = (Path) event.context();
-                        if (changed.endsWith(CONFIG_FILE)) {
-                            System.out.println("[ConfigHub] File change detected. Reloading...");
-                            // Debounce logic
-                            Thread.sleep(100); 
-                            loadFromDisk();
-                        }
-                    }
-                    key.reset();
-                }
-            } catch (Exception e) {
-                System.err.println("[ConfigHub] File watcher died: " + e.getMessage());
-            }
+        this.nodeId = "NODE-" + UUID.randomUUID().toString().substring(0, 8);
+        this.serviceRegistry = new ConcurrentHashMap<>();
+        this.currentState = new AtomicReference<>(NodeState.STARTING);
+        
+        // Start Background Heartbeat
+        this.heartbeatScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "Heartbeat-Thread");
+            t.setDaemon(true);
+            return t;
         });
-        watcherThread.setDaemon(true); // Don't block JVM exit
-        watcherThread.setName("ConfigHub-Watcher");
-        watcherThread.start();
-    }
-
-    // --- Public API ---
-
-    public String getProperty(String key, String defaultValue) {
-        return configStore.getOrDefault(key, defaultValue);
+        
+        this.heartbeatScheduler.scheduleAtFixedRate(
+            this::sendHeartbeat, 1, 1, TimeUnit.SECONDS
+        );
+        
+        this.currentState.set(NodeState.FOLLOWER);
+        System.out.println("[ClusterManager] Node " + nodeId + " is Online.");
     }
     
-    public void addListener(Runnable listener) {
-        listeners.add(listener);
+    // 3. DOUBLE-CHECKED LOCKING
+    public static ClusterManager getInstance() {
+        // First check (No locking) - Fast Path
+        if (instance == null) {
+            // Locking
+            synchronized (ClusterManager.class) {
+                // Second check (Inside lock)
+                if (instance == null) {
+                    instance = new ClusterManager();
+                }
+            }
+        }
+        return instance;
     }
-
-    private void notifyListeners(String key) {
-        // In real app, run listeners in separate Executor to avoid blocking
-        for (Runnable r : listeners) {
-            try { r.run(); } catch (Exception e) { e.printStackTrace(); }
+    
+    // --- Business Logic ---
+    
+    public void registerService(String serviceName, String url) {
+        serviceRegistry.put(serviceName, url);
+        System.out.println("[Registry] Registered: " + serviceName + " -> " + url);
+    }
+    
+    public String discoverService(String serviceName) {
+        return serviceRegistry.get(serviceName);
+    }
+    
+    private void sendHeartbeat() {
+        if (currentState.get() != NodeState.SHUTDOWN) {
+            System.out.print("."); // Heartbeat visual
         }
     }
-
+    
+    public void initiateLeaderElection() {
+        System.out.println("\n[Election] Node " + nodeId + " is striving for leadership...");
+        // Simulation: Random win
+        if (Math.random() > 0.5) {
+            currentState.set(NodeState.LEADER);
+            System.out.println("[Election] VICTORY! I am the Leader.");
+        } else {
+            System.out.println("[Election] Conceded. Staying as Follower.");
+        }
+    }
+    
+    public NodeState getState() { return currentState.get(); }
+    
     // --- Safeguards ---
-
-    // 3. SERIALIZATION GUARD
-    // This method is called during deserialization.
-    // We strictly return the compile-time INSTANCE, ignoring the deserialized stream.
+    
+    // 4. SERIALIZATION SAFEGUARD
     protected Object readResolve() {
         return getInstance();
     }
-
-    // 4. CLONE GUARD
+    
+    // 5. CLONE SAFEGUARD
     @Override
     protected Object clone() throws CloneNotSupportedException {
         throw new CloneNotSupportedException("Singleton cloning forbidden");
     }
-
-    // --- JMX Management (Ops) ---
-    private void registerJMX() {
-        try {
-            MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
-            ObjectName name = new ObjectName("com.enterprise:type=ConfigHub");
-            if (!mbs.isRegistered(name)) {
-                mbs.registerMBean(this, name);
-            }
-        } catch (Exception e) { e.printStackTrace(); }
-    }
-
-    @Override
-    public int getReloadCount() { return reloadCount.get(); } // JMX exposed
-    @Override
-    public Map<String, String> getAllConfig() { return new HashMap<>(configStore); } // JMX exposed
-}
-
-// JMX Interface
-interface DistributedConfigHubMBean {
-    int getReloadCount();
-    Map<String, String> getAllConfig();
 }
 ```
 
 ---
 
-### **5. Implementation II: Database Connection Pool (Enum Singleton)**
+### **5. Implementation II: The Lock-Free Async Logger**
 
-This project demonstrates the **Enum Singleton** pattern, managing a scarce resource (DB Connections).
+A logging framework (like Log4j2) is essentially a Singleton Service. It demonstrates high-performance concurrency using **Enums**.
+
+**Architecture**:
+-   **Enum Singleton**: `LogManager`.
+-   **RingBuffer**: A concurrent queue for log messages (simulating LMAX Disruptor).
+-   **Worker Thread**: Drains queue to disk.
 
 ```java
-import java.util.concurrent.*;
-import java.sql.*;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 
 /**
- * High-Performance CONNECTION POOL using Enum Singleton.
- * Why Enum? 
- * 1. Impossible to instantiate twice (JVM guarantee).
- * 2. Serialization is handled natively.
- * 3. Cleanest syntax.
+ * High-Performance Async Logger using ENUM SINGLETON.
+ * Enum is the safest way to implement Singleton in Java.
  */
-public enum ConnectionPool {
-    INSTANCE;
+public enum LogManager {
+    INSTANCE; // The Single Instance
     
-    private final BlockingQueue<Connection> pool;
-    private static final int POOL_SIZE = 10;
+    private final BlockingQueue<LogMessage> queue;
+    private volatile boolean running = true;
     
-    // Constructor run ONCE by JVM classloader
-    ConnectionPool() {
-        System.out.println("[ConnectionPool] Initializing Enum Singleton...");
-        pool = new ArrayBlockingQueue<>(POOL_SIZE);
-        for (int i = 0; i < POOL_SIZE; i++) {
-            pool.offer(createMockConnection(i));
-        }
-    }
+    // Private Internal Config
+    private final String logFile = "/var/log/app.log";
     
-    private Connection createMockConnection(int id) {
-        // In a real app, this would perform DriverManager.getConnection(...)
-        // Used dynamic proxy for mock demonstration
-        return (Connection) java.lang.reflect.Proxy.newProxyInstance(
-            ConnectionPool.class.getClassLoader(),
-            new Class<?>[]{Connection.class},
-            (proxy, method, args) -> {
-                if (method.getName().equals("toString")) return "Conn-" + id;
-                return null;
-            }
-        );
-    }
-    
-    public Connection borrowConnection() throws InterruptedException {
-        long start = System.nanoTime();
-        Connection conn = pool.poll(5, TimeUnit.SECONDS);
-        if (conn == null) throw new RuntimeException("Connection Pool Exhausted!");
+    // Constructor (Run once by ClassLoader)
+    LogManager() {
+        System.out.println("[LogManager] Starting Async Logger...");
+        this.queue = new ArrayBlockingQueue<>(1024); // Backpressure
         
-        // Simulate health check
-        System.out.println("[Pool] Borrowed " + conn + " in " + (System.nanoTime() - start) + "ns");
-        return conn;
+        // Start Consumer Thread
+        Thread consumer = new Thread(this::consumeLogs);
+        consumer.setName("Logger-IO-Thread");
+        consumer.setDaemon(true);
+        consumer.start();
     }
     
-    public void returnConnection(Connection conn) {
-        if (conn != null) {
-            pool.offer(conn); // Non-blocking return
-            System.out.println("[Pool] Returned " + conn);
+    // --- Public API ---
+    public void info(String msg) {
+        offer(new LogMessage("INFO", msg));
+    }
+    
+    public void error(String msg) {
+        offer(new LogMessage("ERROR", msg));
+    }
+    
+    private void offer(LogMessage m) {
+        if (!queue.offer(m)) {
+            System.err.println("LOG DROP! Queue Full. Msg: " + m.content);
         }
     }
     
-    public int getAvailableCount() {
-        return pool.size();
+    // --- I/O Loop ---
+    private void consumeLogs() {
+        while (running) {
+            try {
+                LogMessage msg = queue.take(); // Blocks if empty
+                // Simulate Disk I/O (Expensive)
+                // In reality: FileWriter.write()
+                Thread.sleep(1); 
+                System.out.printf("  [DISK] %s: %s%n", msg.level, msg.content);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+    }
+    
+    // Inner Data Class
+    private static class LogMessage {
+        final String level;
+        final String content;
+        final long timestamp;
+        
+        LogMessage(String level, String content) {
+            this.level = level;
+            this.content = content;
+            this.timestamp = System.currentTimeMillis();
+        }
     }
 }
 ```
 
 ---
 
-### **6. Implementation III: Attack Simulations (Break & Fix)**
+### **6. Implementation III: Security Analysis (Breaking Singletons)**
 
 We must prove our Singletons are bulletproof by attempting to break them.
 
@@ -34163,17 +34162,15 @@ public class SingletonAttacker {
     public static void attemptReflectionAttack() {
         System.out.println("\n=== Starting Reflection Attack ===");
         try {
-            DistributedConfigHub instance1 = DistributedConfigHub.getInstance();
+            ClusterManager instance1 = ClusterManager.getInstance();
             
-            Constructor<DistributedConfigHub> constructor = DistributedConfigHub.class.getDeclaredConstructor();
+            Constructor<ClusterManager> constructor = ClusterManager.class.getDeclaredConstructor();
             constructor.setAccessible(true);
             
             // This SHOULD fail if safeguards are in place
-            DistributedConfigHub instance2 = constructor.newInstance();
+            ClusterManager instance2 = constructor.newInstance();
             
             System.out.println("❌ ATTACK SUCCESSFUL: Created multiple instances! Singleton broken.");
-            System.out.println("Instance 1: " + instance1.hashCode());
-            System.out.println("Instance 2: " + instance2.hashCode());
             
         } catch (Exception e) {
             if (e.getCause() instanceof IllegalStateException) {
@@ -34191,7 +34188,7 @@ public class SingletonAttacker {
     public static void attemptSerializationAttack() {
         System.out.println("\n=== Starting Serialization Attack ===");
         try {
-            DistributedConfigHub instance1 = DistributedConfigHub.getInstance();
+            ClusterManager instance1 = ClusterManager.getInstance();
             
             // 1. Write to file
             ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream("singleton.ser"));
@@ -34200,15 +34197,13 @@ public class SingletonAttacker {
             
             // 2. Read from file
             ObjectInputStream in = new ObjectInputStream(new FileInputStream("singleton.ser"));
-            DistributedConfigHub instance2 = (DistributedConfigHub) in.readObject();
+            ClusterManager instance2 = (ClusterManager) in.readObject();
             in.close();
             
             if (instance1 == instance2) {
                 System.out.println("✅ ATTACK THWARTED: Deserialized object is the SAME reference.");
             } else {
                 System.out.println("❌ ATTACK SUCCESSFUL: readResolve() failed or missing.");
-                System.out.println("Instance 1: " + instance1.hashCode());
-                System.out.println("Instance 2: " + instance2.hashCode());
             }
             
             new File("singleton.ser").delete();
@@ -34216,6 +34211,16 @@ public class SingletonAttacker {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+    
+    /**
+     * ATTACK 3: UNSAFE (The Nuclear Option)
+     * sun.misc.Unsafe can allocate instances without calling Constructors.
+     * This bypasses ALL checks.
+     */
+    public static void attemptUnsafeAttack() {
+        // "Unsafe" is hard to access in modern Java, but hackers can do it.
+        // This is theoretical proof that nothing is truly truly singleton in raw memory.
     }
     
     public static void main(String[] args) {
@@ -34250,12 +34255,20 @@ public class SingletonBenchmarks {
         // 1. Bill Pugh
         start = System.nanoTime();
         for (int i = 0; i < ITERATIONS; i++) {
-            DistributedConfigHub h = DistributedConfigHub.getInstance();
+            ClusterManager h = ClusterManager.getInstance();
         }
         end = System.nanoTime();
-        printResult("Bill Pugh (No Lock)", end - start);
+        printResult("Double-Checked (Volatile)", end - start);
         
-        // 2. Synchronized (Simulated)
+        // 2. Enum
+        start = System.nanoTime();
+        for (int i = 0; i < ITERATIONS; i++) {
+            LogManager m = LogManager.INSTANCE;
+        }
+        end = System.nanoTime();
+        printResult("Enum Access", end - start);
+        
+        // 3. Synchronized (Simulated)
         start = System.nanoTime();
         for (int i = 0; i < ITERATIONS; i++) {
             SyncSingleton.getInstance();
@@ -34266,7 +34279,7 @@ public class SingletonBenchmarks {
     
     static void printResult(String name, long totalNanos) {
         double avgNs = (double) totalNanos / ITERATIONS;
-        System.out.printf("%-20s: %.2f ns/op%n", name, avgNs);
+        System.out.printf("%-25s: %.2f ns/op%n", name, avgNs);
     }
     
     // Slow Singleton for comparison
@@ -34369,12 +34382,31 @@ Thread B checks `instance`, sees it's non-null, and returns it.
 
 **Decision Tree**:
 1.  Need Serialization/Safety? -> **Enum**.
-2.  Need Lazy Loading + No Enum quirks? -> **Bill Pugh**.
-3.  Legacy Java (<5)? -> **Synchronized** (DCL was broken pre-Java 5).
+2.  Need Lazy Loading? -> **Bill Pugh**.
+3.  Legacy Java (<5)? -> **Synchronized**.
 
 ---
 
+### **11. Practice & Assessment**
 
+#### **Core Exercises**
+1.  **Database Connection Pool**: Implement a pool of 10 mock connections using **Enum Singleton**.
+2.  **Configuration Manager**: Implement a `ConfigLoader` that watches a file for changes (using `WatchService`) and reloads properties. Ensure `getInstance().getConfig("key")` is thread-safe during reload.
+3.  **Logger**: Implement `LogManager` from above, but add "VideoLogger" and "TextLogger" capabilities.
+
+#### **Edge Case Drills**
+11. **ClassLoader Leak**: Create TWO custom ClassLoaders. Load the Singleton class in both. Do you get two instances? (Yes. Prove it).
+12. **Exception Handling**: What if the Singleton Constructor throws an `RuntimeException`? Does the class become unusable forever? (Yes, `NoClassDefFoundError` on subsequent access).
+
+#### **Challenge: The Cluster Leader**
+**Task**:
+1.  Create `Node` class (Singleton per JVM).
+2.  Run 3 JVMs (simulate using 3 threads).
+3.  Implement a mock **Paxos** or **Raft** election.
+4.  Only ONE Node can be `LEADER`.
+5.  If Leader dies (Thread interrupt), another Node becomes Leader.
+
+---
 
 #### Q52: How do you implement a robust, generic Stack from scratch?
 **Companies**: Amazon, Microsoft, LinkedIn, Uber, Tesla, SpaceX
@@ -34387,6 +34419,7 @@ Thread B checks `instance`, sees it's non-null, and returns it.
 
 **The "Why": The Stack's Role in Operating Systems**
 A **Stack** (LIFO) is the memory model for execution itself. When a function calls another function, the CPU pushes a "Stack Frame" (Return Address, Local Variables, Registers) onto the thread's stack segment.
+
 1.  **Memory Management**: Stack allocation is effectively `O(1)` pointer bumping. It is the fastest possible way to allocate memory, far cheaper than Heap allocation.
 2.  **Backtracking Algorithms**: DFS (Depth First Search), Maze Solving, and Compiler Syntax Parsing all rely on stacks to "remember where we came from".
 3.  **Instruction Set Architecture (ISA)**: Java Bytecode runs on a "Stack Machine" (operands are pushed/popped), unlike x86 which is a "Register Machine".
@@ -34441,6 +34474,11 @@ This is what `ArrayList` and `ArrayDeque` do.
 
 This implementation focuses on **Raw Performance** and **Memory Safety**. It mimics the design patterns used in LMAX Disruptor or Aeron.
 
+**Key Engineering Decisions**:
+1.  **Contiguous Memory**: Uses an Array to maximize L1/L2 Cache hits.
+2.  **Loitering Protection**: Explicitly nulls popped elements.
+3.  **Fail-Fast**: Tracks modCount to detect concurrent modification bugs.
+
 ```java
 import java.util.Iterator;
 import java.util.NoSuchElementException;
@@ -34461,7 +34499,7 @@ import java.util.Arrays;
 public class EnterpriseStack<T> implements Iterable<T>, Serializable, Cloneable {
 
     private static final long serialVersionUID = 1L;
-    private static final int INITIAL_CAPACITY = 8; // Small to avoid waste
+    private static final int INITIAL_CAPACITY = 16; // Power of 2 alignment
 
     // The backing array (Object[] because Java Generics are erased)
     private transient Object[] elementData; 
@@ -34500,8 +34538,7 @@ public class EnterpriseStack<T> implements Iterable<T>, Serializable, Cloneable 
         T item = (T) elementData[size - 1];
         
         // CRITICAL: Memory Leak Prevention
-        // If we don't null this, the GC cannot reclaim the object,
-        // even though the stack logically doesn't hold it.
+        // If we don't null this, the GC cannot reclaim the object.
         elementData[size - 1] = null; 
         
         size--;
@@ -34510,7 +34547,7 @@ public class EnterpriseStack<T> implements Iterable<T>, Serializable, Cloneable 
         // Shrink strategy: If 1/4 full, shrink to 1/2.
         // We never shrink below INITIAL_CAPACITY.
         if (size > 0 && size == elementData.length / 4) {
-            resize(elementData.length / 2);
+            resize(Math.max(INITIAL_CAPACITY, elementData.length / 2));
         }
 
         return item;
@@ -34524,18 +34561,18 @@ public class EnterpriseStack<T> implements Iterable<T>, Serializable, Cloneable 
 
     public boolean isEmpty() { return size == 0; }
     public int size() { return size; }
-
+    
     // --- Internals ---
 
     private void ensureCapacity(int minCapacity) {
-        if (minCapacity == elementData.length) { // Fast path
+        if (minCapacity > elementData.length) { 
             // Double the capacity (Growth Strategy)
-            resize(2 * elementData.length);
+            int newCapacity = elementData.length * 2;
+            resize(newCapacity);
         }
     }
 
     private void resize(int capacity) {
-        if (capacity < INITIAL_CAPACITY) return;
         // Arrays.copyOf is an intrinsic (native optimized copy)
         elementData = Arrays.copyOf(elementData, capacity);
     }
@@ -34549,7 +34586,7 @@ public class EnterpriseStack<T> implements Iterable<T>, Serializable, Cloneable 
 
     private class StackIterator implements Iterator<T> {
         private int cursor = size - 1; // Start at top
-        private final int expectedModCount = modCount; // Snapshot state
+        private final int expectedModCount = modCount; // Snapshot logic
 
         public boolean hasNext() {
             return cursor >= 0;
@@ -34588,65 +34625,187 @@ public class EnterpriseStack<T> implements Iterable<T>, Serializable, Cloneable 
 
 ---
 
-### **5. Implementation II: Undo-Redo Manager (Text Editor)**
+### **5. Implementation II: The Compiler Engine (Shunting Yard)**
 
-A classic usage of Stacks. We use **two stacks** to navigate history.
+Stacks are the backbone of Compilers. We will implement Dijkstra's **Shunting Yard Algorithm** to parse and evaluate mathematical expressions (e.g., `(3 + 4) * 5`).
+
+**Components**:
+1.  **Tokenizer**: Breaks string into tokens.
+2.  **Operator Stack**: Recursion management.
+3.  **Operand Stack**: Value management.
 
 ```java
+import java.util.*;
+
 /**
- * Real-world Application: Text Editor History
- * Pattern: Command Pattern with Double Stacks
+ * MATH EXPRESSION ENGINE
+ * Demonstrates the power of Stacks in Recursion/Parsing.
+ * Supports: +, -, *, /, ( )
  */
-public class UndoRedoContext {
-    private final EnterpriseStack<String> undoStack = new EnterpriseStack<>();
-    private final EnterpriseStack<String> redoStack = new EnterpriseStack<>();
-    private String currentText = "";
+public class ExpressionEvaluator {
     
-    // Actions
-    public void type(String text) {
-        undoStack.push(currentText);  // Save state
-        currentText += text;
-        redoStack.clear(); // New action invalidates redo history
-        System.out.println("Typed: '" + text + "'. Current: " + currentText);
-    }
+    private final EnterpriseStack<Double> values = new EnterpriseStack<>();
+    private final EnterpriseStack<Character> ops = new EnterpriseStack<>();
     
-    public void undo() {
-        if (undoStack.isEmpty()) {
-            System.out.println("Nothing to undo.");
-            return;
+    public double evaluate(String expression) {
+        char[] tokens = expression.toCharArray();
+        
+        for (int i = 0; i < tokens.length; i++) {
+            if (tokens[i] == ' ') continue;
+            
+            // 1. Number Parsing
+            if (Character.isDigit(tokens[i])) {
+                StringBuilder sbuf = new StringBuilder();
+                while (i < tokens.length && 
+                      (Character.isDigit(tokens[i]) || tokens[i] == '.')) {
+                    sbuf.append(tokens[i++]);
+                }
+                values.push(Double.parseDouble(sbuf.toString()));
+                i--; // Backtrack one char consumed by loop
+            }
+            // 2. Open Parenthesis
+            else if (tokens[i] == '(') {
+                ops.push('(');
+            }
+            // 3. Close Parenthesis -> Resolve Scope
+            else if (tokens[i] == ')') {
+                while (ops.peek() != '(') {
+                    values.push(applyOp(ops.pop(), values.pop(), values.pop()));
+                }
+                ops.pop(); // Pop '('
+            }
+            // 4. Operators
+            else if (isOperator(tokens[i])) {
+                while (!ops.isEmpty() && hasPrecedence(tokens[i], ops.peek())) {
+                    values.push(applyOp(ops.pop(), values.pop(), values.pop()));
+                }
+                ops.push(tokens[i]);
+            }
         }
-        redoStack.push(currentText); // Save for redo
-        currentText = undoStack.pop();
-        System.out.println("Undo performed. Current: " + currentText);
-    }
-    
-    public void redo() {
-        if (redoStack.isEmpty()) {
-            System.out.println("Nothing to redo.");
-            return;
+        
+        // 5. Drain remaining operators
+        while (!ops.isEmpty()) {
+            values.push(applyOp(ops.pop(), values.pop(), values.pop()));
         }
-        undoStack.push(currentText); // Save for undo
-        currentText = redoStack.pop();
-        System.out.println("Redo performed. Current: " + currentText);
+        
+        return values.pop();
     }
     
-    // Added for clear semantics in EnterpriseStack
-    // EnterpriseStack needs a clear() method or we allocate clean one.
-    // For this demo, assuming clear() or new stack.
+    // --- Helper Logic ---
+    
+    private boolean isOperator(char c) {
+        return c == '+' || c == '-' || c == '*' || c == '/';
+    }
+    
+    private boolean hasPrecedence(char op1, char op2) {
+        if (op2 == '(' || op2 == ')') return false;
+        // * and / have higher precedence than + and -
+        return (op1 != '*' && op1 != '/') || (op2 != '+' && op2 != '-');
+    }
+    
+    private double applyOp(char op, double b, double a) {
+        switch (op) {
+            case '+': return a + b;
+            case '-': return a - b;
+            case '*': return a * b;
+            case '/': if (b == 0) throw new ArithmeticException("Div by zero"); return a / b;
+        }
+        return 0;
+    }
+    
+    public static void main(String[] args) {
+        ExpressionEvaluator engine = new ExpressionEvaluator();
+        String expr = "10 + 2 * 6";
+        System.out.println(expr + " = " + engine.evaluate(expr)); // 22.0
+        
+        String expr2 = "100 * ( 2 + 12 )";
+        System.out.println(expr2 + " = " + engine.evaluate(expr2)); // 1400.0
+        
+        String expr3 = "100 * ( 2 + 12 ) / 14";
+        System.out.println(expr3 + " = " + engine.evaluate(expr3)); // 100.0
+    }
 }
 ```
-*Note: In `EnterpriseStack`, we would add a `clear()` method for completion.*
 
 ---
 
-### **6. Implementation III: The "Loitering" Memory Leak Proof**
+### **6. Implementation III: The Lock-Free Treiber Stack**
 
-We prove that `pop()` MUST null out references. This runnable code demonstrates the GC behavior.
+For High-Concurrency scenarios, `synchronized` is too slow. We use **AtomicReference** and **CAS (Compare-And-Swap)** loops.
+This is the **Treiber Stack Algorithm**.
+
+```java
+import java.util.concurrent.atomic.AtomicReference;
+
+/**
+ * NON-BLOCKING (Lock-Free) Concurrent Stack.
+ * Safe for 1000+ threads. Zero locks.
+ */
+public class TreiberStack<T> {
+    
+    private static class Node<E> {
+        final E item;
+        Node<E> next;
+        Node(E item) { this.item = item; }
+    }
+    
+    // Atomic Head Reference
+    private final AtomicReference<Node<T>> head = new AtomicReference<>();
+    
+    public void push(T item) {
+        Node<T> newHead = new Node<>(item);
+        Node<T> oldHead;
+        
+        // CAS Loop (Optimistic Locking)
+        do {
+            oldHead = head.get();
+            newHead.next = oldHead;
+            // distinct step: compareAndSet(expected, update)
+        } while (!head.compareAndSet(oldHead, newHead));
+    }
+    
+    public T pop() {
+        Node<T> oldHead;
+        Node<T> newHead;
+        
+        do {
+            oldHead = head.get();
+            if (oldHead == null) return null; // Stack Empty
+            newHead = oldHead.next;
+        } while (!head.compareAndSet(oldHead, newHead));
+        
+        return oldHead.item;
+    }
+    
+    public static void main(String[] args) throws InterruptedException {
+        TreiberStack<Integer> stack = new TreiberStack<>();
+        
+        // Parallel Push
+        Thread t1 = new Thread(() -> { 
+            for(int i=0; i<10000; i++) stack.push(i); 
+        });
+        Thread t2 = new Thread(() -> { 
+            for(int i=0; i<10000; i++) stack.push(i); 
+        });
+        
+        t1.start(); t2.start();
+        t1.join(); t2.join();
+        
+        System.out.println("Finished Pushing 20k items lock-free.");
+    }
+}
+```
+
+---
+
+### **7. Implementation IV: Memory Safety Proof (The Loitering Test)**
+
+We prove that `pop()` MUST null out references.
 
 ```java
 import java.lang.ref.WeakReference;
 
-public class StackAttacks {
+public class StackMemoryTest {
     
     /**
      * PROOF: Memory Leak (Loitering)
@@ -34689,46 +34848,10 @@ public class StackAttacks {
 
 ---
 
-### **7. Implementation IV: Performance Benchmarks (Array vs Linked)**
-
-Comparing our `EnterpriseStack` (Array) vs a `LinkedListStack` (Node-based).
-
-```java
-public class StackBenchmarks {
-    
-    static final int OPS = 10_000_000;
-    
-    public static void run() {
-        System.out.println("\n=== Stack Performance Benchmark (10M Ops) ===");
-        
-        // 1. Array Stack
-        EnterpriseStack<Integer> arrayStack = new EnterpriseStack<>();
-        long start = System.nanoTime();
-        for (int i = 0; i < OPS; i++) arrayStack.push(i);
-        for (int i = 0; i < OPS; i++) arrayStack.pop();
-        long arrayTime = System.nanoTime() - start;
-        System.out.printf("ArrayStack (Contiguous): %.2f ms%n", arrayTime / 1e6);
-        
-        // 2. Linked List Stack
-        java.util.LinkedList<Integer> linkedStack = new java.util.LinkedList<>();
-        start = System.nanoTime();
-        for (int i = 0; i < OPS; i++) linkedStack.push(i);
-        for (int i = 0; i < OPS; i++) linkedStack.pop();
-        long linkedTime = System.nanoTime() - start;
-        System.out.printf("LinkedList (Pointer-Chase): %.2f ms%n", linkedTime / 1e6);
-        
-        System.out.println(">> ArrayStack is " + (linkedTime / arrayTime) + "x faster due to Cache Locality.");
-    }
-}
-```
-*Expected Result on M1 Max*: ArrayStack is ~5-8x faster due to L1 cache hits vs pointer chasing.
-
----
-
 ### **8. Multi-Language Perspectives**
 
 **Python: The List Proxy**
-Python lists are dynamic arrays.
+Python lists are dynamic arrays, but optimized for stack operations.
 ```python
 stack = []
 stack.append(1)  # Push O(1)
@@ -34755,13 +34878,13 @@ func (s *Stack[T]) Pop() (T, bool) {
     val := s.elements[idx]
     
     // Avoid memory leak for pointers
-    // s.elements[idx] = nil (if T is interface/pointer)
+    s.elements[idx] = nil 
     s.elements = s.elements[:idx] 
     return val, true
 }
 ```
 
-**Rust: `Vec` Ownerhsip**
+**Rust: `Vec` Ownership**
 Rust's `Vec` implements stack semantics perfectly.
 ```rust
 fn main() {
@@ -34806,19 +34929,12 @@ This is a question of **Amortized Complexity**.
 | **LinkedList** | Constant O(1) | High (Node overhead) | ❌ No | Good for Real-Time |
 | **Resizing Array** | Amortized O(1) | Low (Compact) | ✅ Yes | **Default Choice** |
 | **Sync `Vector`** | Slow (Locks) | Low | ✅ Yes | **Legacy / Avoid** |
-| **Treiber Stack** | O(1) Concurrent | High ( Nodes) | ❌ No | Best for Concurrency |
+| **Treiber Stack** | O(1) Concurrent | High (Nodes) | ❌ No | Best for Concurrency |
 
 **Decision Tree**:
 1.  Need Thread Safety? -> **ConcurrentLinkedDeque**.
 2.  Single Threaded? -> **ArrayDeque**.
 3.  Interview Implementation? -> **Resizing Array Stack** (shows depth).
-
----
-
-### **11. References**
-1.  *Algorithms (4th Ed)* - Sedgewick & Wayne. (Section 1.3: Bags, Queues, and Stacks).
-2.  *Introduction to Algorithms (CLRS)*. (Amortized Analysis).
-3.  *Effective Java* - Joshua Bloch. (Item 29: Favor Generic Types).
 
 ---
 #### Q53: How does the Adapter Pattern bridge incompatible interfaces in production?
@@ -34846,9 +34962,9 @@ Senior Engineers spend 30-50% of their time acting as digital plumbers, connecti
 1.  **Travel Plug Adapter**:
     -   **Problem**: US Plug (Type B, 110V) vs UK Socket (Type G, 230V).
     -   **Adapter**: A physical device that reshapes the pins. It does *not* generate electricity; it just passes it through in a compatible format.
-2.  **Memory Card Reader**:
-    -   **Problem**: Laptop has USB-C. Camera has SD Card.
-    -   **Adapter**: A dongle that has a USB-C male end and an SD female slot.
+2.  **Kubernetes Sidecar**:
+    -   **Problem**: Your app logs to `stdout` (JSON). Your legacy monitoring tool expects files in `/var/log` (Text).
+    -   **Adapter**: A "Sidecar Container" that reads stdout and writes to the file format derived by the legacy tool.
 
 ---
 
@@ -34921,206 +35037,297 @@ public class PayPalAdapter implements PaymentGateway {
 
 ---
 
-### **4. Implementation I: The Universal Payment Gateway**
-Integrating multiple incompatible APIs under one unified standard. This simulates a real FinTech Aggregator.
+### **4. Implementation I: The Mainframe Integration System**
+
+This project simulates connecting a **Modern REST API** to a **Legacy Banking Core (Mainframe)**.
+The Mainframe speaks "EBCDIC" strings and uses obscure method signatures. The Modern app speaks Objects.
+
+**Components**:
+1.  `ModernAccountService` (Interface): What we want.
+2.  `CobolBankingCore` (Legacy): What we have.
+3.  `MainframeAdapter`: The bridge.
 
 ```java
 import java.util.*;
+import java.nio.charset.StandardCharsets;
 
-// --- 1. The Target Interface (Our Standard) ---
-interface PaymentProcessor {
-    void pay(String account, double amount) throws PaymentFailedException;
+/**
+ * THE TARGET INTERFACE
+ * Clean, Modern, Java Records.
+ */
+interface ModernBankingInterface {
+    void transfer(String fromId, String toId, double amount);
+    double getBalance(String accountId);
 }
 
-class PaymentFailedException extends Exception { 
-    public PaymentFailedException(String m) { super(m); }
-}
-
-// --- 2. Incompatible Adaptees (3rd Party Libs) ---
-class StripeApi {
-    public void chargeCard(String token, long amountInCents) {
-        System.out.printf("Stripe: Charged %d cents to %s%n", amountInCents, token);
+/**
+ * THE ADAPTEE (Legacy System)
+ * - Uses specific weird encoding (simulated).
+ * - Methods are named terribly (e.g., 'XF_99').
+ * - Throws checked exceptions (LegacyException).
+ */
+class CobolBankingCore {
+    
+    // Simulating a mainframe database
+    private final Map<String, Long> balances = new HashMap<>(); // Cents
+    
+    public CobolBankingCore() {
+        balances.put("ACCT_001", 500000L); // $5000.00
+        balances.put("ACCT_002", 100000L); // $1000.00
+    }
+    
+    // "XF_99" stands for Transfer in this archaic system
+    // Returns "0000" for success, "9999" for fail.
+    // Inputs are "EBCDIC" encoded byte arrays (Simulated)
+    public String XF_99(byte[] from, byte[] to, long cents) throws Exception {
+        String f = new String(from, StandardCharsets.ISO_8859_1);
+        String t = new String(to, StandardCharsets.ISO_8859_1);
+        
+        if (!balances.containsKey(f) || !balances.containsKey(t)) {
+            return "9999"; // Account Not Found
+        }
+        
+        long bal = balances.get(f);
+        if (bal < cents) return "9999"; // Insufficient Funds
+        
+        balances.put(f, bal - cents);
+        balances.put(t, balances.get(t) + cents);
+        
+        System.out.println("[MAINFRAME] TX: " + f + " -> " + t + " : " + cents);
+        return "0000";
+    }
+    
+    public long INQ_BAL(byte[] acct) {
+        String a = new String(acct, StandardCharsets.ISO_8859_1);
+        return balances.getOrDefault(a, 0L);
     }
 }
 
-class PayPalApi {
-    public void sendMoney(String email, double amountInDollars) {
-        System.out.printf("PayPal: Sent $%.2f to %s%n", amountInDollars, email);
+/**
+ * THE ADAPTER
+ * Bridges the gap between Modern Interface and Cobol Core.
+ * Handles:
+ * 1. Data Conversion (String <-> byte[])
+ * 2. Unit Conversion (Double <-> Long Cents)
+ * 3. Exception Translation (Checked -> Runtime)
+ * 4. Return Code Mapping ("0000" -> void, "9999" -> Exception)
+ */
+class MainframeAdapter implements ModernBankingInterface {
+    
+    private final CobolBankingCore legacySystem;
+    
+    public MainframeAdapter(CobolBankingCore core) {
+        this.legacySystem = core;
     }
-}
-
-// --- 3. The Adapters ---
-
-// Adapter for Stripe (Converts dollars to cents)
-class StripeAdapter implements PaymentProcessor {
-    private final StripeApi stripe;
-
-    public StripeAdapter(StripeApi stripe) {
-        this.stripe = stripe;
-    }
-
+    
     @Override
-    public void pay(String account, double amount) {
-        long cents = (long) (amount * 100);
-        stripe.chargeCard(account, cents);
-    }
-}
-
-// Adapter for PayPal (Matches signature)
-class PayPalAdapter implements PaymentProcessor {
-    private final PayPalApi paypal;
-
-    public PayPalAdapter(PayPalApi paypal) {
-        this.paypal = paypal;
-    }
-
-    @Override
-    public void pay(String account, double amount) {
-        paypal.sendMoney(account, amount);
-    }
-}
-
-// --- 4. The Client (Agnostic to Vendor) ---
-class ECommerceApp {
-    private final PaymentProcessor processor;
-
-    public ECommerceApp(PaymentProcessor processor) {
-        this.processor = processor;
-    }
-
-    public void checkout(String user, double total) {
-        System.out.println("Processing Checkout...");
+    public void transfer(String fromId, String toId, double amount) {
         try {
-            processor.pay(user, total);
-        } catch (PaymentFailedException e) {
-            System.err.println("Checkout Failed: " + e.getMessage());
+            // 1. Convert Data Types
+            byte[] fBytes = fromId.getBytes(StandardCharsets.ISO_8859_1);
+            byte[] tBytes = toId.getBytes(StandardCharsets.ISO_8859_1);
+            long cents = (long) (amount * 100);
+            
+            // 2. Call Legacy
+            String code = legacySystem.XF_99(fBytes, tBytes, cents);
+            
+            // 3. Handle Return Codes
+            if (!code.equals("0000")) {
+                throw new RuntimeException("Transfer Failed. Mainframe Code: " + code);
+            }
+            
+        } catch (Exception e) {
+            // 4. Translate Exception or Re-throw
+            // We wrap checked exceptions into RuntimeException (Unchecked)
+            // to conform to the Modern Interface.
+            throw new RuntimeException("Mainframe Connection Error", e);
         }
-    }
-}
-```
-
----
-
-### **5. Implementation II: Legacy Database Adapter**
-
-In this scenario, we adapt a "Legacy SQL System" (returning `ResultSet` rows) to a modern "Repository Pattern" (returning clean Objects).
-
-```java
-import java.util.*;
-
-// --- Modern Interface ---
-record User(String id, String name) {}
-
-interface UserRepository {
-    Optional<User> findById(String id);
-}
-
-// --- Legacy System (Adaptee) ---
-class LegacySQLDriver {
-    // Simulates "SELECT * FROM users WHERE id = ?"
-    public Map<String, String> queryUserRow(String userId) {
-        if ("42".equals(userId)) {
-            Map<String, String> row = new HashMap<>();
-            row.put("col_id", "42");
-            row.put("col_fname", "John");
-            row.put("col_lname", "Doe");
-            return row;
-        }
-        return null; // Legacy returns null, not Optional
-    }
-}
-
-// --- The Adapter ---
-class SqlToRepoAdapter implements UserRepository {
-    private final LegacySQLDriver driver;
-    
-    public SqlToRepoAdapter(LegacySQLDriver driver) {
-        this.driver = driver;
     }
     
     @Override
-    public Optional<User> findById(String id) {
-        // 1. Call Legacy
-        Map<String, String> row = driver.queryUserRow(id);
-        
-        // 2. Adapt Null to Optional
-        if (row == null) return Optional.empty();
-        
-        // 3. Adapt Data (Map String->String to User Object)
-        // Also adapts "col_fname" + "col_lname" -> "name"
-        String fullName = row.get("col_fname") + " " + row.get("col_lname");
-        return Optional.of(new User(row.get("col_id"), fullName));
+    public double getBalance(String accountId) {
+        long cents = legacySystem.INQ_BAL(accountId.getBytes(StandardCharsets.ISO_8859_1));
+        return cents / 100.0;
     }
 }
 
 // --- Usage ---
-public class MigrationDemo {
+public class BankingDemo {
     public static void main(String[] args) {
-        UserRepository repo = new SqlToRepoAdapter(new LegacySQLDriver());
-        repo.findById("42").ifPresentOrElse(
-            u -> System.out.println("Found: " + u),
-            () -> System.out.println("User not found")
-        );
+        System.out.println("=== Legacy Banking Integration ===");
+        
+        CobolBankingCore legacy = new CobolBankingCore();
+        ModernBankingInterface bank = new MainframeAdapter(legacy);
+        
+        System.out.println("Bal 001: $" + bank.getBalance("ACCT_001"));
+        System.out.println("Bal 002: $" + bank.getBalance("ACCT_002"));
+        
+        System.out.println(">> Transferring $500.00...");
+        bank.transfer("ACCT_001", "ACCT_002", 500.00);
+        
+        System.out.println("Bal 001: $" + bank.getBalance("ACCT_001"));
+        System.out.println("Bal 002: $" + bank.getBalance("ACCT_002"));
     }
 }
 ```
 
 ---
 
-### **6. Implementation III: Attack Simulations (Exception Leaking)**
+### **5. Implementation II: The Kubernetes Sidecar (Cross-Process Adapter)**
 
-Adapters often fail by leaking internal exceptions.
+In distributed systems, the Adapter pattern often runs as a separate process (Sidecar).
+Imagine a Legacy App that only knows how to write to a FILE.
+We want to send those logs to a Modern Cloud Collector (HTTP).
+
+**Pattern**:
+-   **Legacy App**: Writes to `/shared/log.txt`.
+-   **Sidecar (Adapter)**: Reads `/shared/log.txt`, converts to JSON, POSTs to Cloud.
 
 ```java
-public class AdapterAttacks {
+import java.io.*;
+import java.util.concurrent.*;
+
+/**
+ * Simulation of the "Sidecar" Pattern.
+ * This is an Adapter that bridges File I/O to Network I/O.
+ */
+public class SidecarLogAdapter {
     
-    // Target Interface
-    interface ImageLoader {
-        void load(String path) throws IllegalStateException; // Our specific error
-    }
-    
-    // Adaptee (3rd Party)
-    static class ThirdPartyLib {
-        public void fetchBytes(String url) throws java.io.IOException {
-            throw new java.io.IOException("Socket Timeout");
+    // The "Legacy" App
+    static class LegacyApp implements Runnable {
+        private final File logFile;
+        public LegacyApp(File f) { this.logFile = f; }
+        
+        public void run() {
+            try (PrintWriter out = new PrintWriter(new FileWriter(logFile, true))) {
+                for (int i=0; i<5; i++) {
+                    out.println("ERROR: Something broke at " + System.currentTimeMillis());
+                    out.flush();
+                    Thread.sleep(500);
+                }
+            } catch (Exception e) { e.printStackTrace(); }
         }
     }
     
-    // BAD Adapter
-    static class BadAdapter implements ImageLoader {
-        private ThirdPartyLib lib = new ThirdPartyLib();
+    // The "Sidecar" Adapter
+    static class LogShipper implements Runnable {
+        private final File logFile;
+        public LogShipper(File f) { this.logFile = f; }
         
-        @Override
-        public void load(String path) {
+        public void run() {
             try {
-                lib.fetchBytes(path);
-            } catch (java.io.IOException e) {
-                // MISTAKE: Swallowing or throwing RuntimeException without context
-                throw new RuntimeException(e); // Leaks implementation detail wrapper
+                RandomAccessFile reader = new RandomAccessFile(logFile, "r");
+                long filePointer = 0;
+                
+                while (true) {
+                    long length = reader.length();
+                    if (length < filePointer) {
+                        // Log rotated
+                        filePointer = 0;
+                        reader.seek(0);
+                    }
+                    if (length > filePointer) {
+                        reader.seek(filePointer);
+                        String line = reader.readLine();
+                        while (line != null) {
+                            sendToCloud(line);
+                            line = reader.readLine();
+                        }
+                        filePointer = reader.getFilePointer();
+                    }
+                    Thread.sleep(200);
+                }
+            } catch (Exception e) { /* Interrupted */ }
+        }
+        
+        // The "Modern" Interface
+        private void sendToCloud(String line) {
+            String json = "{ \"level\": \"ERROR\", \"msg\": \"" + line + "\" }";
+            System.out.println("[SIDECAR] POST /logs payload=" + json);
+        }
+    }
+    
+    public static void main(String[] args) throws Exception {
+        File sharedFile = new File("legacy_app.log");
+        sharedFile.createNewFile();
+        
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        
+        // Start both processes
+        pool.submit(new LogShipper(sharedFile)); // The Adapter
+        pool.submit(new LegacyApp(sharedFile));  // The Legacy App
+        
+        Thread.sleep(3000);
+        pool.shutdownNow();
+        sharedFile.delete();
+    }
+}
+```
+
+---
+
+### **6. Implementation III: Security Analysis (Exception Tunneling)**
+
+A common vulnerability in Adapters is **Exception Swallowing** or **Information Leaking**.
+An Adapter might catch a Secure Exception (e.g., `InvalidSqlException`) and rethrow a generic one, OR worse, leak the stack trace to the UI.
+
+```java
+public class AdapterSecurityTest {
+    
+    interface SecureService {
+        void login(String user, String pass);
+    }
+    
+    static class LegacyAuth {
+        void auth(String u, String p) throws Exception {
+            if ("admin".equals(u)) return;
+            // VULNERABILITY: Internal error code reveals system details!
+            throw new Exception("ORA-00911: Invalid Character in " + u); 
+        }
+    }
+    
+    // BAD Adapter: Leaks internal implementation details
+    static class LeakyAdapter implements SecureService {
+        private LegacyAuth auth = new LegacyAuth();
+        public void login(String u, String p) {
+            try {
+                auth.auth(u, p);
+            } catch (Exception e) {
+                // DON'T DO THIS: Propagating raw message
+                throw new RuntimeException("Login Failed: " + e.getMessage());
             }
         }
     }
     
-    // GOOD Adapter
-    static class GoodAdapter implements ImageLoader {
-        private ThirdPartyLib lib = new ThirdPartyLib();
-        
-        @Override
-        public void load(String path) throws IllegalStateException {
+    // SECURE Adapter: Sanitizes errors
+    static class SecureAdapter implements SecureService {
+        private LegacyAuth auth = new LegacyAuth();
+        public void login(String u, String p) {
             try {
-                lib.fetchBytes(path);
-            } catch (java.io.IOException e) {
-                // TRANSLATION: IO -> Domain Exception
-                throw new IllegalStateException("Failed to load image: " + path, e);
+                auth.auth(u, p);
+            } catch (Exception e) {
+                // Log the real error securely
+                System.err.println("[SECURE LOG] " + e.getMessage());
+                // Throw sanitized error to user
+                throw new SecurityException("Invalid Credentials");
             }
         }
     }
     
     public static void main(String[] args) {
+        System.out.println("--- Testing Leaky Adapter ---");
         try {
-            new GoodAdapter().load("img.png");
-        } catch (IllegalStateException e) {
-            System.out.println("✅ Correctly caught domain exception: " + e.getMessage());
+            new LeakyAdapter().login("hacker'", "123");
+        } catch (Exception e) {
+            System.out.println("User saw: " + e.getMessage());
+            // User sees "ORA-00911" -> Knows we use Oracle DB! -> SQL Injection Target
+        }
+        
+        System.out.println("\n--- Testing Secure Adapter ---");
+        try {
+            new SecureAdapter().login("hacker'", "123");
+        } catch (Exception e) {
+            System.out.println("User saw: " + e.getMessage());
         }
     }
 }
@@ -35131,13 +35338,14 @@ public class AdapterAttacks {
 ### **7. Implementation IV: Performance Benchmarks (Overhead)**
 
 Does adding an Adapter layer slow down the system?
+We measure the cost of Virtual Method Dispatch through an Adapter vs Direct Call.
 
 ```java
 public class AdapterBenchmark {
     interface Worker { void work(); }
     
     static class RealWorker implements Worker {
-        public void work() { /* no-op */ }
+        public void work() { /* JIT Optimized No-Op */ }
     }
     
     static class AdapterWorker implements Worker {
@@ -35150,6 +35358,9 @@ public class AdapterBenchmark {
         Worker direct = new RealWorker();
         Worker adapter = new AdapterWorker();
         
+        // Warmup
+        for(int i=0; i<10000; i++) { direct.work(); adapter.work(); }
+        
         long start = System.nanoTime();
         for(long i=0; i<ops; i++) direct.work();
         long directTime = System.nanoTime() - start;
@@ -35160,11 +35371,11 @@ public class AdapterBenchmark {
         
         System.out.printf("Direct: %.2f ms%n", directTime / 1e6);
         System.out.printf("Adapter: %.2f ms%n", adapterTime / 1e6);
-        System.out.println("Overhead per call: ~" + ((adapterTime - directTime)/ops) + " ns");
+        System.out.println("Overhead per call: ~" + ((adapterTime - directTime)/(double)ops) + " ns");
     }
 }
 ```
-*Result*: The JIT compiler often inlines the Adapter call, reducing overhead to **near zero** (0-1ns). Don't fear the adapter.
+*Result*: On modern JVMs (HotSpot), the overhead is usually **0ns** because the JIT compiler aggressively inlines the adapter method if the call depth is shallow.
 
 ---
 
@@ -35249,13 +35460,6 @@ A **Two-Way Adapter** implements *both* the Target and Adaptee interfaces.
 **Key Takeaway**: Use Adapter when you have an existing class that does what you need, but its interface doesn't match the one you require.
 
 ---
-
-### **11. References**
-1.  *Design Patterns (GoF)* - The Structural Patterns chapter.
-2.  *Refactoring to Patterns* - Josh Kerievsky. (Move logic out of adapters).
-3.  *Head First Design Patterns* - Chapter 7: Adapters and Facades.
-
----
 #### Q54: How does the Decorator Pattern enable dynamic functionality extension?
 **Companies**: Microsoft, Meta, Starbucks, Amazon, Adobe
 **Difficulty**: **Medium** (Core Structural Pattern)
@@ -35309,11 +35513,11 @@ Inheritance is static (compile-time). **Decorator** is dynamic (runtime). You ca
 class DataSource {}
 class EncryptedDataSource extends DataSource {} 
 class CompressedDataSource extends DataSource {}
-class EncryptedCompressedDataSource extends EncryptedDataSource {} // Nightmare
+class EncryptedCompressedDataSource extends EncryptedDataSource {} // The Horror
 ```
-*   **Critique**: Rigid. You cannot remove encryption at runtime. You cannot change the order easily.
+*   **Critique**: Rigid. You cannot remove encryption at runtime. You cannot change the order easily (does encryption happen before or after compression?).
 
-#### Approach 2: The "God Class"
+#### Approach 2: The "God Class" (Flags)
 ```java
 class DataSource {
     boolean compress;
@@ -35321,7 +35525,7 @@ class DataSource {
     // ... logic for both inside one class
 }
 ```
-*   **Critique**: Violation of Single Responsibility Principle. The class becomes bloated with unrelated logic.
+*   **Critique**: Violation of Single Responsibility Principle (SRP). The class becomes bloated with unrelated logic. Adding a new feature means modifying the core class.
 
 #### Approach 3: Decorator Pattern (Composition)
 Wrappers that delegate.
@@ -35331,338 +35535,383 @@ DataSource source = new CompressionDecorator(
                             new FileDataSource("data.txt")));
 source.writeData(data);
 ```
-*   **Verdict**: Flexible. 3 classes cover all combinations.
+*   **Verdict**: Flexible. 3 classes cover all combinations. Chains can be built at runtime.
 
 ---
 
-### **4. Implementation I: The Middleware Chain Builder**
-A simulation of a Web Server Request Pipeline (like Express.js or Spring Security).
+### **4. Implementation I: The I/O Stream Simulator**
 
-```java
-import java.util.logging.Logger;
+The most classic example of Decorator is `java.io`. We will rebuild a mini-version of it to understand how `BufferedInputStream(FileInputStream)` actually works.
 
-// --- 1. Component Interface ---
-interface RequestHandler {
-    String handle(String request);
-}
-
-// --- 2. Concrete Component (The Core Logic) ---
-class BasicController implements RequestHandler {
-    @Override
-    public String handle(String request) {
-        return "HTTP 200 OK: Processed [" + request + "]";
-    }
-}
-
-// --- 3. Abstract Decorator ---
-abstract class BaseMiddleware implements RequestHandler {
-    protected final RequestHandler next; // The "Wrappee"
-
-    public BaseMiddleware(RequestHandler next) {
-        this.next = next;
-    }
-
-    @Override
-    public String handle(String request) {
-        return next.handle(request);
-    }
-}
-
-// --- 4. Concrete Decorators ---
-
-// Feature: Authentication (Blocking)
-class AuthMiddleware extends BaseMiddleware {
-    public AuthMiddleware(RequestHandler next) { super(next); }
-
-    @Override
-    public String handle(String request) {
-        if (!request.contains("AuthToken=123")) {
-            System.out.println("⛔ [Auth] Blocked request!");
-            return "HTTP 401 Unauthorized"; 
-        }
-        System.out.println("✅ [Auth] User Authorized");
-        return super.handle(request); 
-    }
-}
-
-// Feature: Logging (Passive)
-class LoggingMiddleware extends BaseMiddleware {
-    public LoggingMiddleware(RequestHandler next) { super(next); }
-
-    @Override
-    public String handle(String request) {
-        long start = System.nanoTime();
-        System.out.println("📝 [Log] Request started: " + request);
-        
-        String response = super.handle(request); // Delegate
-        
-        long duration = (System.nanoTime() - start) / 1000;
-        System.out.println("📝 [Log] Finished in " + duration + "us");
-        return response;
-    }
-}
-
-// Feature: GZIP Compression (Post-Processing)
-class GzipMiddleware extends BaseMiddleware {
-    public GzipMiddleware(RequestHandler next) { super(next); }
-
-    @Override
-    public String handle(String request) {
-        String originalResponse = super.handle(request); 
-        return compress(originalResponse);
-    }
-
-    private String compress(String input) {
-        return "{GZIP " + input + "}";
-    }
-}
-
-// --- Usage ---
-public class DecoratorDemo {
-    public static void main(String[] args) {
-        // Construct Pipeline: Gzip(Log(Auth(Basic)))
-        // Execution Order: 
-        // 1. Gzip calls Log
-        // 2. Log calls Auth
-        // 3. Auth checks token -> Success -> calls Basic
-        // 4. Basic returns
-        // 5. Auth returns
-        // 6. Log times it
-        // 7. Gzip compresses result
-        
-        RequestHandler server = new GzipMiddleware(
-                                    new LoggingMiddleware(
-                                        new AuthMiddleware(
-                                            new BasicController()
-                                        )
-                                    )
-                                );
-        
-        System.out.println("--- Test 1: Valid ---");
-        System.out.println("Response: " + server.handle("GET /home?AuthToken=123"));
-        
-        System.out.println("\n--- Test 2: Invalid ---");
-        System.out.println("Response: " + server.handle("GET /home"));
-    }
-}
-```
-
----
-
-### **5. Implementation II: Resilience Framework (Retry, Cache, CircuitBreaker)**
-
-A critical application of Decorators in Distributed Systems (Microservices). We wrap a fragile `RemoteService` with stability features.
+**Goal**: Write data to a "Disk", but optionally Encrypt it, Compress it, and Log it.
 
 ```java
 import java.util.*;
 
-// Component Interface
-interface RemoteService {
-    String call() throws Exception;
+// 1. The Component Interface
+interface DataSource {
+    void writeData(String data);
+    String readData();
 }
 
-// Fragile Implementation
-class UnstableApi implements RemoteService {
-    private final Random rand = new Random();
-    public String call() throws Exception {
-        if (rand.nextInt(10) < 7) throw new RuntimeException("Network Flake");
-        return "Success Payload";
+// 2. Concrete Component (The Base)
+class FileDataSource implements DataSource {
+    private String filename;
+    private String simulatedDiskStorage; // Simulating a file on disk
+
+    public FileDataSource(String filename) {
+        this.filename = filename;
+    }
+
+    @Override
+    public void writeData(String data) {
+        System.out.println("💾 [File] Writing to " + filename + ": " + data);
+        this.simulatedDiskStorage = data;
+    }
+
+    @Override
+    public String readData() {
+        System.out.println("💾 [File] Reading from " + filename);
+        return simulatedDiskStorage;
     }
 }
 
-// 1. Retry Decorator (Resilience)
-class RetryDecorator implements RemoteService {
-    private final RemoteService next;
-    private final int maxRetries;
-    
-    public RetryDecorator(RemoteService next, int maxRetries) {
-        this.next = next;
-        this.maxRetries = maxRetries;
+// 3. Abstract Base Decorator
+class DataSourceDecorator implements DataSource {
+    protected final DataSource wrappee; // The wrapped object
+
+    public DataSourceDecorator(DataSource source) {
+        this.wrappee = source;
     }
-    
-    public String call() throws Exception {
-        Exception lastEx = null;
-        for (int i=0; i<maxRetries; i++) {
-            try {
-                return next.call();
-            } catch (Exception e) {
-                lastEx = e;
-                System.out.println("⚠️ Retry " + (i+1) + " failed...");
-            }
-        }
-        throw lastEx;
+
+    @Override
+    public void writeData(String data) {
+        wrappee.writeData(data); // Delegate
+    }
+
+    @Override
+    public String readData() {
+        return wrappee.readData(); // Delegate
     }
 }
 
-// 2. Cache Decorator (Performance)
-class CacheDecorator implements RemoteService {
-    private final RemoteService next;
-    private String cachedValue = null;
-    
-    public CacheDecorator(RemoteService next) { this.next = next; }
-    
-    public String call() throws Exception {
-        if (cachedValue != null) {
-            System.out.println("💾 Returning Cached Value");
-            return cachedValue;
-        }
-        cachedValue = next.call();
-        return cachedValue;
+// 4. Concrete Decorators
+
+// Encryption: Scrambles data on Write, Unscrambles on Read
+class EncryptionDecorator extends DataSourceDecorator {
+    public EncryptionDecorator(DataSource source) { super(source); }
+
+    @Override
+    public void writeData(String data) {
+        String encrypted = "ENCRYPTED(" + data + ")";
+        System.out.println("🔒 [Encrypt] Encrypting data...");
+        super.writeData(encrypted);
+    }
+
+    @Override
+    public String readData() {
+        String data = super.readData();
+        System.out.println("🔓 [Encrypt] Decrypting data...");
+        return data.replace("ENCRYPTED(", "").replace(")", "");
     }
 }
 
-public class ResilienceDemo {
-    public static void main(String[] args) throws Exception {
-        // Architecture: Cache(Retry(Api))
-        // We want to cache successful results.
-        // If cache misses, we retry the network call up to 3 times.
-        
-        RemoteService service = new CacheDecorator(
-                                    new RetryDecorator(
-                                        new UnstableApi(), 3
-                                    )
-                                );
-        
-        System.out.println("--- First Call (Cold) ---");
-        System.out.println("Result: " + service.call());
-        
-        System.out.println("\n--- Second Call (Warm) ---");
-        System.out.println("Result: " + service.call());
+// Compression: Shrinks data on Write, Expands on Read
+class CompressionDecorator extends DataSourceDecorator {
+    public CompressionDecorator(DataSource source) { super(source); }
+
+    @Override
+    public void writeData(String data) {
+        String compressed = "ZIP(" + data + ")";
+        System.out.println("📦 [Compress] Compressing data...");
+        super.writeData(compressed);
+    }
+
+    @Override
+    public String readData() {
+        String data = super.readData();
+        System.out.println("📦 [Compress] Decompressing data...");
+        return data.replace("ZIP(", "").replace(")", "");
     }
 }
-```
 
----
-
-### **6. Implementation III: Attack & Analysis (Order Matters)**
-
-Demonstrating why `Encrypt(Compress(Data))` is SAFE, but `Compress(Encrypt(Data))` is WASTEFUL.
-
-```java
-public class DecoratorAttacks {
+// 5. Usage Demo
+public class StreamDemo {
     public static void main(String[] args) {
-        String data = " AAAAAAAAAAAAAAAAAAAAAA "; // Highly compressible
+        // Architecture: File <- Encryption <- Compression
+        // Write Path: Compress -> Encrypt -> File
+        // Read Path: File -> Decrypt -> Decompress
         
-        System.out.println("Original Size: " + data.length());
+        System.out.println("--- 1. Constructing Pipeline ---");
+        DataSource source = new EncryptionDecorator(
+                                new CompressionDecorator(
+                                    new FileDataSource("secret.dat")
+                                )
+                            );
         
-        // Case A: Compress THEN Encrypt (Preferred)
-        // Compression removes redundancy -> Encryption scrambles high-entropy data
-        String caseA = encrypt(compress(data));
-        System.out.println("Compress -> Encrypt Size: " + caseA.length() + " (Efficient)");
+        String payload = "NuclearLaunchCodes:1234";
         
-        // Case B: Encrypt THEN Compress (Bad)
-        // Encryption creates random noise -> Compression CANNOT find redundancy
-        String caseB = compress(encrypt(data));
-        System.out.println("Encrypt -> Compress Size: " + caseB.length() + " (Bloated!)");
+        System.out.println("\n--- 2. Writing Data ---");
+        source.writeData(payload);
+        // OUTPUT:
+        // [Compress] Compressing...
+        // [Encrypt] Encrypting "ZIP(Nuclear...)"
+        // [File] Writing "ENCRYPTED(ZIP(Nuclear...))"
         
-        System.out.println("ORDER MATTERS IN DECORATORS!");
-    }
-    
-    // Mock implementations
-    static String compress(String s) { return s.replace("AA", "B"); } // Dummy logic
-    static String encrypt(String s) { return convertToHex(s); }
-    static String convertToHex(String s) {
-        StringBuilder sb = new StringBuilder();
-        for (char c : s.toCharArray()) sb.append(Integer.toHexString(c));
-        return sb.toString();
+        System.out.println("\n--- 3. Reading Data ---");
+        String result = source.readData();
+        // OUTPUT:
+        // [File] Reading...
+        // [Encrypt] Decrypting...
+        // [Compress] Decompressing...
+        
+        System.out.println("\nFinal Result: " + result);
     }
 }
 ```
 
 ---
 
-### **7. Implementation IV: Benchmarks (Chain Overhead)**
+### **5. Implementation II: The Web Server Middleware (Chain of Responsibility via Decorator)**
 
-Measuring the cost of virtual method dispatch through 100 decorator layers.
+This simulates an Express.js or Spring Security pipeline.
+The `WebRunner` is the component. `Auth`, `Log`, `RateLimit` are decorators.
 
 ```java
-public class DecoratorBenchmark {
-    interface Task { int run(int x); }
-    
-    static class Core implements Task { 
-        public int run(int x) { return x + 1; } 
+// Component
+interface WebServer {
+    void handleRequest(String req);
+}
+
+// Concrete
+class JettyServer implements WebServer {
+    public void handleRequest(String req) {
+        System.out.println("🚀 [Server] Processing 200 OK: " + req);
     }
+}
+
+// Base Decorator
+abstract class Middleware implements WebServer {
+    private final WebServer next;
+    public Middleware(WebServer next) { this.next = next; }
     
-    static class Wrapper implements Task {
-        private final Task next;
-        public Wrapper(Task next) { this.next = next; }
-        public int run(int x) { return next.run(x); }
+    public void handleRequest(String req) {
+        next.handleRequest(req);
     }
-    
-    public static void run() {
-        Task stack = new Core();
-        // Wrap 1000 times
-        for (int i=0; i<1000; i++) stack = new Wrapper(stack);
-        
-        long start = System.nanoTime();
-        int result = stack.run(0);
-        long dur = System.nanoTime() - start;
-        
-        System.out.println("1000 Layer Stack Call time: " + dur + " ns");
-        System.out.println("Cost per Layer: " + (dur/1000.0) + " ns");
+}
+
+// Decorator 1: Logger
+class LogMiddleware extends Middleware {
+    public LogMiddleware(WebServer next) { super(next); }
+    public void handleRequest(String req) {
+        System.out.println("📝 [Log] Request: " + req);
+        super.handleRequest(req);
+    }
+}
+
+// Decorator 2: Auth (Can block execution!)
+class AuthMiddleware extends Middleware {
+    public AuthMiddleware(WebServer next) { super(next); }
+    public void handleRequest(String req) {
+        if (!req.contains("ADMIN_TOKEN")) {
+            System.out.println("⛔ [Auth] 403 Forbidden!");
+            return; // BLOCKS chain
+        }
+        System.out.println("✅ [Auth] User valid.");
+        super.handleRequest(req);
+    }
+}
+
+// Decorator 3: Rate Limiter
+class RateLimitMiddleware extends Middleware {
+    private int calls = 0;
+    public RateLimitMiddleware(WebServer next) { super(next); }
+    public void handleRequest(String req) {
+        if (calls++ > 2) {
+            System.out.println("🖐️ [RateLimit] 429 Too Many Requests");
+            return;
+        }
+        super.handleRequest(req);
+    }
+}
+
+public class MiddlewareDemo {
+    public static void main(String[] args) {
+        // Build: RateLimit -> Auth -> Log -> Server
+        WebServer app = new RateLimitMiddleware(
+                            new AuthMiddleware(
+                                new LogMiddleware(
+                                    new JettyServer()
+                                )
+                            )
+                        );
+                        
+        app.handleRequest("GET /dashboard (No Token)"); // Blocked by Auth
+        System.out.println("-");
+        app.handleRequest("GET /dashboard ADMIN_TOKEN"); // OK
+        System.out.println("-");
+        app.handleRequest("GET /dashboard ADMIN_TOKEN"); // OK
+        System.out.println("-");
+        app.handleRequest("GET /dashboard ADMIN_TOKEN"); // OK
+        System.out.println("-");
+        app.handleRequest("GET /dashboard ADMIN_TOKEN"); // Blocked by RateLimit
     }
 }
 ```
-*Result*: Overhead is minimal (~2-5ns per layer) thanks to JVM inlining, but memory footprint increases (1000 wrapper objects).
+
+---
+
+### **6. Implementation III: Dynamic Proxies (The "Invisible" Decorator)**
+
+Java's `Proxy` class allows us to decorate *any* interface at runtime without writing a class for it. This is how Spring AOP works.
+
+```java
+import java.lang.reflect.*;
+
+public class DynamicDecorator {
+    
+    interface Service { void doWork(); }
+    
+    static class RealService implements Service {
+        public void doWork() { System.out.println("Working..."); }
+    }
+    
+    // The "Universal Decorator" Handler
+    static class AuditHandler implements InvocationHandler {
+        private final Object target;
+        
+        public AuditHandler(Object target) { this.target = target; }
+        
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            long start = System.nanoTime();
+            System.out.println(">>> Dynamic Log: Calling " + method.getName());
+            
+            Object result = method.invoke(target, args);
+            
+            long end = System.nanoTime();
+            System.out.println("<<< Dynamic Log: Finished in " + (end-start) + "ns");
+            return result;
+        }
+    }
+    
+    @SuppressWarnings("unchecked")
+    public static void main(String[] args) {
+        Service real = new RealService();
+        
+        // Wrap 'real' with AuditHandler dynamically
+        Service secure = (Service) Proxy.newProxyInstance(
+            DynamicDecorator.class.getClassLoader(),
+            new Class[] { Service.class },
+            new AuditHandler(real)
+        );
+        
+        secure.doWork();
+        // Outputs:
+        // >>> Dynamic Log: Calling doWork
+        // Working...
+        // <<< Dynamic Log: Finished in ...ns
+    }
+}
+```
+
+---
+
+### **7. Implementation IV: UI Component System (Swing Style)**
+
+Visual decoration (Borders, Scrollbars) is the origin of this pattern.
+
+```java
+interface VisualComponent {
+    void draw();
+}
+
+class TextField implements VisualComponent {
+    public void draw() { System.out.print("[ Text Field ]"); }
+}
+
+abstract class VisualDecorator implements VisualComponent {
+    protected VisualComponent wrapped;
+    public VisualDecorator(VisualComponent w) { this.wrapped = w; }
+    public void draw() { wrapped.draw(); }
+}
+
+class BorderDecorator extends VisualDecorator {
+    public BorderDecorator(VisualComponent w) { super(w); }
+    public void draw() {
+        System.out.print("|");
+        super.draw();
+        System.out.print("|");
+    }
+}
+
+class ScrollDecorator extends VisualDecorator {
+    public ScrollDecorator(VisualComponent w) { super(w); }
+    public void draw() {
+        super.draw();
+        System.out.print(" ↕️");
+    }
+}
+
+public class UIDemo {
+    public static void main(String[] args) {
+        // A Text Field with a Border AND a Scrollbar
+        VisualComponent widget = new ScrollDecorator(
+                                    new BorderDecorator(
+                                        new TextField()
+                                    )
+                                 );
+                                 
+        widget.draw();
+        // Output: |[ Text Field ]| ↕️
+    }
+}
+```
 
 ---
 
 ### **8. Multi-Language Perspectives**
 
-#### Python: Function Decorators via `@Syntax`
-Python supports Decorators at the language level for functions.
+#### Python: Function Decorators
+Python uses `@Operator` for this.
 ```python
-def log_execution(func):
-    def wrapper(*args, **kwargs):
-        print(f"Calling {func.__name__}")
-        return func(*args, **kwargs)
+def make_bold(fn):
+    def wrapper():
+        return "<b>" + fn() + "</b>"
     return wrapper
 
-@log_execution
-def process_data(data):
-    print("Processing...")
+@make_bold
+def get_hello():
+    return "Hello"
 
-process_data("meta") # Automatically logs
+print(get_hello()) # <b>Hello</b>
 ```
 
-#### Go: Embedding for "Mixin" Behavior
-Go uses composition (embedding) to simulate decoration.
+#### Go: Middleware Pattern
+Common in HTTP handlers.
 ```go
-type Server interface { Handle() }
-
-type BaseServer struct{}
-func (s *BaseServer) Handle() { fmt.Println("200 OK") }
-
-type AuthMiddleware struct {
-    Server // Embedding Interface
+func LoggingMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        log.Println("URL:", r.URL)
+        next.ServeHTTP(w, r)
+    })
 }
-func (a *AuthMiddleware) Handle() {
-    fmt.Println("Auth Check...")
-    a.Server.Handle()
-}
-```
-
-#### C++: Unique Ptr Wrapping
-Explicit memory ownership transfer.
-```cpp
-class Decorator : public Component {
-    std::unique_ptr<Component> wrapped;
-public:
-    Decorator(std::unique_ptr<Component> c) : wrapped(std::move(c)) {}
-    void operation() override { wrapped->operation(); }
-};
 ```
 
 ---
 
 ### **9. Deep Theory: The "Identity Crisis"**
 
-When you decorate a `FileInputStream` with `BufferedInputStream`, the resulting object is NO LONGER a `FileInputStream`.
-*   `original instanceof FileInputStream` -> `true`
-*   `decorated instanceof FileInputStream` -> `false`
-*   `decorated instanceof InputStream` -> `true`
+**The Problem**:
+When you wrap an object, `instanceof` checks can fail if you check for the concrete class.
+-   `wrapped instanceof ConcreteComponent` -> **False** (it's a Decorator).
+-   `wrapped instanceof ComponentInterface` -> **True**.
 
-**Rule**: Client code must depend on the **Abstract Component** (`InputStream`), never the concrete class (`FileInputStream`). If your code relies on the concrete type, Decorators will break it.
+**Rule**: **Always code to the Interface**. If you rely on `MyConcreteClass`, decorators will break your code. Use Factories to hide the wrapping process.
+
+ **The "Callback" Problem**:
+If `ConcreteComponent` passes `this` to someone else, it passes the *naked* object, bypassing the decorators!
+*Fix*: Generally hard to fix in classic OOP. In functional decoration (React HOC), this is handled by closure scope.
 
 ---
 
@@ -35670,20 +35919,21 @@ When you decorate a `FileInputStream` with `BufferedInputStream`, the resulting 
 
 | Metric | Decorator Pattern | Inheritance |
 | :--- | :--- | :--- |
-| **Adding Behavior** | Dynamic (Runtime) | Static (Compile Time) |
-| **Combinations** | Mix & Match ($N$ classes) | Combinatorial Explosion ($2^N$ classes) |
-| **Object Identity** | Hidden inside wrapper | The object itself |
-| **Performance** | Slight indirection cost | Zero cost (V-Table) |
+| **Flexibility** | High (Runtime Mix & Match) | Low (Static) |
+| **Complexity** | High (Many small objects) | Medium (Classes) |
+| **Performance** | Method wrapping overhead | V-Table lookup (Fast) |
+| **Use Case** | Middleware, I/O Streams, UI | Is-A Relationships |
 
-**Verdict**: Use Decorator when you need to stack features dynamically (like streams, UI borders, middleware).
+**Verdict**: Use Decorator when you need to layer behaviors that can be toggled independently (e.g., Encryption ON, Logging OFF).
 
 ---
 
 ### **11. References**
 1.  *Design Patterns (GoF)* - Structural Patterns.
-2.  *Head First Design Patterns* - "The Starbuzz Coffee Example" (Classic introduction).
+2.  *Head First Design Patterns* - "The Starbuzz Coffee Example".
 3.  *Effective Java* - Item 18: Favor Composition over Inheritance.
 
+---
 #### Q55: How do you architecturally resolve Circular Dependencies in large systems?
 **Companies**: Google, Amazon, Netflix, Uber, Palantir
 **Difficulty**: **Hard** (Architectural Integrity)
@@ -35695,9 +35945,10 @@ When you decorate a `FileInputStream` with `BufferedInputStream`, the resulting 
 
 **The "Why": The Acyclic Dependencies Principle (ADP)**
 Robert C. Martin (Uncle Bob) states in the *Stable Dependency Principle*: "The dependency structure of all released software components must be a Directed Acyclic Graph (DAG). There can be no cycles."
+
 When a cycle exists ($A \rightarrow B \rightarrow C \rightarrow A$), these components effectively become **one giant component**.
--   **Testing**: You cannot unit test A without mocking B *and* C.
--   **Reusability**: You cannot pull A into another project without dragging B and C along ("The Banana Problem": You wanted a banana, but you got the gorilla holding the banana and the entire jungle).
+-   **Testing**: You cannot unit test `A` without mocking `B` *and* `C`.
+-   **Reusability**: You cannot pull `A` into another project without dragging `B` and `C` along ("The Banana Problem": You wanted a banana, but you got the gorilla holding the banana and the entire jungle).
 -   **Build Time**: Compilation often fails or requires multi-pass linking.
 -   **Runtime**: Creation Deadlocks (Thread A holds Lock on Class A, Thread B holds Lock on Class B -> Deadlock).
 
@@ -35914,7 +36165,84 @@ public class DecoupledArchitecture {
 
 ---
 
-### **6. Implementation III: Attack Simulations (StackOverflow)**
+### **6. Implementation III: The Spring "Three-Level Cache" Simulator**
+
+This is the **Deepest** concept. How does Spring Framework *actually* solve circular dependencies?
+It uses a 3-stage Process:
+1.  **Instantiation**: `new A()`.
+2.  **Exposure**: Add reference of `A` to Singleton Factory (before properties).
+3.  **Initialization**: Fill properties.
+
+```java
+import java.util.*;
+import java.util.function.Supplier;
+
+public class SpringCacheSimulator {
+    
+    static class Bean {
+        String name;
+        Bean dependency;
+        public Bean(String name) { this.name = name; }
+        public String toString() { return name + (dependency!=null ? "->" + dependency.name : ""); }
+    }
+
+    // 1. Singleton Cache (Ready Beans)
+    static Map<String, Bean> singletonObjects = new HashMap<>();
+    
+    // 2. Early Reference Cache (Not fully initialized)
+    static Map<String, Bean> earlySingletonObjects = new HashMap<>();
+    
+    // 3. Registered Factories
+    static Map<String, Supplier<Bean>> singletonFactories = new HashMap<>();
+
+    public static Bean getBean(String name) {
+        // 1. Check Cycle: Is it already created?
+        if (singletonObjects.containsKey(name)) return singletonObjects.get(name);
+        
+        // 2. Check Early Cycle: Is it currently being created?
+        if (earlySingletonObjects.containsKey(name)) {
+            System.out.println("♻️  Cycle detected! Returning early reference for: " + name);
+            return earlySingletonObjects.get(name);
+        }
+        
+        System.out.println("Creating " + name + "...");
+        
+        // 3. Instantiate (Raw Object)
+        Bean bean = new Bean(name);
+        
+        // 4. Expose Early Reference (Critical Step!)
+        earlySingletonObjects.put(name, bean);
+        
+        // 5. Populate Dependencies
+        if (name.equals("A")) {
+            bean.dependency = getBean("B"); // A needs B
+        } else if (name.equals("B")) {
+            bean.dependency = getBean("A"); // B needs A (Cycle!)
+        }
+        
+        // 6. Move to fully initialized cache
+        earlySingletonObjects.remove(name);
+        singletonObjects.put(name, bean);
+        System.out.println("✅ " + name + " fully initialized.");
+        
+        return bean;
+    }
+    
+    public static void main(String[] args) {
+        // Request A. A needs B. B needs A.
+        Bean a = getBean("A");
+        
+        System.out.println("\nFinal Graph:");
+        System.out.println("A: " + a);
+        System.out.println("B: " + a.dependency);
+    }
+}
+```
+*Result*: Unlike naive recursion which StackOverflows, this mechanism detects the cycle and provides the *reference* to the unfinished `A` to `B`, allowing `B` to finish, which allows `A` to finish.
+
+---
+
+### **7. Implementation IV: Attack Simulations (StackOverflow)**
 
 What happens if we serialize a cyclic graph blindly?
 
@@ -35955,17 +36283,10 @@ public class CycleAttacks {
 
 ---
 
-### **7. Multi-Language Perspectives**
+### **8. Multi-Language Perspectives**
 
 #### Java: Spring's Three-Level Cache
 Spring solves *Setter* recursion by exposing "Early Object References".
-1.  Construct A (raw).
-2.  Cache A (Level 3).
-3.  Inject B into A.
-4.  Construct B.
-5.  Inject A into B (Found in Level 3 Cache).
-6.  Finish B.
-7.  Finish A.
 *Note*: This only works for Singleton Scope + Setter Injection. Constructor Injection fails immediately.
 
 #### Go: Compiler Enforcement
@@ -36003,7 +36324,7 @@ def my_func():
 
 ---
 
-### **8. Practice & Assessment**
+### **9. Practice & Assessment**
 
 #### Core Exercises
 1.  **Refactoring Drill (Interface Segregation)**:
@@ -36032,14 +36353,14 @@ def my_func():
 
 ---
 
-### **9. Deep Dive: The "Banana Problem"**
+### **10. Deep Dive: The "Banana Problem"**
 "You wanted a banana but you got the gorilla holding the banana and the entire jungle."
 -   **Joe Armstrong** (Creator of Erlang) on OOP.
 Circular dependencies bind modules together. You cannot reuse Module A without Module B. In a clean architecture (Ports & Adapters), the Core Logic has ZERO dependencies on outer layers (UI/DB).
 
 ---
 
-### **10. Cheatsheet & Summary**
+### **11. Cheatsheet & Summary**
 
 | Metric | Constructor Injection | Setter Injection |
 | :--- | :--- | :--- |
@@ -36055,13 +36376,12 @@ Circular dependencies bind modules together. You cannot reuse Module A without M
 
 ---
 
-### **11. References**
+### **12. References**
 1.  *Clean Architecture* - Robert C. Martin. (ADP - Acyclic Dependencies Principle).
 2.  *dependency-injection* reference (Spring/Guice docs).
 3.  *Graph Theory* - DFS Cycle Detection.
 
-----   `Plugin` needs `Core` services to register.
-**Task**: Design the startup sequence.
+---
 #### Q56: How does the Command Pattern enable "Undo" functionality and Transactional behavior?
 **Companies**: Microsoft, Apple, Adobe, Salesforce, Atlassian (Jira)
 **Difficulty**: **Medium** (Core Behavioral Pattern)
@@ -36069,7 +36389,7 @@ Circular dependencies bind modules together. You cannot reuse Module A without M
 
 ---
 
-### 1. Conceptual Overview & Motivation
+### **1. Conceptual Overview & Motivation**
 
 **The "Why": Decoupling Intent from Execution**
 In many systems, the *Initiator* of an action (User clicking a button, API client) needs to be decoupled from the *Executor* (Business Logic).
@@ -36095,60 +36415,9 @@ If a `Button` calls `Light.turnOn()` directly:
 
 ---
 
-### 2. Comprehensive Definition
+### **2. Comprehensive Definition**
 
 **Formal Definition**:
-> The **Command Pattern** encapsulates a request as an object, thereby letting you parameterize clients with different requests, queue or log requests, and support undoable operations.
-
-**Key Components**:
-1.  **Command (Interface)**: Declares `void execute()` and optionally `void undo()`.
-2.  **ConcreteCommand**: Implements `execute()`. Binds a `Receiver` with an action.
-3.  **Receiver**: The object that does the actual work (e.g., `Document`, `Light`).
-4.  **Invoker**: Stores the command and triggers it (e.g., `Toolbar`, `Scheduler`).
-5.  **Client**: Assembles the command object with the receiver and passes it to the invoker.
-
-**The Magic of Undo**:
-To support Undo, the Command object must store **State**.
--   `Execute`: `prevState = receiver.getState(); receiver.action();`
--   `Undo`: `receiver.setState(prevState);`
-
----
-
-### 3. Progressive Solution Evolution
-
-#### Approach 1: Direct Method Calls (The Tight Coupling)
-The UI Button calls the business logic directly.
-```java
-public class SaveButton {
-    private Document doc; // Hard dependency
-    public void click() { doc.save(); } // Irreversible?
-}
-// Critique: No Undo. No Logging. Tightly coupled.
-```
-
-#### Approach 2: Callback/Lambda (The Stateless Decoupling)
-Pass a function `() -> doc.save()`.
-```java
-public class Button {
-    private Runnable action;
-    public void click() { action.run(); }
-}
-// Critique: Decoupled, BUT Runnable has no 'undo()' method. It's stateless.
-```
-
-#### Approach 3: The Command Object (Stateful & Reversible)
-Wrap the action in a class.
-```java
-public class PasteCommand implements Command {
-    private Document doc;
-    private String backupText; // STATE for Undo
-
-    public void execute() {
-        backupText = doc.getText(); // Save Snapshot
-        doc.insertFromClipboard();
-    }
-    public void undo() {
-        doc.setText(backupText);    // Restore Snapshot
 > The Command Pattern encapsulates a request as an object, thereby letting you parameterize other objects with different requests, queue or log requests, and support undoable operations.
 
 **The Four Key Roles**:
@@ -36459,6 +36728,14 @@ C++ uses `operator()` to make objects callable.
 class Command {
 public:
     virtual void execute() = 0;
+};
+```
+
+#### JavaScript: Redux (Flux Pattern)
+Redux is literally the Command Pattern for UI State.
+```javascript
+// 1. The Command (Action)
+const addItem = (text) => ({
     type: 'ADD_TODO',
     payload: { text }
 });
@@ -36478,10 +36755,9 @@ function todos(state = [], action) {
 // Time Travel Debugging = Replaying the Actions!
 ```
 
-### [CONTINUE_Q56_LAYERS_5_10]
+---
 
-
-### 5. Practice & Assessment
+### **9. Practice & Assessment**
 
 #### Core Exercises
 1.  **Refactoring Drill (Callback to Command)**:
@@ -36498,9 +36774,15 @@ function todos(state = [], action) {
 
 #### Edge Case Drills
 1.  **Destructive Undo**:
+    -   *Problem*: User deletes "report.txt". Undo must RESTORE it.
+    -   *Solution*: The Command must read the file content into memory (Memento) BEFORE deleting it, so `undo()` can rewrite the file.
+2.  **Infinite Encapsulation**:
+    -   *Problem*: `CommandA` triggers `CommandB`. Undo logic becomes nested.
+    -   *Solution*: Flatten the history. Pushing `CommandA` should effectively push `[CommandA_Step1, CommandA_Step2]`.
+
 ---
 
-### 5. Deep Theory: CQRS & Event Sourcing
+### **10. Deep Theory: CQRS & Event Sourcing**
 
 **1. CQRS (Command Query Responsibility Segregation)**:
 Traditional CRUD uses the same model for Reads and Writes.
@@ -36510,7 +36792,7 @@ CQRS splits them:
 **Command Pattern** is the heart of the "Write" side.
 
 **2. Event Sourcing**:
-Instead of storing "Current State" (User name is "Bob"), store the **Commands/Events** that led there.
+Instead of storing just the "Current State" (User name is "Bob"), store the **Commands/Events** that led there.
 -   `UserCreated(name="Alice")`
 -   `UserNameChanged(newName="Bob")`
 -   **Current State**: Replay all events.
@@ -36519,24 +36801,7 @@ Instead of storing "Current State" (User name is "Bob"), store the **Commands/Ev
 
 ---
 
-### 8. Interview Bank: Follow-Up Questions
-
-1.  **Q**: "Difference between Command and Strategy Pattern?"
-    **A**:
-    -   **Command**: Encapsulates *Request*. Goal is to decouple Sender/Receiver or enable Undo/Queueing.
-    -   **Strategy**: Encapsulates *Algorithm*. Goal is to swap logic at runtime (e.g., Sorting method).
-2.  **Q**: "How do you handle Undo for 'Delete' operations?"
-    **A**: Two ways:
-    -   **Heavy**: Store the deleted object's state in the Command (Memento).
-    -   **Light**: Use Soft Deletes (mark `isDeleted=true`). Undo just sets `isDeleted=false`.
-3.  **Q**: "What if a Command takes too long?"
-    **A**: Asynchronous Command. The `execute()` method returns a `Future`/`Promise`. The Invoker puts it in a thread pool.
-4.  **Q**: "Relate Command Pattern to Thread Pools."
-    **A**: `Runnable` and `Callable` in Java *are* Commands. The `ExecutorService` (Invoker) takes these functional commands and executes them on available worker threads (Receivers).
-
----
-
-### 9. Cheatsheet & Summary
+### **11. Cheatsheet & Summary**
 
 | Pattern | Goal | Key Feature | Undo Support? |
 | :--- | :--- | :--- | :--- |
@@ -36548,92 +36813,12 @@ Instead of storing "Current State" (User name is "Bob"), store the **Commands/Ev
 
 ---
 
-### 10. References
+### **12. References**
 1.  *Design Patterns (GoF)* - Behavioral Patterns.
 2.  *Enterprise Integration Patterns* - Message Channel / Command Message.
 3.  *Implementing Domain-Driven Design* - Vaughn Vernon (CQRS & Event Sourcing).
 
 ---
-
-### 5. Practice & Assessment
-
-#### Core Exercises
-1.  **Basic**: Implement a `SmartHome` remote. Creates commands for `LightOn`, `LightOff`, `FanStart`, `FanStop`. Bind them to slots 1 and 2.
-2.  **Intermediate**: Create a `MacroCommand` (a Composite Command) that holds a list of other Commands. Executing the macro executes all children. Use this to create a "Party Mode" button (Lights On + Music On + Fan On).
-3.  **Advanced**: Implement a transactional **Bank Transfer** system. A transfer involves `DebitCommand` and `CreditCommand`. If Credit fails, you must Undo Debit. Wrap this logic in a `TransferTransactionCommand`.
-
-#### Edge Case Drills
-1.  **Undo Fallibility**: What if `undo()` fails? (e.g., Disk full). Do you retry? Throw exception? Log fatal error?
-2.  **State Size**: If your `undo` stack grows to 1 million commands, you run out of RAM. Implement a `CircularBuffer` for history to keep only the last 50 actions.
-3.  **Asynchronous Commands**: How do you implement a Command that makes an HTTP request? The `execute()` method returns immediately, but the work isn't done. (Hint: Promises/CompletableFutures).
-
-#### Challenge: The Job Queue
-**Task**: Build a simple Thread Pool.
-- `WorkerThread` pulls `Command` objects from a `BlockingQueue`.
-- Takes a list of 100 `ImageResizeCommand`s.
-- Submits them to the queue.
-- Shut down securely after completion.
-
----
-
-### 6. Common Mistakes & Anti-Patterns
-
-| Mistake | Consequence |
-| :--- | :--- |
-| **Smart Commands** | Putting all logic in `Command.execute()` instead of calling `Receiver`. The Command becomes a "God Class" instead of just a router. |
-| **Ignoring Undo** | Implementing "Command" purely for decoupling but forgetting `undo()`. While valid, it misses 50% of the pattern's power. |
-| **Direct Invocation** | Client calls `command.execute()` directly. You lose the Invoker's ability to log, queue, or manage history. |
-| **Stateful vs Stateless** | Confusing instances. A `LightOnCommand` usually needs state (which Light?). You can't reuse a single singleton instance for all lights. |
-
----
-
-### 7. Deep Dive: CQRS (Command Query Responsibility Segregation)
-
-**Theory**:
-CQRS (popularized by Greg Young) splits the model into two:
-1.  **Command Model (Write)**: Handling `CreateUser`, `UpdateOrder`. Uses the Command Pattern heavily. Optimizes for consistency and validation.
-2.  **Query Model (Read)**: Handling `GetUser`, `GetOrderHistory`. Optimizes for speed (often denormalized views).
-
-**Event Sourcing**:
-Often paired with CQRS. Instead of storing just the *current state* of an entity, you store the *sequence of Commands/Events* that got it there.
-- **Replay**: You can "rebuild" the database by re-executing all commands from time zero.
-- **Audit**: Perfect audit trail.
-
----
-
-### 8. Interview Bank: Follow-Up Questions
-
-1.  **Q**: "Difference between Command and Strategy?"
-    **A**: **Command** is an action (request) encapsulated as an object (Who/What/When). **Strategy** is an algorithm (How) encapsulated as an object. You "execute" a Command; you "use" a Strategy.
-2.  **Q**: "How to handle return values from Commands?"
-    **A**: Standard Command pattern is `void execute()`. To get results, either store the result inside the Command object (polled by Client) or pass a `Callback` to the Command constructor.
-3.  **Q**: "When is Command Pattern overkill?"
-    **A**: If you just need a simple button click handler without undo/queueing/logging, a simple lambda or method reference is sufficient. Don't create 5 classes for a "Hello World" click.
-4.  **Q**: "How does Command relate to Memento?"
-    **A**: Memento captures internal state. Command uses Memento to implement `undo()` efficiently without violating encapsulation (Command saves a Memento before executing, restores it on undo).
-
----
-
-### 9. Cheatsheet & Summary
-
-| Concept | Role | Example |
-| :--- | :--- | :--- |
-| **Command** | The Request | `LightOnCommand` |
-| **Invoker** | The Trigger | `RemoteControl`, `Button` |
-| **Receiver** | The Worker | `Light`, `Stereo` |
-| **Client** | The Assembler | `Main` (wires them up) |
-
-**Key Benefit**: Turns a request into a stand-alone object that can be passed around, stored, and executed later.
-
----
-
-### 10. References
-1.  *Design Patterns (GoF)* - Behavioral Patterns section.
-2.  *Enterprise Integration Patterns* - Message Channel (ActiveMQ/Kafka usage of Command).
-3.  *Head First Design Patterns* - "The Diner Example".
-
----
-
 
 #### Q57: How does the State Pattern replace complex `if-else/switch` logic in lifecycles?
 **Companies**: Uber, Lyft, Google (Android Lifecycle), Game Dev Studios
@@ -36959,12 +37144,50 @@ public class StateAttack {
 
 ---
 
-### **7. Implementation IV: Benchmarks (Polymorphism Overhead)**
+### **7. Implementation IV: Implementation IV: Thread-Safe State Machine (Atomic References)**
 
-Does calling `state.method()` cost more than `if (state == A)`?
-*   **Switch/If**: Branch Prediction can be fast, but large switches cause cache misses.
-*   **Polymorphism (Virtual Call)**: Requires v-table lookup.
-*   **Result**: Virtual calls add ~2-3ns overhead. For lifecycle transitions (which happen milliseconds apart), this is irrelevant. The maintainability win is massive.
+Handling concurrent events in a high-throughput system.
+
+```java
+import java.util.concurrent.atomic.AtomicReference;
+
+interface ConnectionState {
+    void handle(SafeConnection ctx);
+}
+
+class Open implements ConnectionState {
+    public void handle(SafeConnection ctx) {
+        System.out.println("Closing...");
+        ctx.transition(this, new Closed());
+    }
+}
+
+class Closed implements ConnectionState {
+    public void handle(SafeConnection ctx) {
+        System.out.println("Opening...");
+        ctx.transition(this, new Open());
+    }
+}
+
+class SafeConnection {
+    // AtomicReference ensures thread-safe transitions
+    private final AtomicReference<ConnectionState> state = new AtomicReference<>(new Closed());
+    
+    public void event() {
+        state.get().handle(this);
+    }
+    
+    public void transition(ConnectionState oldState, ConnectionState newState) {
+        // CAS (Compare-And-Swap) Loop not needed if logic relies on 'oldState' validity
+        // But for strict correctness:
+        if (state.compareAndSet(oldState, newState)) {
+            System.out.println("Transitioned to " + newState.getClass().getSimpleName());
+        } else {
+            System.out.println("Race Condition detected! Transition failed.");
+        }
+    }
+}
+```
 
 ---
 
@@ -37046,39 +37269,32 @@ func (s NewState) Next() State {
 ### 5. Practice & Assessment
 
 #### Core Exercises
-1.  **Media Player**:
-    -   *States*: `Playing`, `Paused`, `Stopped`.
-    -   *Inputs*: `Play`, `Pause`, `Stop`.
-    -   *Rules*: `Play` while `Playing` does nothing. `Play` while `Paused` resumes. `Stop` resets track.
-2.  **Document Workflow**:
-    -   *States*: `Draft`, `Moderation`, `Published`.
-    -   *Constraint*: Only `Admin` user can move from `Moderation` to `Published`. If `User` tries, throw Exception.
-    -   *Task*: Pass the `User` object into the state method `publish(doc, user)`.
-3.  **Gumball Machine**:
-    -   *States*: `NoQuarter`, `HasQuarter`, `Sold`, `SoldOut`.
-    -   *Logic*: `TurnCrank` behaves differently in each state.
-    -   *Bonus*: Add a 10% chance of "Winner" state (dispense 2 gumballs).
+1.  **Basic**: Implement a **Turnstile**.
+    -   Rules: `Locked` + Coin -> `Unlocked`. `Unlocked` + Push -> `Locked`.
+2.  **Intermediate**: Implement a **Vending Machine**.
+    -   States: `Idle`, `HasMoney`, `Dispensing`, `OutofStock`.
+    -   Drill: What happens if `OutofStock` receives `Coin`? (Refund immediately).
+3.  **Advanced**: Implement a **Circuit Breaker** class.
+    -   Config: `failureThreshold = 5`, `timeout = 10s`.
+    -   Mock the external service call to throw exceptions randomly.
 
 #### Edge Case Drills
-1.  **State Explosion**:
-    -   *Problem*: You have 50 states. Creating 50 classes is tedious.
-    -   *Drill*: Use a **Table-Driven Approach** (Map<State, Map<Input, State>>) as an alternative implementation and discuss tradeoffs (Lost behavior encapsulation vs Compactness).
-2.  **Concurrency**:
-    -   *Problem*: Two threads call `pay()` simultaneously on `NewState`.
-    -   *Task*: Ensure state transitions are atomic (`AtomicReference<State>` or `synchronized`).
-3.  **Circular Transitions**:
-    -   *Problem*: State A creates new B. B creates new A. Infinite loop if Logic is in Constructor.
-    -   *Fix*: Put transition logic in `methods`, not constructors.
+1.  **Concurrency**:
+    -   *Task*: Two threads call `connection.open()` simultaneously on a `CLOSED` connection.
+    -   *Problem*: Both might check `if state == CLOSED`, succeed, and *both* spawn a listener.
+    -   *Fix*: `synchronized` transition methods or `AtomicReference.compareAndSet`.
+2.  **Shared State**:
+    -   *Task*: Can we make State objects Singletons (Flyweight)?
+    -   *Answer*: ONLY if the State object allows no instance fields. If `DraftState` needs to store `draftVersion`, you need a new instance per Context. If it implies behavior only, Singleton is fine (and saves memory).
 
-#### Challenge: The TCP Protocol Stack
-**Scenario**: Implement a simplified TCP Connection.
-**States**: `CLOSED`, `LISTEN`, `SYN_RCVD`, `ESTABLISHED`, `FIN_WAIT_1`, `CLOSE_WAIT`.
-**Events**: `ActiveOpen`, `PassiveOpen`, `Syn`, `Ack`, `Fin`.
-**Task**:
--   `CLOSED` + `ActiveOpen` -> `SYN_SENT`.
--   `LISTEN` + `Syn` -> `SYN_RCVD`.
--   `SYN_RCVD` + `Ack` -> `ESTABLISHED`.
--   Implement this using the State Pattern, ensuring illegal transitions throw exceptions.
+#### Challenge: The Game AI
+**Scenario**: An Enemy Guard AI.
+-   States: `Patrol`, `Chase`, `Attack`.
+-   Transitions:
+    -   `Patrol` -> See Player -> `Chase`.
+    -   `Chase` -> Close Range -> `Attack`.
+    -   `Chase` -> Lost Player -> `Patrol`.
+**Task**: Implement using State Pattern.
 
 ---
 
@@ -37086,27 +37302,6 @@ func (s NewState) Next() State {
 
 | Mistake | Consequence |
 | :--- | :--- |
-| **Logic in Context** | Keeping the `switch` statement in the Context and just delegating small tasks to State classes. The *transition logic itself* should effectively move to the States (or a transition table). |
-| **State Output Coupling** | Tightly coupling State classes to the View/UI. State classes should be pure logic. |
-| **Garbage Creation** | Creating a `new State()` object on every transition (e.g., `new Idle()`). If states are stateless, use **Singletons** to save memory. |
-| **Inconsistent State** | Changing the state variable `currentState = next` *before* output actions are complete, leading to race conditions. |
-
----
-
-### 7. Deep Dive: TCP State Machine
-
-**The Classic Example**:
-TCP is the most famous Finite State Machine in computing.
-Instead of a 1000-line `switch` statement in `tcp_input.c` (Linux Kernel), conceptually it operates as a State Pattern.
-
-**Implementation Sketch**:
-```java
-// Logic: "If I am in ESTABLISHED state and receive FIN, I must send ACK and move to CLOSE_WAIT."
-
-class EstablishedState implements TcpState {
-    public void receiveFin(TcpContext ctx) {
-        System.out.println("Received FIN from remote.");
-        ctx.sendAck();
         ctx.setConnectionState(new CloseWaitState());
     }
     
@@ -37455,14 +37650,6 @@ Frameworks like **Spring Statemachine** allow you to define states and transitio
 **Companies**: Amazon, Microsoft, Netflix, LinkedIn, Twitter (Real-time feeds)
 **Difficulty**: **Hard** (Concurrency & Memory Management)
 **Category**: Concurrency Patterns, System Design (Pub/Sub)
-
----
-
-### 1. Conceptual Overview & Motivation
-
-**The "Why"**:
-In modern, highly decoupled systems, components need to react to events without knowing *who* triggers them or *who* else is listening.
-**Category**: Behavioral Patterns, Concurrency, Event-Driven Architecture
 
 ---
 
@@ -37969,318 +38156,57 @@ void notify() {
 ---
 
 ### 10. References
-1.  *Design Patterns (GoF)* - Behavioral Patterns.
-2.  *LMAX Disruptor Technical Paper* - Mechanical Sympathy.
-3.  *Reactive Streams Specification* - Flow API.
-
----
-#### Q59: How does the Proxy Pattern control access to sensitive or expensive resources?
-**Companies**: Google (RPC), LinkedIn (Lazy Loading), SpringSource (AOP), Hibnernate (Lazy Fetch)
-**Difficulty**: **Medium** (Core Structural Pattern / AOP Basis)
-**Category**: Structural Patterns, Meta-Programming
-
----
-
-### **1. Conceptual Overview & Motivation**
-
-**The "Why": Intercepting Access**
-Sometimes, you cannot (or should not) access an object directly.
-1.  **It's Remote**: The object lives on a server in Tokyo (RPC/gRPC).
-2.  **It's Heavy**: The object is a 2GB Video File. Loading it freezes the UI.
-3.  **It's Sensitive**: You need `ADMIN` role to call `deleteUser()`.
-
-**The Solution**: A **Substitute** (Proxy).
-The Proxy looks *exactly* like the Real Object (implements same Interface).
-It intercepts the call, performs some logic (Lazy Load / Auth Check / Network Call), and *then* delegates to the Real Object.
-
-**Real-World Analogies**:
-1.  **Credit Card**: It is a proxy for the Cash in your Bank Account. You use the card, the bank checks funds, then executes the transaction.
-2.  **Cheque**: A piece of paper representing money.
-
----
-
-### **2. Comprehensive Definition**
-
-**Formal Definition**:
-> The Proxy Pattern provides a surrogate or placeholder for another object to control access to it.
-
-**The Three Variants**:
-1.  **Remote Proxy**: Represents an object in a different address space (e.g., REST Client, RMI).
-2.  **Virtual Proxy**: Creates expensive objects on demand (Lazy Loading).
-3.  **Protection Proxy**: Controls access based on permissions (Auth/ACL).
-
----
-
-### **3. Progressive Solution Evolution**
-
-#### Approach 1: Direct Access (The Problem)
-```java
-// Loading Profile loads everything
-class UserProfile {
-    HighResImage avatar = new HighResImage(); // Validates 50MB immediately!
-}
-```
-*   **Critique**: Slow startup. Wastes RAM if user never views the avatar.
-
-#### Approach 2: Static Proxy (Manual Wrapper)
-```java
-class ImageProxy implements Image {
-    RealImage real;
-    void display() {
-        if (real == null) real = new RealImage(); // Lazy
-        real.display();
-    }
-}
-```
-*   **Verdict**: Excellent for specific classes. Tedious if you have 100 classes to proxy.
-
-#### Approach 3: Dynamic Proxy (The Framework Way)
-Generate the Proxy Class at **Runtime** using Reflection (`java.lang.reflect.Proxy`).
-*   **Verdict**: Used by Spring, Hibernate, Mybatis. Harder to debug but infinitely scalable.
-
----
-
-### **4. Implementation I: The Protection Proxy (Security)**
-Simulating a "Role-Based Access Control" (RBAC) system.
-
-```java
-interface Database {
-    void deleteUser(int id);
-    void readData();
-}
-
-// 1. The Real Subject (Sensitive)
-class RealDatabase implements Database {
-    @Override
-    public void deleteUser(int id) {
-        System.out.println("🔥 DELETING USER " + id);
-    }
-    
-    @Override
-    public void readData() {
-        System.out.println("📄 Reading Data...");
-    }
-}
-
-// 2. The Proxy (The Bouncer)
-class SecurityProxy implements Database {
-    private final RealDatabase realDB;
-    private final String userRole;
-    
-    public SecurityProxy(String role) {
-        this.realDB = new RealDatabase();
-        this.userRole = role;
-    }
-    
-    @Override
-    public void deleteUser(int id) {
-         if (!"ADMIN".equals(userRole)) {
-             throw new SecurityException("⛔ ACCESS DENIED: Requires ADMIN");
-         }
-         realDB.deleteUser(id);
-    }
-    
-    @Override
-    public void readData() {
-        // Everyone can read
-        realDB.readData();
-    }
-}
-
-// 3. Usage
-public class SecurityDemo {
-    public static void main(String[] args) {
-        Database adminDB = new SecurityProxy("ADMIN");
-        adminDB.readData();
-        adminDB.deleteUser(101); // Works
         
-        Database guestDB = new SecurityProxy("GUEST");
-        guestDB.readData(); // Works
-        try {
-            guestDB.deleteUser(999); // Throws Exception
-        } catch (Exception e) {
-            System.out.println(e.getMessage());
-        }
-    }
-}
-```
-
----
-
-### **5. Implementation II: The Virtual Proxy (Lazy Loading)**
-Loading a huge image only when `render()` is called.
-
-```java
-interface Graphic {
-    void render();
-}
-
-class HeavyImage implements Graphic {
-    private final String filename;
-    
-    public HeavyImage(String filename) {
-        this.filename = filename;
-        loadFromDisk(); // Expensive operation happens in Constructor!
-    }
-    
-    private void loadFromDisk() {
-        try {
-            System.out.println("... Loading 500MB file: " + filename);
-            Thread.sleep(1000); // Simulate I/O
-        } catch(InterruptedException e){}
-    }
-    
-    public void render() {
-        System.out.println("🖼️ Displaying " + filename);
-    }
-}
-
-// The Proxy
-class ImageProxy implements Graphic {
-    private final String filename;
-    private HeavyImage realImage; // Null initially
-    
-    public ImageProxy(String filename) { this.filename = filename; }
-    
-    @Override
-    public void render() {
-        if (realImage == null) {
-            realImage = new HeavyImage(filename); // Just-in-Time Loading
-        }
-        realImage.render();
-    }
-}
-
-public class VirtualProxyDemo {
-    public static void main(String[] args) {
-        System.out.println("--- App Startup ---");
-        // Lightweight - No loading occurs here
-        Graphic img1 = new ImageProxy("Photo_4K.jpg"); 
-        Graphic img2 = new ImageProxy("Blueprint.png");
-        
-        System.out.println("--- User Scrolls to Image 1 ---");
-        img1.render(); // Loads now
-        
-        System.out.println("--- User Scrolls to Image 1 Again (Cached) ---");
-        img1.render(); // No load
-        
-        // Image 2 is never loaded (RAM Saved!)
-    }
-}
-```
-
----
-
-### **6. Implementation III: Dynamic Proxy (Generic Logging)**
-Using `java.lang.reflect.Proxy` to create a logger for **any** interface without writing a specific wrapper class.
-
-```java
-import java.lang.reflect.*;
-
-// Generic Invocation Handler
-class AuditHandler implements InvocationHandler {
-    private final Object target;
-    
-    public AuditHandler(Object target) { this.target = target; }
-    
-    @Override
-    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-        System.out.println("📝 AUDIT: Calling " + method.getName());
-        
-        long start = System.nanoTime();
-        Object result = method.invoke(target, args); // Forward to Real Object
-        long end = System.nanoTime();
-        
-        System.out.println("✅ DONE in " + (end - start) + "ns");
+        System.out.println(">> [LOG] End " + method.getName() + " took " + (end-start) + "ns");
         return result;
     }
 }
 
 public class DynamicProxyDemo {
     public static void main(String[] args) {
-        Database realDB = new RealDatabase(); // From previous example
+        Service real = new RealService();
         
-        // Create Proxy at Runtime
-        Database auditedDB = (Database) Proxy.newProxyInstance(
-            DynamicProxyDemo.class.getClassLoader(),
-            new Class<?>[] { Database.class },
-            new AuditHandler(realDB)
+        // Magically create a new class executing the Handler
+        Service proxy = (Service) Proxy.newProxyInstance(
+            Service.class.getClassLoader(),
+            new Class<?>[] { Service.class },
+            new LoggingHandler(real)
         );
-};
-
-class Proxy : public Subject {
-    RealSubject* realSubject;
-public:
-    Proxy() : realSubject(nullptr) {}
-    ~Proxy() { delete realSubject; }
-
-    void request() override {
-        if (realSubject == nullptr) {
-            realSubject = new RealSubject(); // Lazy Init
-        }
-        std::cout << "Proxy checking access..." << std::endl;
-        realSubject->request();
+        
+        proxy.serve();
     }
-};
+}
 ```
+*   **Deep Dive**: `Proxy.newProxyInstance` generates bytecode (`$Proxy0.class`) in memory that forwards every method call to `invoke()`. This is how Spring AOP wraps your beans to add Transaction/Security logic without modifying your code.
 
-#### JavaScript: ES6 Proxy
-Native `Proxy` object.
+---
 
+### **7. Implementation IV: Benchmarks (Native vs Proxy)**
+Wrappers add overhead.
+1.  **Direct Call**: ~0.5ns (inlined).
+2.  **Static Proxy**: ~1ns (one extra hop).
+3.  **Dynamic Proxy (Reflection)**: ~10ns (Method.invoke is slower).
+4.  **CGLIB/ByteBuddy**: ~2ns (Direct bytecode access, faster than Reflection).
+
+---
+
+### **8. Multi-Language Perspectives**
+
+#### JavaScript: The `Proxy` Object
+ES6 introduced native Proxies.
 ```javascript
 const target = {
-    message1: "hello",
-    message2: "world"
+    message: "secret"
 };
 
 const handler = {
     get: function(obj, prop) {
-        if (prop === 'secret') {
-            return 'Access Denied';
-        }
-        return Reflect.get(...arguments);
+        if (prop === 'message') return "ACCESS DENIED";
+        return obj[prop];
     }
 };
 
 const proxy = new Proxy(target, handler);
-
-console.log(proxy.message1); // "hello"
-console.log(proxy.secret);   // "Access Denied"
-```
-
-### 5. Practice & Assessment
-
-#### Core Exercises
-1.  **Basic**: Create a `MathService` with a method `add(int x, int y)`. Create a `LoggingProxy` that prints "Added x and y" before calling the real service.
-2.  **Intermediate**: Implement a **Lazy Loading Proxy** for a `VideoPlayer` class. The `Video` object should only load the 500MB file from disk when `play()` is called, not when `new Video()` is called.
-3.  **Advanced**: Build a **Generic Retry Proxy**. It takes ANY interface. If a method throws an `IOException`, it retries 3 times before failing. (Use `java.lang.reflect.InvocationHandler`).
-
-#### Edge Case Drills
-1.  **Circular Proxies**: What happens if Proxy A calls Proxy B, and B calls A? StackOverflow. How do you detect this?
-2.  **equals() and hashCode()**: Does `proxy.equals(realObject)`? This is a notorious trap in Hibernate. Proxies usually break identity equality.
-3.  **Final Classes**: Try to create a Proxy for a `final` class in Java. It fails (cannot subclass). Understanding this limitation is key for frameworks like Spring.
-
-#### Challenge: The Wall
-**Task**: Implement a Firewall Proxy.
-- Define a list of `BlockedSites`.
-- If `connect(url)` matches a blocked site, throw `AccessDeniedException`.
-- If allowed, delegate to `RealNetwork`.
-- Add "Admin Override" functionality (if user is Admin, bypass firewall).
-
----
-
-### 6. Common Mistakes & Anti-Patterns
-
-| Mistake | Consequence |
-| :--- | :--- |
-| **Proxy vs Decorator** | Confusing the two. **Proxy** controls access/lifecycle. **Decorator** adds behavior/features. |
-| **Heavy Proxy** | Putting too much business logic in the Proxy. It should be a thin wrapper. |
-| **Reflection Overhead** | Using Dynamic Proxies in a tight loop (millions of calls/sec). Reflection is slower than direct calls. |
-| **Self-Invocation** | Calling `this.method()` inside the RealObject bypasses the Proxy (and its transactions/security). Known as the "Spring Self-Invocation Problem". |
-
----
-
-### 7. Deep Dive: JDK Dynamic Proxy vs. CGLIB
 
 **The Two Types of Proxies in Spring**:
 
@@ -38443,20 +38369,17 @@ Modern software subsystems are complex webs of classes.
 -   **Example**: To "Play a Movie" in a home theater system:
     1.  `Amplifier.on()`
     2.  `Amplifier.setSource(DVD)`
-    3.  `Projector.on()`
-    4.  `Projector.setInput(HDMI)`
-    5.  `DVDPlayer.on()`
-    6.  `DVDPlayer.play()`
--   **The Problem**: If the Client (User) has to do this manually every time, the system is unusable. If you upgrade from DVD to BluRay, the Client code breaks.
--   **The Solution**: A **Facade** (`HomeTheater.watchMovie()`) that encapsulates these 6 steps into 1 method.
+Imagine a modern "Smart Home".
+-   **Without Facade**: You manually pair the Zigbee bulb, open the socket connection to the thermostat, authenticate with the cloud camera, synchronize the NTP time server, and calculate the sunset time to dim the lights.
+-   **With Facade**: You say "Goodnight".
+
+In software, subsystems naturally become complex. They have dozens of classes (`Codec`, `Manager`, `Builder`, `Registry`). Client code should not be coupled to this internal spaghetti. It just wants `home.triggerScene("Goodnight")`.
+
+**The Solution**: A **Facade** class that provides a unified, higher-level interface to a set of interfaces in a subsystem.
 
 **Real-World Analogies**:
-1.  **Car Starter**: You push a "Start" button (Facade). Under the hood, it calculates fuel injection, engages the starter motor, fires spark plugs in order, and monitors oil pressure. You don't see this complexity.
-2.  **Amazon One-Click Buy**: One button triggers a massive chain: Verify Auth -> Check Inventory -> Charge Card -> Alert Warehouse -> Schedule Shipping -> Email User.
-3.  **API Gateway**: In Microservices, the Frontend doesn't call 50 services. It calls `gateway.getDashboard()`. The Gateway aggregates data from `Users`, `Orders`, and `Recommendations` services.
-
-1.  **Home Theater Remote**: One button "Watch Movie" turns on TV, lowers blinds, dims lights, switches output to HDMI 1.
-2.  **Customer Support**: You call one number. They route you to Billing, Technical, or Sales. You don't call the billing department directly.
+1.  **Car Starter**: One button "Start" triggers: `FuelPump.inject()`, `StarterMotor.engage()`, `SparkPlugs.fire()`, `ECU.monitor()`.
+2.  **Customer Support**: 1-800-HELP. The operator routes you to Billing, Tech, or Sales. You don't need the direct extension of the junior billing analyst.
 
 ---
 
@@ -38465,260 +38388,353 @@ Modern software subsystems are complex webs of classes.
 **Formal Definition**:
 > The Facade Pattern provides a unified interface to a set of interfaces in a subsystem. Facade defines a higher-level interface that makes the subsystem easier to use.
 
-**Distinction**:
--   **Facade**: Simplifies interface (New Interface -> Many Old Objects).
--   **Adapter**: Converts interface (New Interface -> One Old Object).
--   **Proxy**: Controls access (Same Interface -> One Object).
+**Key Characteristics**:
+-   **Decoupling**: Promotes weak coupling between the subsystem and its clients.
+-   **Layering**: Helps define entry points to each layer of the system.
+-   **Optionality**: Usually, Facades do *not* prevent advanced clients from accessing the underlying classes if they really need to.
 
 ---
 
 ### **3. Progressive Solution Evolution**
 
-#### Approach 1: Helper Class / Utils
-`VideoUtils.convert()`.
-*   **Critique**: Often becomes a "God Class" with static methods, hard to test or mock.
+#### Approach 1: The "God Class" (Anti-Pattern)
+A single class `Utils` with 500 static methods.
+*   **Critique**: Untestable, high coupling, shared static state hell.
 
 #### Approach 2: Direct Access (Spaghetti)
-Client instantiates `AudioMixer`, `VideoCodec`, `SubtitleSyncer`.
-*   **Critique**: Strong coupling. If you change the `VideoCodec` library, you break the Client efficiently.
+Client instantiates `ZigbeeController`, `WifiManager`, `CloudAuth`.
+*   **Critique**: If you switch from Zigbee to Z-Wave, you rewrite the Client.
 
-#### Approach 3: The Facade
-Client instantiates `VideoConverter`. `VideoConverter` manages the mess.
-*   **Verdict**: Decoupled. The ecosystem can change without breaking the client.
-
----
-
-### **4. Implementation I: The Multimedia Conversion (Classic)**
-Hiding a complex ffmpeg-style library.
-
-```java
-// --- Complex Subsystem (The "Mess") ---
-class VideoFile { 
-    public VideoFile(String name) {} 
-}
-
-class OggCompressionCodec {
-    public void compress() { System.out.println("Compressing Ogg..."); }
-}
-
-class MPEG4CompressionCodec {
-    public void compress() { System.out.println("Compressing MPEG4..."); }
-}
-
-class CodecFactory {
-    public static Object extract(VideoFile file) { return new Object(); }
-}
-
-class BitrateReader {
-    public static String read(String filename, Object sourceCodec) { return "buffer..."; }
-    public static String convert(String buffer, Object destinationCodec) { return "result"; }
-}
-
-class AudioMixer {
-    public File fix(String result) { return new File("final.mp4"); }
-}
-
-// --- The Facade (The "Easy Button") ---
-class VideoConversionFacade {
-    public File convertVideo(String fileName, String format) {
-        System.out.println("--- Conversion Started ---");
-        VideoFile file = new VideoFile(fileName);
-        
-        Object sourceCodec = CodecFactory.extract(file);
-        Object destinationCodec;
-        
-        if (format.equals("mp4")) {
-            destinationCodec = new MPEG4CompressionCodec();
-        } else {
-            destinationCodec = new OggCompressionCodec();
-        }
-        
-        String buffer = BitrateReader.read(fileName, sourceCodec);
-        String result = BitrateReader.convert(buffer, destinationCodec);
-        File finalFile = new AudioMixer().fix(result);
-        
-        System.out.println("--- Conversion Completed ---");
-        return finalFile;
-    }
-}
-
-// --- Usage ---
-public class FacadeDemo {
-    public static void main(String[] args) {
-        // Client knows NOTHING about codecs, bitrates, or mixers.
-        VideoConversionFacade converter = new VideoConversionFacade();
-        File mp4 = converter.convertVideo("funny_cat.ogg", "mp4");
-    }
-}
-```
+#### Approach 3: The Facade (Clean Architecture)
+Client talks to `SmartHomeHub`. The Hub manages the complexity.
+*   **Verdict**: The subsystem can be refactored completely without breaking the client.
 
 ---
 
-### **5. Implementation II: The API Gateway (Microservices Facade)**
-In Distributed Systems, the Facade is often a network service (BFF - Backend for Frontend).
-It aggregates calls to multiple microservices.
+### **4. Implementation: The Enterprise Smart Home OS**
+**Scenario**: A complete Home Automation System (like HomeAssistant).
+We need to orchestrate:
+1.  **Protocol Layer**: Zigbee, Z-Wave, WiFi.
+2.  **Device Registry**: Keeping track of what's online.
+3.  **Automation Engine**: Rules and Triggers.
+4.  **Network Layer**: Service Discovery.
+
+This is a **System-Level** implementation demonstrating how a Facade tames a massive ecosystem.
 
 ```java
+import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
-// Subsystems
-class UserService {
-    public String getUser(String id) { return "User:" + id; }
-}
-class OrderService {
-    public String getOrders(String uid) { return "[Order1, Order2]"; }
-}
-class PricingService {
-    public String getPoints(String uid) { return "Points: 500"; }
+/**
+ * ============================================================================
+ * THE COMPLEX SUBSYSTEM (The "Mess" we want to hide)
+ * ============================================================================
+ */
+
+// --- 1. Protocol Layer (Low Level) ---
+
+interface ProtocolAdapter {
+    void sendSignal(String deviceId, String payload);
+    boolean isReachable(String deviceId);
 }
 
-// The Facade (Aggregator)
-class MobileDashboardFacade {
-    private final UserService userSvc = new UserService();
-    private final OrderService orderSvc = new OrderService();
-    private final PricingService priceSvc = new PricingService();
+class ZigbeeAdapter implements ProtocolAdapter {
+    public void sendSignal(String deviceId, String payload) {
+        System.out.println("  [Zigbee] TX -> " + deviceId + ": " + payload);
+    }
+    public boolean isReachable(String deviceId) { return true; }
+}
+
+class ZWaveAdapter implements ProtocolAdapter {
+    public void sendSignal(String deviceId, String payload) {
+        System.out.println("  [Z-Wave] TX -> " + deviceId + ": " + payload);
+    }
+    public boolean isReachable(String deviceId) { return true; }
+}
+
+class WifiAdapter implements ProtocolAdapter {
+    public void sendSignal(String deviceId, String payload) {
+        System.out.println("  [WiFi] HTTP POST -> " + deviceId + ": " + payload);
+    }
+    public boolean isReachable(String deviceId) { return true; }
+}
+
+// --- 2. Device Registry (State Management) ---
+
+enum DeviceType { LIGHT, THERMOSTAT, LOCK, CAMERA, SPEAKER }
+
+class Device {
+    final String id;
+    final String name;
+    final DeviceType type;
+    final String protocol; // "zigbee", "wifi", etc.
     
-    // Returns a Composite DTO (Data Transfer Object)
-    public DashboardDTO getDashboard(String userId) {
-        // In real life, these would be Async CompeltableFutures
-        String user = userSvc.getUser(userId);
-        String orders = orderSvc.getOrders(userId);
-        String points = priceSvc.getPoints(userId);
-        
-        return new DashboardDTO(user, orders, points);
+    public Device(String id, String name, DeviceType type, String protocol) {
+        this.id = id; this.name = name; this.type = type; this.protocol = protocol;
     }
 }
 
-class DashboardDTO {
-    public final String u, o, p;
-    public DashboardDTO(String u, String o, String p) {
-        this.u = u; this.o = o; this.p = p;
+class DeviceRegistry {
+    private final Map<String, Device> devices = new ConcurrentHashMap<>();
+    
+    public void register(Device d) { devices.put(d.id, d); }
+    public Device get(String id) { return devices.get(id); }
+    public List<Device> getByType(DeviceType type) {
+        return devices.values().stream()
+                .filter(d -> d.type == type)
+                .collect(Collectors.toList());
     }
-    @Override public String toString() { return u + " | " + o + " | " + p; }
 }
 
-public class GatewayDemo {
+// --- 3. Automation Engine (Business Logic) ---
+
+class AutomationEngine {
+    public void scheduleAction(String deviceId, long delayMs) {
+        System.out.println("  [Engine] Scheduling action for " + deviceId + " in " + delayMs + "ms");
+    }
+    
+    public void validateSecurity(String userId) {
+        if (!"admin".equals(userId)) throw new SecurityException("Unauthorized");
+    }
+}
+
+// --- 4. Network Discovery (Infrastructure) ---
+
+class NetworkDiscovery {
+    public void scan() {
+        System.out.println("  [Net] Scanning local network for new devices...");
+    }
+}
+
+/**
+**The Key Roles**:
+1.  **Facade**: The "Face". Knows which subsystem classes are responsible for a request.
+2.  **Subsystem Classes**: The "Workers". Complex, granular, independent classes (e.g., `CPU, RAM, HardDrive`). They do not know about the Facade.
+3.  **Client**: Calls the Facade.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Mixing Client and Subsystem (The Mess)
+```java
+// Client code
+Codec c = new OpenAI_Codec();
+Buffer b = new RingBuffer(1024);
+if (c.init(b)) {
+    c.decode(); // Error prone: Did you check the buffer size?
+}
+```
+*   **Critique**: Client is tightly coupled to `Codec` and `Buffer`. If we swap `OpenAI` for `DeepMind`, client breaks.
+
+#### Approach 2: Utility Helper
+```java
+class VideoUtil {
+    static void convert() { ... }
+}
+```
+*   **Critique**: Hard to mock (static methods). Often becomes a "God Class".
+
+#### Approach 3: The Facade (Object-Oriented)
+```java
+class VideoConversionFacade {
+    public File convert(String filename, String format) {
+        // Encapsulates all the mess
+        Codec c = CodecFactory.get(format);
+        // ... orchestration logic
+        return result;
+    }
+}
+```
+*   **Verdict**: Decoupled. Start simple, stay simple.
+
+---
+
+### **4. Implementation I: The Smart Home OS (Classic Facade)**
+Coordinating a Home Theater system.
+
+```java
+// --- THE COMPLEX SUBSYSTEMS ---
+
+class Amplifier {
+    void on() { System.out.println("Amp ON"); }
+    void setVolume(int level) { System.out.println("Amp Volume: " + level); }
+    void setSurround() { System.out.println("Amp Surround Sound ON"); }
+    void off() { System.out.println("Amp OFF"); }
+}
+
+class Projector {
+    void on() { System.out.println("Projector ON"); }
+    void wideScreenMode() { System.out.println("Projector Widescreen (16:9)"); }
+    void off() { System.out.println("Projector OFF"); }
+}
+
+class Screen {
+    void down() { System.out.println("Screen Lowering..."); }
+    void up() { System.out.println("Screen Rising..."); }
+}
+
+class PopcornPopper {
+    void on() { System.out.println("Popcorn Popper ON"); }
+    void pop() { System.out.println("Popping corn!"); }
+    void off() { System.out.println("Popcorn Popper OFF"); }
+}
+
+class Lights {
+    void dim(int percentage) { System.out.println("Lights dimmed to " + percentage + "%"); }
+    void on() { System.out.println("Lights ON"); }
+}
+
+// --- THE FACADE ---
+
+class HomeTheaterFacade {
+    private final Amplifier amp;
+    private final Projector projector;
+    private final Screen screen;
+    private final PopcornPopper popper;
+    private final Lights lights;
+
+    public HomeTheaterFacade(Amplifier amp, Projector projector, Screen screen, 
+                             PopcornPopper popper, Lights lights) {
+        this.amp = amp;
+        this.projector = projector;
+        this.screen = screen;
+        this.popper = popper;
+        this.lights = lights;
+    }
+
+    public void watchMovie(String movie) {
+        System.out.println("=== Get ready to watch '" + movie + "' ===");
+        popper.on();
+        popper.pop();
+        lights.dim(10);
+        screen.down();
+        projector.on();
+        projector.wideScreenMode();
+        amp.on();
+        amp.setSurround();
+        amp.setVolume(5);
+        System.out.println("🍿 Movie Started!");
+    }
+
+    public void endMovie() {
+        System.out.println("\n=== Shutting Movie Theater Down ===");
+        popper.off();
+        lights.on();
+        screen.up();
+        projector.off();
+        amp.off();
+    }
+}
+
+// --- USAGE ---
+public class SmartHomeDemo {
     public static void main(String[] args) {
-        MobileDashboardFacade api = new MobileDashboardFacade();
-        System.out.println(api.getDashboard("U-123"));
-        // Output: User:U-123 | [Order1, Order2] | Points: 500
+        long start = System.nanoTime();
+        
+        // 1. Direct Subsystem Calls
+        // codec.init(); codec.decode(); mixer.mix();
+        
+        // 2. Facade Call
+        // facade.convert();
+        
+        long end = System.nanoTime();
+        
+        // Result:
+        // Local Facade: ~2ns overhead (JIT inlines it).
+        // Remote Facade (API Gateway): ~50ms overhead (Network).
+        
+        System.out.println("Local Facade Overhead: 0% (Optimized)");
+        System.out.println("Remote Facade Overhead: High (Latency)");
     }
 }
 ```
 
 ---
 
-### **6. Challenge: The "Leaky Facade" Attack**
-**The Problem**: If the Facade method returns an object from the Subsystem, the Facade is "Leaky".
-The client can then call methods on that object, re-introducing coupling.
+### **9. Multi-Language Perspectives**
 
-**Vulnerable Code**:
-```java
-class BankFacade {
-    private AccountSystem internalSystem = new AccountSystem();
-    
-    // 🚨 LEAK! Returns internal entity
-    public AccountSystem getSystem() { 
-        return internalSystem; 
-    }
-}
+#### **C: The Opaque Pointer (Pimpl Idiom)**
+In C, the Facade is often implemented by hiding the `struct` definition in the `.c` file, exposing only a `void*` or incomplete type in the `.h` file.
+
+```c
+// facade.h
+typedef struct SmartHome* HomeHandle; // Opaque
+HomeHandle create_home();
+void trigger_scene(HomeHandle h, const char* scene);
+
+// facade.c
+struct SmartHome {
+    struct Zigbee* z;
+    struct Wifi* w;
+};
+// Client cannot see 'z' or 'w'. They are physically decoupled.
 ```
 
-**The Attack**:
-```java
-BankFacade facade = new BankFacade();
-// Attacker bypasses facade logic
-facade.getSystem().forceWithdraw(100000); 
+#### **JavaScript / Node.js: The Module Facade**
+Standard pattern for libraries.
+```javascript
+// my-lib/index.js
+// This file IS the Facade.
+module.exports = {
+   startServer: require('./server').start,
+   connectDB: require('./database').connect
+};
+// The client never sees './internal/utils.js'
 ```
 
-**The Fix**:
-Always return **DTOs** (Data Transfer Objects) or Immutable Wrappers. Never return internal Entities.
+#### **Go: Internal Packages**
+Go enforces Facades via the `internal/` folder convention.
+```text
+project/
+  internal/  <-- Cannot be imported by external projects
+     zigbee/
+     wifi/
+  pkg/
+     smarthome/ <-- Public Facade
+        hub.go
+```
 
----
-
-### **7. Multi-Language Perspectives**
-
-#### Python: `__init__.py`
-Python libraries use `__init__.py` to expose a clean API while hiding the file structure.
+#### **Python: `__init__.py`**
 ```python
-# mylogic/
-#    __init__.py
-#    complex_math.py
-#    network_stuff.py
+# smarthome/__init__.py
+from ._internal.zigbee import ZigbeeAdapter # _internal is convention
+from ._internal.wifi import WifiAdapter
 
-# __init__.py
-from .complex_math import easy_calculate as calculate
-# Now client just imports 'manage' and calls calculate()
-```
-
-#### JavaScript: Module Exports
-// index.js (The Facade)
-import { parse } from './internal/parser';
-import { validate } from './internal/types';
-
-export function process(data) {
-    if (validate(data)) return parse(data);
-}
-// Client only imports 'process', not 'parse' or 'validate'.
+class SmartHomeHub:
+    def __init__(self):
+        self.z = ZigbeeAdapter()
 ```
 
 ---
 
-### **8. Benchmarks (Overhead)**
+### **10. Practice & Assessment**
 
-| Mechanism | Overhead | Notes |
-| :--- | :--- | :--- |
-| **Inline Code** | 0ns | Direct calls. |
-| **Class Facade** | ~2ns | One extra method call. Negligible. |
-| **Network Facade** | ~50ms | API Gateway adds network hop + serialization. Trade-off for decoupling. |
+#### **Core Exercises**
+1.  **The "Universal Remote"**:
+    -   Create a Facade for `TV`, `SoundBar`, `CableBox`, `GameConsole`.
+    -   Method: `watchNetflix()` -> TV on, Input HDMI2, SoundBar on, Box off.
+2.  **The "Database Helper"**:
+    -   Wrap JDBC (`Connection`, `PreparedStatement`, `ResultSet`, `SQLException`).
+    -   Facade: `EasyDB.query("SELECT * FROM users", inputs)`.
+3.  **The "Travel Agent"**:
+    -   Wrap `FlightAPI`, `HotelAPI`, `CarRentalAPI`.
+    -   Facade: `bookTrip(dates, location)`. MUST handle rollbacks if one fails.
 
----
+#### **Edge Case Drills**
+11. **Partial Failure**: If `Goodnight` scene fails halfway (Lights off, but Lock fails), what happens? (Facade should catch and report/retry).
+12. **Singleton**: Should `SmartHomeHub` be a Singleton? (Yes, usually represents physical reality).
+13. **Bypassing**: Is it ever okay for a Client to access Subsystem directly? (Only for "Power Users" or advanced configuration not exposed by Facade).
 
-### **9. Cheatsheet & Summary**
-
-| Metric | Description |
-| :--- | :--- |
-| **Coupling** | Drastically Reduced (Low Coupling). |
-| **Composability** | High. Facades can wrap other Facades. |
-| **Performance** | Neutral (Local) or Costly (Network). |
-| **Maintainability** | High. Subsystem updates don't break clients. |
-
-**Verdict**: Use Facades to define **Public APIs** for your modules.
-
----
-
-### **10. References**
-1.  *Design Patterns (GoF)* - Structural Patterns.
-2.  *Enterprise Integration Patterns* - Message Facade.
-3.  *Clean Architecture* - Boundary Crossing.
-
----
-
-### **11. Practice & Assessment**
-
-#### Core Exercises
-1.  **Smart Home**:
-    -   Create `Light`, `Thermostat`, `MusicPlayer`, `CoffeePot`.
-    -   Create `MorningRoutineFacade.wakeUp()`: Lights on, temp 72, play jazz, brew coffee.
-2.  **E-Commerce Checkout**:
-    -   Create `Inventory`, `Payment`, `Shipping`, `Email`.
-    -   Create `CheckoutFacade.placeOrder(cart)`. It orchestrates the flow.
-3.  **Database Wrapper**:
-    -   Create a simple Facade over JDBC (`Connection`, `Statement`, `ResultSet`).
-    -   Method: `List<Map<String, Object>> executeQuery(String sql)`.
-
-#### Edge Case Drills
-1.  **Partial Failure**: In `CheckoutFacade`, if Payment succeeds but Shipping fails, how do you rollback? (Facade must handle transactions).
-2.  **Singleton Facade**: Should the Facade be a Singleton? (Usually yes, it's stateless).
-3.  **Bypassing**: Is it ever okay for a Client to access Subsystem directly? (Only for "Power Users" or advanced configuration not exposed by Facade).
-
-#### Challenge: The Legacy System Strangler
-**Scenario**: You have a monolithic Legacy System (Spaghetti).
+#### **Challenge: The Legacy Strangler Facade**
 **Task**:
-1.  Create a Facade that mirrors the Legacy features.
-2.  Point the Client to the Facade.
-3.  Gradually replace Legacy internal classes with new Microservices *behind* the Facade.
-4.  The Client never knows the implementation changed.
+1.  You have a `LegacyBankingCore` (Spaghetti code).
+2.  Build a `BankFacade` that delegates to Legacy.
+3.  **Secretly** replace `LegacyBankingCore.transfer()` with `NewMicroservice.transfer()` inside the Facade.
+4.  The Client code must not change a single line.
+
+---
 
 ---
 
@@ -38753,167 +38769,11276 @@ export function process(data) {
 ---
 
 
-**Q61: How do you implement a thread-safe cache?**  
-**Companies**: Google, Amazon  
-**Answer**: Use ConcurrentHashMap, implement proper locking strategies, consider cache eviction policies, handle race conditions.
+#### Q61: What is the Flyweight Pattern and when should it be used?
+**Companies**: Google (Maps), Electronic Arts (Game Engines), Adobe (Photoshop)
+**Difficulty**: **Hard** (Memory Management)
+**Category**: Structural Patterns, Optimization
 
-**Q62: Explain the chain of responsibility pattern.**  
-**Companies**: Apple, Microsoft  
-**Answer**: Passes requests along a chain of handlers. Each handler decides either to process the request or pass it to the next handler.
+---
 
-**Q63: What is the visitor pattern?**  
-**Companies**: Google, Meta  
-**Answer**: Separates algorithms from the objects on which they operate. Useful when you need to perform operations on objects of different types.
+### **1. Conceptual Overview & Motivation**
 
-**Q64: How do you implement object pooling?**  
-**Companies**: Amazon, Microsoft  
-**Answer**: Create a pool of reusable objects, implement acquire/release methods, handle thread safety, consider pool size limits.
+**The "Why": The 10th Million Object Crash**
+Imagine you are building an MMORPG (Massively Multiplayer Online Role-Playing Game) or a Forest Rendering System.
 
-**Q65: Explain the mediator pattern.**  
-**Companies**: Apple, Google  
-**Answer**: Defines how objects interact with each other. Instead of objects communicating directly, they communicate through a mediator.
+-   **Scenario**: You need to render **1,000,000 trees** in a forest.
+-   **Naive Approach**: Create `new Tree()` for every tree.
+    -   Each `Tree` object has: `Mesh` (1MB), `Texture` (5MB), `p` (x,y,z), `color`.
+    -   Total Memory: 1,000,000 * 6MB = **6 Terabytes**. (CRASH).
+-   **Reality**: Most trees look exactly the same. They share the *same* mesh and the *same* texture. Only their *position* differs.
 
-**Q66: What is the memento pattern?**  
-**Companies**: Microsoft, Meta  
-**Answer**: Captures and externalizes an object's internal state so it can be restored later, without violating encapsulation.
+**The Solution**: Separate the **Intrinsic State** (Shared: Mesh, Texture) from the **Extrinsic State** (Unique: Position, Scale). Create the Intrinsic object *once* and share it.
 
-**Q67: How do you implement lazy initialization thread-safely?**  
-**Companies**: Google, Amazon  
-**Answer**: Use double-checked locking with volatile, initialization-on-demand holder pattern, or synchronized methods.
+**The "Flyweight"**: The shared, lightweight object.
 
-**Q68: Explain the prototype pattern.**  
-**Companies**: Apple, Microsoft  
-**Answer**: Creates objects by cloning existing instances. Useful when object creation is expensive or when you need to create similar objects.
+**Real-World Analogies**:
+1.  **Font Glyphs**: A PDF document doesn't embed the vector graphics for the letter 'A' 5,000 times. It embeds it *once* (Flyweight) and references it 5,000 times with different positions.
+2.  **Caching**: The browser caches `logo.png` once. Every page view references that cached file.
 
-**Q69: What is the bridge pattern?**  
-**Companies**: Meta, Google  
-**Answer**: Separates abstraction from implementation, allowing both to vary independently. Useful for platform-independent code.
+---
 
-**Q70: How do you implement a type-safe heterogeneous container?**  
-**Companies**: Google, Microsoft  
-**Answer**: Use Class objects as keys in a Map, with type tokens to ensure type safety at runtime.
+### **2. Comprehensive Definition**
 
-**Q71: Explain the flyweight pattern.**  
-**Companies**: Amazon, Apple  
-**Answer**: Minimizes memory usage by sharing efficiently among similar objects. Separates intrinsic (shared) from extrinsic (context-specific) state.
+**Formal Definition**:
+> The Flyweight Pattern allows programs to support vast quantities of objects by keeping their memory footprint low. It achieves this by sharing parts of object state between multiple objects.
 
-**Q72: What is the abstract factory pattern?**  
-**Companies**: Microsoft, Meta  
-**Answer**: Provides interface for creating families of related objects without specifying their concrete classes.
+**Key Concepts**:
+-   **Intrinsic State**: Invariant, context-independent, shared (e.g., The 3D Model of a Pine Tree).
+-   **Extrinsic State**: Variant, context-dependent, unique (e.g., The coordinate `100, 50, 400`).
+-   **Flyweight Factory**: Manages valid Flyweights and ensures sharing.
 
-**Q73: How do you implement a custom iterator?**  
-**Companies**: Google, Amazon  
-**Answer**: Implement Iterator interface with hasNext() and next() methods, handle concurrent modification, maintain iteration state.
+---
 
-**Q74: Explain the interpreter pattern.**  
-**Companies**: Apple, Microsoft  
-**Answer**: Defines a representation for a language's grammar and an interpreter to interpret sentences in the language.
+### **3. Progressive Solution Evolution**
 
-**Q75: What is the null object pattern?**  
-**Companies**: Meta, Google  
-**Answer**: Uses a null object with neutral behavior instead of null references, eliminating the need for null checks.
+#### Approach 1: The "Heavy" Object (Naive)
+```java
+class Tree { 
+    Mesh mesh; // Heavy!
+    Texture bark; // Heavy!
+    float x, y, z;
+}
+// 1 Million Trees = 1 Million Meshes loaded.
+```
+
+#### Approach 2: Static Sharing (Rigid)
+```java
+class Tree {
+    static Mesh commonMesh; // Shared
+    float x, y, z;
+}
+// Better, but what if we have Pine Trees AND Oak Trees? We can't use one static field.
+```
+
+#### Approach 3: The Flyweight Pattern (Flexible)
+```java
+class TreeType { // The Flyweight
+    Mesh mesh; 
+    Texture bark;
+}
+class Tree { // The Context
+    TreeType type; // Reference to Flyweight
+    float x, y, z;
+}
+// 1 Million Trees = 2 TreeType objects (Pine, Oak) + 1 Million light references.
+```
+
+---
+
+### **4. Implementation: The Enterprise Game Engine**
+
+**Scenario**: A simplified 3D Engine (`VoxelEngine`) rendering a battlefield with millions of particles and units.
+**Key Components**:
+1.  `ParticleModel` (Flyweight): The shape and logic.
+2.  `ParticleInstance` (Context): The specific location.
+3.  `FlyweightFactory`: Ensures we don't recreate models.
+
+```java
+import java.util.*;
+import java.util.concurrent.*;
+import java.awt.Color;
+
+/**
+ * ============================================================================
+ * THE INTRINSIC STATE (The Flyweight)
+ * ============================================================================
+ * This object is HEAVY (in terms of data) but SHARED.
+ * It must be IMMUTABLE to be shared safely.
+ */
+
+// Represents the 3D Model and Texture of a particle (e.g., Smoke, Fire, Shrapnel)
+final class ParticleModel {
+    private final String name;
+    private final byte[] meshData; // Simulated heavy data (e.g., 100KB)
+    private final byte[] textureData; // Simulated heavy data (e.g., 1MB)
+    private final Color color;
+    
+    public ParticleModel(String name, Color color, int meshSizeKb, int textureSizeKb) {
+        this.name = name;
+        this.color = color;
+        // Simulate loading heavy assets
+        this.meshData = new byte[meshSizeKb * 1024]; 
+        this.textureData = new byte[textureSizeKb * 1024];
+        // Fill to prevent optimization
+        new Random().nextBytes(this.meshData);
+        new Random().nextBytes(this.textureData);
+        
+        System.out.printf("  [ALLOC] Created Heavy Model: %s (Mesh: %dKB, Tex: %dKB)%n", 
+            name, meshSizeKb, textureSizeKb);
+    }
+    
+    // The Operation (Context is passed in as arguments)
+    public void render(float x, float y, float z, float scale, long timestamp) {
+        // In a real engine, this would push vertices to the GPU
+        // System.out.printf("Rendering %s at [%.1f, %.1f, %.1f] Scale: %.1f%n", 
+        //    name, x, y, z, scale);
+    }
+    
+    public String getName() { return name; }
+    public int getMemoryUsage() { return meshData.length + textureData.length; }
+}
+
+/**
+ * ============================================================================
+ * THE FACTORY (The Cache)
+ * ============================================================================
+ * Manages the pool of Flyweights.
+ */
+class ParticleFactory {
+    // Cache map: Name -> Flyweight
+    private static final Map<String, ParticleModel> cache = new ConcurrentHashMap<>();
+    
+    public static ParticleModel get(String name, Color color, int meshKb, int texKb) {
+        // "ComputeIfAbsent" is the heart of the Flyweight factory
+        return cache.computeIfAbsent(name, k -> new ParticleModel(name, color, meshKb, texKb));
+    }
+    
+    public static int getCacheSize() { return cache.size(); }
+    public static long getTotalManagedMemory() {
+        return cache.values().stream().mapToLong(ParticleModel::getMemoryUsage).sum();
+    }
+    
+    public static void clear() { cache.clear(); }
+}
+
+/**
+ * ============================================================================
+ * THE EXTRINSIC STATE (The Context)
+ * ============================================================================
+ * This object is LIGHT and UNIQUE.
+ * It links the Intrinsic state with unique coordinates.
+ */
+class Particle {
+    private final ParticleModel model; // Reference to Flyweight (Intrinsic)
+    private float x, y, z;             // Extrinsic
+    private float vectorX, vectorY;    // Extrinsic velocity
+    private float scale;               // Extrinsic
+    private boolean active = true;
+    
+    public Particle(ParticleModel model, float x, float y) {
+        this.model = model;
+        this.x = x;
+        this.y = y;
+        this.z = 0;
+        this.scale = 1.0f;
+        this.vectorX = (float)(Math.random() * 2 - 1);
+        this.vectorY = (float)(Math.random() * 2 - 1);
+    }
+    
+    public void update() {
+        x += vectorX;
+        y += vectorY;
+        // The render call requires passing the Extrinsic state back to the Intrinsic object
+        model.render(x, y, z, scale, System.currentTimeMillis());
+    }
+    
+    public boolean isActive() { return active; }
+}
+
+/**
+ * ============================================================================
+ * THE CLIENT (The World)
+ * ============================================================================
+ */
+class GameWorld {
+    private final List<Particle> particles = new ArrayList<>();
+    
+    public void spawnExplosion(float x, float y) {
+        // Request the "Smoke" flyweight (It might already exist!)
+        ParticleModel smoke = ParticleFactory.get("Smoke", Color.GRAY, 50, 100); // 150KB
+        ParticleModel fire = ParticleFactory.get("Fire", Color.RED, 50, 200);   // 250KB
+        
+        // Create 10,000 particles sharing just these 2 models
+        for (int i = 0; i < 5000; i++) particles.add(new Particle(smoke, x, y));
+        for (int i = 0; i < 5000; i++) particles.add(new Particle(fire, x, y));
+    }
+    
+    public void renderFrame() {
+        for (Particle p : particles) p.update();
+    }
+    
+    public int getParticleCount() { return particles.size(); }
+}
+
+/**
+ * ============================================================================
+ * SYSTEM DEMO
+ * ============================================================================
+ */
+public class FlyweightDemo {
+    public static void main(String[] args) {
+        GameWorld world = new GameWorld();
+        
+        System.out.println("--- 1. Spawning Explosion 1 (First Load) ---");
+        // This causes the "Smoke" and "Fire" models to be CREATED.
+        world.spawnExplosion(100, 100);
+        
+        System.out.println("\n--- 2. Spawning Explosion 2 (Re-Use) ---");
+        // This RE-USES the existing "Smoke" and "Fire" models. No new allocation!
+        world.spawnExplosion(500, 500);
+        
+        System.out.println("\n--- 3. Stats ---");
+        System.out.println("Total Particles (Objects): " + world.getParticleCount()); // 20,000
+        System.out.println("Total Models (Flyweights): " + ParticleFactory.getCacheSize()); // 2
+        System.out.println("Shared Memory Usage: " + (ParticleFactory.getTotalManagedMemory() / 1024) + " KB");
+        
+        // Without Flyweight, 20,000 * 200KB = 4,000,000 KB (4GB)
+        // With Flyweight, 2 * 200KB = 400 KB.
+    }
+}
+```
+
+---
+
+### **5. Performance Analysis: The Heap Dump Simulation**
+
+We will mathematically prove the memory savings using a benchmark suite.
+
+```java
+import java.util.*;
+
+public class FlyweightMemoryAnalysis {
+    
+    // Simulate a Heavy Object (Without Flyweight)
+    static class HeavyUnit {
+        byte[] mesh = new byte[1024 * 100]; // 100KB per unit
+        float x, y;
+    }
+    
+    // Simulate a Light Object (With Flyweight)
+    static class FlyweightUnit {
+        static byte[] SHARED_MESH = new byte[1024 * 100]; // Shared
+        float x, y;
+    }
+    
+    public static void runBenchmark() {
+        int COUNT = 10_000;
+        
+        System.out.println("\n=== MEMORY BENCHMARK (N=" + COUNT + ") ===");
+        
+        // 1. NON-FLYWEIGHT
+        try {
+            List<HeavyUnit> heavyList = new ArrayList<>();
+            long startMem = getUsedMemory();
+            for (int i = 0; i < COUNT; i++) heavyList.add(new HeavyUnit());
+            long endMem = getUsedMemory();
+            
+            System.out.printf("Without Flyweight: ~%d MB used.%n", (endMem - startMem) / (1024*1024));
+        } catch (OutOfMemoryError e) {
+            System.err.println("Without Flyweight: CRASHED (OutOfMemory)!");
+        }
+        
+        System.gc(); // Reset
+        
+        // 2. WITH FLYWEIGHT
+        List<FlyweightUnit> lightList = new ArrayList<>();
+        long startMem = getUsedMemory();
+        for (int i = 0; i < COUNT; i++) lightList.add(new FlyweightUnit());
+        long endMem = getUsedMemory();
+        
+        System.out.printf("With Flyweight:    ~%d MB used.%n", (endMem - startMem) / (1024*1024));
+    }
+    
+    private static long getUsedMemory() {
+        return Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+    }
+}
+```
+
+---
+
+### **6. Security Analysis: State Corruption (The Risk)**
+
+The biggest risk in Flyweight is **Intrinsic State Mutation**. behaviors.
+If one client modifies the shared Flyweight, **ALL** clients are affected.
+
+```java
+public class FlyweightSecurityImplications {
+    
+    static class SharedSoldierModel {
+        // 🚨 VULNERABILITY: Intrinsic state is Mutable!
+        public String unityType; 
+        public int damage; 
+        
+        public SharedSoldierModel(String t, int d) { unityType = t; damage = d; }
+    }
+    
+    public static void demonstrateAttack() {
+        System.out.println("\n=== SECURITY: SHARED STATE ATTACK ===");
+        
+        // 1. The Factory creates a standard "Grunt"
+        SharedSoldierModel gruntType = new SharedSoldierModel("Grunt", 10);
+        
+        // 2. Player 1 and Player 2 both use this "Grunt" type
+        SharedSoldierModel p1_soldier = gruntType;
+        SharedSoldierModel p2_soldier = gruntType;
+        
+        System.out.println("Player 1 Damage: " + p1_soldier.damage); // 10
+        System.out.println("Player 2 Damage: " + p2_soldier.damage); // 10
+        
+        // 3. 🚨 ATTACK: Player 1 finds a way to modify the Shared Object
+        // Maybe via reflection, or a poorly designed setter
+        p1_soldier.damage = 9999; 
+        
+        System.out.println("--- ATTACK EXECUTED ---");
+        
+        // 4. RESULT: Player 2 (and 1,000,000 other AI units) now do 9999 damage.
+        System.out.println("Player 1 Damage: " + p1_soldier.damage); // 9999
+        System.out.println("Player 2 Damage: " + p2_soldier.damage); // 9999 (CORRUPTED)
+    }
+}
+```
+
+**DEFENSE**:
+1.  **Immutability**: Intrinsic state (Flyweight classes) MUST be `final`.
+2.  **No Setters**: Remove all setters from Flyweight classes.
+3.  **Defensive Copies**: If the Flyweight holds mutable objects (like arrays), return copies, not references.
+
+---
+
+### **7. Deep Dive: Java String Interning (The Native Flyweight)**
+
+Java's `String` class is the most famous Flyweight.
+
+**The String Constant Pool**:
+-   When you write `String s = "Hello"`, JVM checks the pool.
+-   If "Hello" exists, it returns the specific reference.
+-   This saves GIGABYTES of RAM in typical enterprise apps.
+
+```java
+public class StringFlyweightDemo {
+    public static void main(String[] args) {
+        String s1 = "Java"; // Goes to Pool
+        String s2 = "Java"; // Returns Ref from Pool
+        
+        String s3 = new String("Java"); // Forces NEW heap object (Bypasses Flyweight)
+        
+        System.out.println(s1 == s2); // true (Same Pointer)
+        System.out.println(s1 == s3); // false (Different Pointer)
+        
+        // Manual Interning (Registering into Flyweight Pool)
+        String s4 = s3.intern(); 
+        System.out.println(s1 == s4); // true
+    }
+}
+```
+
+**Integer Cache**:
+`Integer.valueOf(100)` is also a Flyweight factory! Checks cache for -128 to 127.
+
+---
+
+### **8. Multi-Language Perspectives**
+
+#### **C: The Canonical Pointer/Struct**
+In C, this pattern is natural via pointers to const structs.
+```c
+struct TreeModel { // Intrinsic
+    char* mesh_data;
+    char* texture_path;
+};
+
+struct Tree { // Extrinsic
+    struct TreeModel* model; // Pointer to shared memory (8 bytes)
+    float x, y, z;
+};
+
+// All trees point to the same 'pine_model' address.
+```
+
+#### **Python: `__new__` Magic Method**
+Python allows trapping object creation to return cached instances.
+```python
+class ParticleFlyweight:
+    _cache = {}
+    
+    def __new__(cls, name):
+        if name not in cls._cache:
+            print(f"Creating new Flyweight: {name}")
+            cls._cache[name] = super().__new__(cls)
+        return cls._cache[name]
+
+p1 = ParticleFlyweight("Smoke")
+p2 = ParticleFlyweight("Smoke")
+print(p1 is p2) # True
+```
+
+#### **JavaScript: Prototypes**
+JS Prototypes are essentially Flyweights for methods. Methods defined on the prototype are shared by all instances.
+```javascript
+function Particle(x, y) {
+    this.x = x; this.y = y;
+}
+// Shared Intrinsic Method
+Particle.prototype.draw = function() {
+    console.log("Drawing at " + this.x);
+};
+```
+
+---
+
+### **9. Advanced Architecture: The "Tile System" (Google Maps)**
+
+**Case Study**: Rendering the World Map.
+The world, at Zoom Level 10, has 1,000,000 tiles (images).
+We cannot load 1M images.
+
+**Flyweight Strategy**:
+-   **Intrinsic**: `TileImage` (The raw PNG bits).
+    -   Key: The generic "Ocean" tile image is repeated 500,000 times.
+    -   We load "ocean.png" ONCE.
+-   **Extrinsic**: `TilePosition` (Lat, Lon).
+    -   We draw the "One Ocean Image" at 500,000 different screen coordinates.
+
+**Implementation Sketch**:
+```java
+// The Flyweight
+class TileTexture {
+    final BufferedImage image;
+    public TileTexture(String path) { image = load(path); }
+    public void draw(Graphics g, int x, int y) { g.drawImage(image, x, y, null); }
+}
+
+// The Factory
+class TileFactory {
+    static Map<String, TileTexture> pool = new HashMap<>();
+    static TileTexture get(String type) {
+        // "ocean", "grass", "desert"
+        return pool.computeIfAbsent(type, TileTexture::new);
+    }
+}
+
+// The Context (The grid)
+class MapGrid {
+    String[][] gridTypes; // Only stores Strings ("ocean", "ocean", "grass"...)
+    
+    public void render(Graphics g) {
+        for(int x=0; x<gridTypes.length; x++) {
+            for(int y=0; y<gridTypes[x].length; y++) {
+                // Fetch Flyweight
+                TileTexture texture = TileFactory.get(gridTypes[x][y]);
+                // Pass Extrinsic (x,y) to Intrinsic
+                texture.draw(g, x*256, y*256);
+            }
+        }
+    }
+}
+```
+
+---
+
+### **10. Decision Matrix: When to Use Flyweight**
+
+```java
+public class FlyweightDecisionGuide {
+    public static boolean shouldUseFlyweight(SystemContext ctx) {
+        
+        // 1. Is the sheer NUMBER of objects causing OOM?
+        if (!ctx.hasMillionsOfObjects()) {
+            return false; // ❌ Premature Optimization. Don't add complexity.
+        }
+        
+        // 2. Can you identifying SHARED state?
+        if (ctx.objectsAreTotallyUnique()) {
+            return false; // ❌ Use object pool instead, or just new().
+        }
+        
+        // 3. Is the State Immutable?
+        if (ctx.sharedStateMustChangePerObject()) {
+            return false; // ❌ Impossible.
+        }
+        
+        // 4. Are you okay with CPU overhead?
+        // Flyweight trades RAM (gain) for CPU (computing extrinsic state lookups).
+        return true; // ✅ CORE USE CASE
+    }
+}
+```
+
+---
+
+### **11. Cheatsheet & Summary**
+
+| Concept | Role | Example |
+| :--- | :--- | :--- |
+| **Intrinsic State** | Constant, Shared | `Mesh`, `FontLetter`, `Texture` |
+| **Extrinsic State** | Variable, Unique | `Position`, `Color`, `Size` |
+| **Factory** | Cache Manager | `ParticleFactory`, `StringPool` |
+| **Client** | Calculation Engine | `GameWorld`, `TextEditor` |
+
+**Pros**:
+-   Massive RAM savings (Terabytes -> Megabytes).
+-   Faster creation (returning cached object is O(1)).
+
+**Cons**:
+-   Complexity: separating state is hard.
+-   CPU Overhead: frequent lookups, calculating extrinsic state on the fly.
+-   Thread Safety: The Factory must be synchronized.
+
+---
+
+### **12. References**
+1.  *Design Patterns (GoF)* - Structural Patterns.
+2.  *Game Programming Patterns* - Robert Nystrom (Chapter on Flyweight).
+3.  *Effective Java* - Static Factory Methods (Flyweight enablers).
+
+---
+
+### **13. Case Study I: The Enterprise Text Editor**
+
+**Context**: Building a Google Docs clone.
+**Problem**: A document has 100,000 characters. Each character has a Font, Size, Color, Bold, Italic, Underline property.
+**Naive Object**: `CharObj` = 6 boolean/int fields + char + overhead = ~64 bytes.
+**Total**: 6.4 MB for just text? Acceptable.
+**Scale**: 100 open tabs? 640 MB.
+**Formatting**: What if we add "LinkUrl", "CommentId", "HighlightColor"? The object grows.
+
+**The Solution**: Flyweight for Formatting.
+
+```java
+import java.util.*;
+
+// 1. The Intrinsic State (Formatting Style)
+// Shared by thousands of characters.
+final class CharacterStyle {
+    private final String fontFace;
+    private final int fontSize;
+    private final int colorCode; // ARGB
+    private final boolean bold;
+    private final boolean italic;
+    
+    public CharacterStyle(String font, int size, int color, boolean bold, boolean italic) {
+        this.fontFace = font;
+        this.fontSize = size;
+        this.colorCode = color;
+        this.bold = bold;
+        this.italic = italic;
+    }
+    
+    // Unique signature for caching
+    @Override
+    public int hashCode() {
+        return Objects.hash(fontFace, fontSize, colorCode, bold, italic);
+    }
+    
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof CharacterStyle)) return false;
+        CharacterStyle other = (CharacterStyle) o;
+        return fontSize == other.fontSize && 
+               colorCode == other.colorCode &&
+               bold == other.bold &&
+               italic == other.italic &&
+               Objects.equals(fontFace, other.fontFace);
+    }
+}
+
+// 2. The Factory (Style Repository)
+class StyleFactory {
+    private static final Map<CharacterStyle, CharacterStyle> cache = new HashMap<>();
+    
+    public static CharacterStyle get(String font, int size, int color, boolean bold, boolean italic) {
+        // Create a temporary key
+        CharacterStyle temp = new CharacterStyle(font, size, color, bold, italic);
+        
+        // Return existing or store new
+        if (!cache.containsKey(temp)) {
+            cache.put(temp, temp);
+            System.out.println("[StyleFactory] New Style Created: " + cache.size() + " total");
+        }
+        return cache.get(temp);
+    }
+}
+
+// 3. The Extrinsic State (The Character in the Doc)
+class DocChar {
+    private final char c;
+    private final CharacterStyle style; // Reference to Flyweight
+    
+    public DocChar(char c, CharacterStyle style) {
+        this.c = c;
+        this.style = style;
+    }
+    
+    public void render(int x, int y) {
+        // System.out.printf("Draw '%c' at %d,%d with font %s%n", c, x, y, style.fontFace);
+    }
+}
+
+// 4. The Document (Client)
+class TextDocument {
+    private final List<DocChar> content = new ArrayList<>();
+    
+    public void append(String text, String font, int size, int color, boolean bold) {
+        // Get the Flyweight ONCE for this whole block
+        CharacterStyle style = StyleFactory.get(font, size, color, bold, false);
+        
+        for (char c : text.toCharArray()) {
+            content.add(new DocChar(c, style));
+        }
+    }
+    
+    public int getTotalMemory() {
+        // Approximate: List Overhead + DocChar instances
+        return content.size() * 16; 
+    }
+}
+
+public class EditorDemo {
+    public static void main(String[] args) {
+        TextDocument doc = new TextDocument();
+        
+        // Setup: User types 5000 words in "Arial 12"
+        String standardPara = "Lorem ipsum dolor sit amet...".repeat(100); 
+        doc.append(standardPara, "Arial", 12, 0x000000, false);
+        
+        // Setup: User highlights one sentence in "Bold Red"
+        doc.append("IMPORTANT WARNING!", "Arial", 12, 0xFF0000, true);
+        
+        // Setup: User reverts to standard
+        doc.append(standardPara, "Arial", 12, 0x000000, false);
+        
+        // Result:
+        // We typically have 3-5 Styles in the Factory.
+        // We have 10,000+ DocChar objects.
+        // The HEAVY style data is stored only 3-5 times.
+    }
+}
+```
+
+---
+
+### **14. Case Study II: The Procedural Forest (Full Engine)**
+
+**Context**: High-performance game engine.
+**Requirement**: "Infinite" terrain with dense vegetation.
+**Technical Challenge**: Level of Detail (LOD) and Memory Bandwidth.
+
+We will implement a `ForestManager` that handles:
+1.  **LOD Groups**: High-res trees near camera, low-res billboards far away.
+2.  **Flyweight Meshes**: Shared geometry.
+3.  **Instance Batching**: Sending `(MeshID, [Pos1, Pos2, Pos3...])` to GPU.
+
+```java
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+
+// --- 1. The Flyweight Assets ---
+abstract class TreeAsset {
+    abstract void draw(float x, float y, float z, float scale);
+    abstract int getPolygonCount();
+}
+
+class HighResTree extends TreeAsset {
+    private final float[] vertices = new float[10000]; // Heavy!
+    public HighResTree() { /* Load 3D model */ }
+    public void draw(float x, float y, float z, float s) { /* Draw 5k polys */ }
+    public int getPolygonCount() { return 5000; }
+}
+
+class LowResTree extends TreeAsset {
+    private final float[] vertices = new float[100]; // Light
+    public LowResTree() { /* Load billboard */ }
+    public void draw(float x, float y, float z, float s) { /* Draw 2 polys */ }
+    public int getPolygonCount() { return 20; }
+}
+
+// --- 2. The Flyweight Factory ---
+class TreeAssetFactory {
+    private static final Map<String, TreeAsset> cache = new HashMap<>();
+    
+    public static TreeAsset get(String type, boolean highRes) {
+        String key = type + (highRes ? "_HIGH" : "_LOW");
+        return cache.computeIfAbsent(key, k -> {
+            return highRes ? new HighResTree() : new LowResTree();
+        });
+    }
+}
+
+// --- 3. The Context (A Tree Instance) ---
+class TreeInstance {
+    final String type; // "Pine", "Oak"
+    final float x, y, z;
+    final float scale;
+    
+    public TreeInstance(String type, float x, float y, float z, float scale) {
+        this.type = type;
+        this.x = x; this.y = y; this.z = z; this.scale = scale;
+    }
+    
+    // The "Render" method decides WHICH Flyweight to use based on Client Context (Distance)
+    public void render(float camX, float camY, float camZ) {
+        double dist = Math.sqrt(Math.pow(x-camX, 2) + Math.pow(z-camZ, 2));
+        
+        boolean useHighRes = dist < 50.0; // LOD Threshold
+        
+        TreeAsset asset = TreeAssetFactory.get(type, useHighRes);
+        asset.draw(x, y, z, scale);
+    }
+}
+
+// --- 4. The World Manager ---
+class Forest {
+    private final List<TreeInstance> trees = new CopyOnWriteArrayList<>();
+    
+    public void generateTerrain(int size) {
+        // Procedural generation
+        for(int i=0; i<size; i++) {
+            float x = (float)(Math.random() * 1000);
+            float z = (float)(Math.random() * 1000);
+            float s = 0.8f + (float)(Math.random() * 0.4);
+            trees.add(new TreeInstance("Pine", x, 0, z, s));
+        }
+    }
+    
+    public void renderScene(float camX, float camZ) {
+        for(TreeInstance t : trees) {
+            t.render(camX, 0, camZ);
+        }
+    }
+}
+```
+
+---
+
+### **15. Deep Dive: JVM String Interning**
+
+The `String` class is the most pervasive Flyweight in the Java ecosystem. Understanding its internals is mandatory for senior engineers.
+
+#### **The String Pool Architecture**
+-   **Location**: Heap (since Java 7). Before Java 7, it was PermGen (limited size).
+-   **Structure**: A Hash Table (Fixed size buckets).
+-   **Flag**: `-XX:StringTableSize=N`. Default is ~60,000 buckets.
+
+#### **How `intern()` works (Native Code Analysis)**
+When you call `s.intern()`:
+1.  **Calculate Hash**: Computes `s.hashCode()`.
+2.  **Lookup**: Looks in the StringTable for an entry with same hash and `equals()`.
+3.  **Found**: Return the address of the existing String.
+4.  **Not Found**: Add the *current* String object reference to the Table. Return it.
+
+**Performance Trap**:
+If you intern *too many* unique strings (e.g., random UUIDs), the StringTable ("flyweight cache") fills up.
+-   **Collision**: Hash collisions increase.
+-   **Scan Time**: `intern()` becomes O(N) instead of O(1).
+-   **GC Impact**: The StringTable is scanned during Garbage Collection. Huge tables slow down GC *significantly*.
+
+**Benchmark: The Cost of Interning**
+```java
+public class StringInternBenchmark {
+    public static void main(String[] args) {
+        long start = System.currentTimeMillis();
+        for (int i = 0; i < 10_000_000; i++) {
+            // "prefix" + i creates a new String
+            // .intern() forces a HashMap lookup
+            ("prefix" + i).intern(); 
+        }
+        System.out.println("Time: " + (System.currentTimeMillis() - start) + "ms");
+        
+        // Result on default JVM: Very Slow (>5s).
+        // Reason: 10M Strings fighting for 60k buckets.
+    }
+}
+```
+
+**Best Practice**:
+Only intern strings that will definitely repeat (e.g., "Country Names", "Currency Codes", "XML Tags"). DO NOT intern "User IDs" or "Transaction IDs".
+
+---
+
+### **16. Advanced Optimization: WeakReference Flyweight Factories**
+
+A standard `Map<String, Flyweight>` holds a **Strong Reference**. This means the Flyweights are **NEVER** garbage collected, even if no one uses them anymore. This is a potential Memory Leak for long-running servers.
+
+**Solution**: `WeakHashMap` or `WeakReference`.
+
+```java
+import java.lang.ref.WeakReference;
+import java.util.WeakHashMap;
+
+class AutoCleaningFactory {
+    // WeakHashMap: Key is weak. 
+    // BUT we need the Val to be weak effectively if Key==key params.
+    
+    // Better Pattern: Map<Key, WeakReference<Val>>
+    private static final Map<String, WeakReference<BigImage>> cache = new HashMap<>();
+    
+    public static BigImage get(String filename) {
+        WeakReference<BigImage> ref = cache.get(filename);
+        BigImage img = (ref != null) ? ref.get() : null;
+        
+        if (img == null) {
+            // It was GC'd, or never existed.
+            System.out.println("Loading " + filename + " from disk...");
+            img = new BigImage(filename);
+            cache.put(filename, new WeakReference<>(img));
+        } else {
+            System.out.println("Hit " + filename + " from cache.");
+        }
+        return img;
+    }
+}
+
+class BigImage {
+    byte[] data = new byte[10_000_000]; // 10MB
+    public BigImage(String name) { }
+}
+
+public class WeakFactoryDemo {
+    public static void main(String[] args) {
+        BigImage img1 = AutoCleaningFactory.get("logo.png"); // Loads
+        BigImage img2 = AutoCleaningFactory.get("logo.png"); // Cache Hit
+        
+        img1 = null; 
+        img2 = null;
+        
+        System.gc(); // JVM reclaims the 10MB image because Factory only holds WeakRef
+        
+        // Next call will reload
+        BigImage img3 = AutoCleaningFactory.get("logo.png"); // Loads again
+    }
+}
+```
+
+---
+
+### **17. Cheat Sheet: Comparison with Other Patterns**
+
+| Pattern | Goal | Structure |
+| :--- | :--- | :--- |
+| **Flyweight** | Save Memory by sharing. | Factory + Intrinsic/Extrinsic separation. |
+| **Singleton** | Restrict to ONE instance. | Static Instance. |
+| **Prototype** | Create new objects by copying. | `clone()`. (Opposite of Flyweight). |
+| **Object Pool** | Reuse objects to avoid Alloc overhead. | Borrow/Return semantics. State is reset. |
+
+**Critical Distinction: Object Pool vs Flyweight**
+-   **Object Pool**: Objects are "checked out" (Exclusive Access). State is mutable. (e.g., DB Connections).
+-   **Flyweight**: Objects are "shared concurrently" (Shared Access). State is immutable. (e.g., The letter 'A').
+
+---
+
+### **18. Practice & Assessment**
+
+#### **Core Exercises**
+1.  **Text Editor**: Implement the `EditorDemo` above with meaningful rendering logic (console output).
+2.  **Color Palette**:
+    -   Create a `ColorFactory`.
+    -   If client asks for "Red", return `Color.RED`.
+    -   If client asks for "RGB(255, 0, 0)", return `Color.RED` (deduplication).
+3.  **Resturaunt Menu**:
+    -   `Dish` (Intrinsic): Name, Description, Price, Image.
+    -   `Order` (Extrinsic): TableNumber, Customization ("No onions").
+    -   Simulate a busy night with 1000 orders but only 50 distinct dishes.
+
+#### **Edge Case Drills**
+1.  **Thread Contention**: Run `StrictFlyweightFactory` with 100 threads requesting items. Ensure `computeIfAbsent` protects against double-instantiation.
+2.  **Memory Limit**: Implement an `LRUFlyweightFactory` that holds max 100 items. If 101st is requested, evict the least recently used.
+3.  **Serialization**: Serialize a `List<Particle>`. Ensure the Flyweights are serialized efficiently (by Reference/ID) rather than duplicating the heavy data in the byte stream.
+
+#### **Challenge: The Distributed Flyweight**
+**Scenario**: A Microservices Architecture.
+-   Service A needs "UserMetadata" (Heavy).
+-   Service B needs "UserMetadata" (Same Heavy Data).
+-   **Task**: Implement a Redis-backed Flyweight.
+    -   Check Local Cache (JVM Heap).
+    -   Check Distributed Cache (Redis).
+    -   Load from DB.
+    -   Ensure all services share the *concept* of the data to reduce DB load.
+
+---
+
+
+#### Q62: How does the Strategy Pattern enable dynamic behavior selection?
+**Companies**: Amazon (Shipping Costs), Stripe (Payment Methods), Google (Compression Algos), Netflix (Bitrate Adaptation)
+**Difficulty**: **Medium** (Behavioral Pattern / Polymorphism)
+**Category**: Behavioral Patterns, Composition over Inheritance
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The If/Else Nightmare**
+You are building an E-Commerce checkout.
+```java
+if (paymentType.equals("CREDIT_CARD")) {
+    validateCard(); chargeCard();
+} else if (paymentType.equals("PAYPAL")) {
+    redirectPaypal(); verifyToken();
+} else if (paymentType.equals("CRYPTO")) {
+    checkGasFees(); transferEth();
+}
+// ... 20 more else-ifs
+```
+**Problem**: Open/Closed Principle Violation. Adding "ApplePay" requires modifying the `Checkout` class.
+**Risk**: Breaking "Credit Card" logic while adding "ApplePay".
+
+**The Solution**: The Strategy Pattern.
+Encapsulate each algorithm family into a separate class with a common interface.
+The Client (Checkout) holds a reference to the Interface, not the implementation.
+Behavior enables **Runtime Switching**.
+
+**Real-World Analogies**:
+1.  **Navigation App**: "Fastest Route" vs "No Tolls" vs "Scenic". The destination is the same; the *strategy* to get there differs.
+2.  **Camera Modes**: "Portrait", "Night", "Sports". Same hardware, different processing algorithm.
+3.  **Sorting**: `Collections.sort()` takes a `Comparator`. The Comparator is the Strategy.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Define a family of algorithms, encapsulate each one, and make them interchangeable. Strategy lets the algorithm vary independently from clients that use it.
+
+**The Key Roles**:
+1.  **Strategy Interface**: Defines the contract (e.g., `pay(amount)`).
+2.  **Concrete Architectures**: Implements the algorithm (e.g., `CreditCardStrategy`, `PaypalStrategy`).
+3.  **Context**: The class using the strategy (e.g., `ShoppingCart`). It delegates the work.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: The Monolithic Method (Anti-Pattern)
+```java
+class Compressor {
+    void compress(String file, String format) {
+        if (format.equals("zip")) { ... }
+        else if (format.equals("rar")) { ... }
+    }
+}
+```
+*   **Critique**: Rigid. Hard to test "Rar" in isolation.
+
+#### Approach 2: Inheritance (The Trap)
+```java
+abstract class Compressor { abstract void compress(); }
+class ZipCompressor extends Compressor { ... }
+class RarCompressor extends Compressor { ... }
+```
+*   **Critique**: What if encryption varies too? `ZipAesEncryptedCompressor`? **Combinatorial Explosion**.
+
+#### Approach 3: Strategy (Composition)
+```java
+interface CompressionStrategy { void compress(File f); }
+
+class ZipCompression implements CompressionStrategy { ... }
+class RarCompression implements CompressionStrategy { ... }
+
+class Compressor {
+    private CompressionStrategy strategy;
+    public Compressor(CompressionStrategy s) { this.strategy = s; }
+    public void run(File f) { strategy.compress(f); }
+}
+```
+*   **Verdict**: Flexible. Can switch strategy at runtime.
+
+---
+
+### **4. Implementation I: The Enterprise Payment Engine**
+Handling complex payment flows with validation and fallbacks.
+
+```java
+import java.math.BigDecimal;
+import java.util.HashMap;
+import java.util.Map;
+
+// 1. STRATEGY INTERFACE
+interface PaymentStrategy {
+    boolean pay(BigDecimal amount);
+    String getProviderName();
+    void collectDetails(); // UI hook
+}
+
+// 2. CONCRETE STRATEGIES
+class CreditCardStrategy implements PaymentStrategy {
+    private String name, cardNumber, cvv, expiry;
+    
+    public CreditCardStrategy(String name, String cc, String cvv, String expiry) {
+        this.name = name; this.cardNumber = cc; this.cvv = cvv; this.expiry = expiry;
+    }
+    
+    @Override
+    public boolean pay(BigDecimal amount) {
+        System.out.println("Connecting to VISA network...");
+        System.out.println("Charging $" + amount + " to " + cardNumber);
+        return true; 
+    }
+    
+    @Override public String getProviderName() { return "Credit Card"; }
+    @Override public void collectDetails() { System.out.println("Collecting CC Info..."); }
+}
+
+class PayPalStrategy implements PaymentStrategy {
+    private String email;
+    
+    public PayPalStrategy(String email) { this.email = email; }
+    
+    @Override
+    public boolean pay(BigDecimal amount) {
+        System.out.println("Redirecting to PayPal...");
+        System.out.println("Paid $" + amount + " using " + email);
+        return true;
+    }
+    
+    @Override public String getProviderName() { return "PayPal"; }
+    @Override public void collectDetails() { System.out.println("Login to PayPal..."); }
+}
+
+class CryptoStrategy implements PaymentStrategy {
+    private String walletAddress;
+    
+    public CryptoStrategy(String wallet) { this.walletAddress = wallet; }
+    
+    @Override
+    public boolean pay(BigDecimal amount) {
+        System.out.println("Generating Smart Contract...");
+        System.out.println("Transferring ETH equivalent of $" + amount + " from " + walletAddress);
+        return true;
+    }
+    
+    @Override public String getProviderName() { return "Ethereum"; }
+    @Override public void collectDetails() { System.out.println("Sign with MetaMask..."); }
+}
+
+// 3. CONTEXT (Shopping Cart)
+class ShoppingCart {
+    private BigDecimal total = BigDecimal.ZERO;
+    
+    public void addProduct(BigDecimal price) {
+        total = total.add(price);
+    }
+    
+    // The "Pay" method takes the Strategy as a specific parameter
+    // This allows "Dependency Injection" at the method level
+    public void checkout(PaymentStrategy paymentMethod) {
+        System.out.println("--- Checkout Initiated ---");
+        System.out.println("Total Due: $" + total);
+        
+        if (paymentMethod.pay(total)) {
+            System.out.println("✅ Payment Successful via " + paymentMethod.getProviderName());
+        } else {
+            System.out.println("❌ Payment Failed.");
+        }
+    }
+}
+
+// 4. USAGE
+public class StrategyDemo {
+    public static void main(String[] args) {
+        ShoppingCart cart = new ShoppingCart();
+        cart.addProduct(new BigDecimal("99.99"));
+        cart.addProduct(new BigDecimal("45.50"));
+        
+        // User selects Credit Card
+        cart.checkout(new CreditCardStrategy("John Doe", "1234-5678-9012-3456", "123", "12/25"));
+        
+        // User changes mind, uses PayPal
+        cart.checkout(new PayPalStrategy("john@example.com"));
+        
+        // Modern Java: Lambda Strategy (Functional Interface)
+        // Ad-hoc strategy implementation
+        cart.checkout(new PaymentStrategy() {
+            public boolean pay(BigDecimal a) { System.out.println("Paid with Cash!"); return true; }
+            public String getProviderName() { return "Cash"; }
+            public void collectDetails() {}
+        });
+    }
+}
+```
+
+---
+
+### **5. Implementation II: Strategy Factory & Dynamic Loading**
+In real systems, you often select the strategy based on a config file or user input string.
+
+```java
+class PaymentStrategyFactory {
+    public static PaymentStrategy getStrategy(String type, Map<String, String> context) {
+        return switch (type.toUpperCase()) {
+            case "CC" -> new CreditCardStrategy(context.get("name"), context.get("cc"), context.get("cvv"), context.get("exp"));
+            case "PAYPAL" -> new PayPalStrategy(context.get("email"));
+            case "CRYPTO" -> new CryptoStrategy(context.get("wallet"));
+            default -> throw new IllegalArgumentException("Unknown Payment Type");
+        };
+    }
+}
+```
+
+---
+
+### **6. Implementation III: Functional Strategies (Java 8+)**
+Strategies don't always need to be full classes. `java.util.function` is perfect for lightweight strategies.
+
+```java
+import java.util.function.Function;
+
+class TextFormatter {
+    // Strategy: Function<String, String>
+    public static void print(String text, Function<String, String> formatter) {
+        System.out.println(formatter.apply(text));
+    }
+}
+
+public class FunctionalStrategy {
+    public static void main(String[] args) {
+        // Strategies defined inline
+        TextFormatter.print("Hello", s -> s.toUpperCase()); // Upper Strategy
+        TextFormatter.print("Hello", s -> "Result: " + s);  // Prefix Strategy
+        TextFormatter.print("Hello", s -> new StringBuilder(s).reverse().toString()); // Reverse
+    }
+}
+```
+*   **Deep Dive**: This removes the boilerplate of creating `UpperStrategy`, `PrefixStrategy` classes.
+
+---
+
+### **7. Multi-Language Perspectives**
+
+#### Node.js / JavaScript: First-Class Functions
+JS doesn't need interfaces. Functions *are* the strategy.
+```javascript
+// Strategies
+const strategies = {
+    creditCard: (amount) => console.log(`Charged ${amount} to CC`),
+    paypal: (amount) => console.log(`Paypal payment: ${amount}`),
+    bitcoin: (amount) => console.log(`Mining transaction... ${amount}`)
+};
+
+// Context
+class Checkout {
+    constructor(strategyName) {
+        this.pay = strategies[strategyName];
+    }
+    
+    execute(amount) {
+        this.pay(amount);
+    }
+}
+
+const c = new Checkout('bitcoin');
+c.execute(100);
+```
+
+#### Python: Functions as Objects
+```python
+def sort_by_name(item):
+    return item['name']
+
+def sort_by_price(item):
+    return item['price']
+
+items = [{'name': 'B', 'price': 10}, {'name': 'A', 'price': 50}]
+
+# Strategy passed as argument
+items.sort(key=sort_by_name)
+print(items) # Sorted by name
+```
+
+#### C: Function Pointers
+The OG Strategy Pattern.
+```c
+#include <stdio.h>
+
+// Strategy Signature
+typedef void (*Sorter)(int*, int);
+
+void bubbleSort(int* arr, int size) { printf("Bubble Sorting\n"); }
+void quickSort(int* arr, int size) { printf("Quick Sorting\n"); }
+
+// Context
+void processData(int* data, int size, Sorter strategy) {
+    strategy(data, size); // Dynamic Dispatch
+}
+
+int main() {
+    int data[] = {1, 3, 2};
+    processData(data, 3, quickSort); // Pass function pointer
+    processData(data, 3, bubbleSort);
+    return 0;
+}
+```
+
+#### Go: Interfaces
+Go uses implicit interfaces for powerful strategy composition.
+```go
+type PaymentStrategy interface {
+    Pay(amount float64) string
+}
+
+type Card struct {}
+func (c Card) Pay(amount float64) string { return "Paid via Card" }
+
+type ApplePay struct {}
+func (a ApplePay) Pay(amount float64) string { return "Paid via ApplePay" }
+
+func Checkout(p PaymentStrategy, amt float64) {
+    fmt.Println(p.Pay(amt))
+}
+```
+
+---
+
+### **8. Practice & Assessment**
+
+#### Core Exercises
+1.  **Compression Tool**:
+    -   Host: `FileCompressor`
+    -   Strats: `Zip`, `Rar`, `SevenZip`.
+    -   Task: Compress a folder using different strategies based on file extension.
+2.  **RPG Damage Calculation**:
+    -   Host: `Player`
+    -   Strats: `MeleeAttack`, `RangedAttack`, `MagicAttack`.
+    -   Task: Switch strategy when Player picks up a Bow vs Sword.
+3.  **Route Planner**:
+    -   Context: `MapsApp`.
+    -   Strats: `Walk`, `Car`, `PublicTransport`.
+    -   Task: Calculate ETA for each.
+
+#### Edge Case Drills
+1.  **Stateful Strategies**:
+    -   *Q*: What if `CreditCardStrategy` needs to store `retryCount`?
+    -   *A*: Valid. Strategies can have state. But be careful if sharing the strategy instance across threads (Concurrency).
+2.  **Strategy vs Command**:
+    -   *Q*: Difference?
+    -   *A*: Strategy = "How" (Algorithm). Command = "What" (Action to be performed).
+3.  **Null Strategy**:
+    -   *Q*: What if no strategy is passed?
+    -   *A*: Use "Null Object Pattern" (`NoOpStrategy`) to avoid null checks.
+
+---
+
+### **9. Security Analysis: Strategy Injection**
+
+**Vulnerability**: If the User can define the class name of the Strategy (e.g., via JSON payload), they might instantiate dangerous classes.
+
+**Scenario**:
+Input JSON: `{ "strategy": "com.hacker.MaliciousStrategy" }`
+Code: `Class.forName(json.strategy).newInstance()`
+
+**Mitigation**:
+1.  **Whitelist**: Only allow specific class names.
+2.  **Factory**: Use `switch/case` in a Factory instead of `Class.forName`.
+
+```java
+// VULNERABLE
+String className = request.getParameter("algo");
+Strategy s = (Strategy) Class.forName(className).newInstance(); // RCE Risk!
+
+// SECURE
+Strategy s = StrategyFactory.get(request.getParameter("algo")); // Whitelisted
+```
+
+---
+
+### **10. Cheatsheet & Summary**
+
+| Pattern | Goal | Analogy |
+| :--- | :--- | :--- |
+| **Strategy** | Interchangeable Algorithms | Sorting (Quick vs Merge) |
+| **State** | Behavior changes with State | TCP Connection (Open/Closed) |
+| **Template** | Fixed Skeleton, Variable Steps | Baking Recipe |
+
+**Verdict**: Use Strategy when you have a class that does the same thing in many different ways, and you want to switch between them easily.
+
+---
+
+### **11. References**
+1.  *Head First Design Patterns* - Chapter 1 (SimUDuck).
+2.  *Effective Java* - Item 42: Prefer lambdas to anonymous classes.
+3.  *Refactoring* - "Replace Conditional with Polymorphism".
+
+---
+
+
+#### Q63: How does the Template Method Pattern enforce an algorithm's structure?
+**Companies**: Google (MapReduce), Microsoft (ASP.NET Life Cycle), Spring (JdbcTemplate), JUnit (Test Life Cycle)
+**Difficulty**: **Easy** (Behavioral Pattern / Inheritance)
+**Category**: Behavioral Patterns, Code Reuse
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Duplicate Workflow Logic**
+You are building a Data Mining tool.
+1.  **PDF Miner**: Open File -> Extract Text -> *Parse PDF* -> Analyze -> Close File.
+2.  **CSV Miner**: Open File -> Extract Text -> *Parse CSV* -> Analyze -> Close File.
+3.  **Doc Miner**: Open File -> Extract Text -> *Parse DOC* -> Analyze -> Close File.
+
+**Problem**: 90% of the code (Open, Extract, Analyze, Close) is identical. Only the "Parse" step differs.
+**Risk**: If you fix a bug in "Analyze", you have to fix it in 3 places.
+
+**The Solution**: The Template Method Pattern.
+Define the **Skeleton** of the algorithm in a Parent Class.
+Let Child Classes implement the **Specific Steps**.
+The Parent controls the *flow*, the Child controls the *details*.
+
+**Real-World Analogies**:
+1.  **Home Builders**: Every house needs Foundation -> Framework -> Roof -> Walls. The *material* of the walls (Brick vs Wood) varies, but the *order* is fixed.
+2.  **Baking**: Mix Ingredients -> Bake -> Garnish. You can't Garnish before Baking.
+3.  **React Components**: `componentDidMount` -> `render` -> `componentWillUnmount`. The cycle is fixed; you just fill in the hooks.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Defines the skeleton of an algorithm in a method, deferring some steps to subclasses. Template Method lets subclasses redefine certain steps of an algorithm without changing the algorithm's structure.
+
+**The Key Roles**:
+1.  **Abstract Class**: Defines the `templateMethod()` (final) and the abstract steps.
+2.  **Concrete Class**: Implements the specific steps.
+3.  **Hooks**: Optional steps that subclasses *can* override but don't *have* to.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Copy-Paste (The Maintenance Nightmare)
+```java
+class PDFMiner {
+    void mine() { open(); parsePDF(); close(); }
+}
+class CSVMiner {
+    void mine() { open(); parseCSV(); close(); }
+}
+```
+*   **Critique**: Violation of DRY (Don't Repeat Yourself).
+
+#### Approach 2: Strategy Pattern?
+You could use Strategy (`miner.setParser(new PDFParser())`).
+*   **Nuance**: Strategy is for *interchangeable algorithms*. Template Method is for *fixed algorithms with variable steps*. Sometimes they overlap, but Template Method relies on Inheritance.
+
+#### Approach 3: Template Method (Inheritance)
+```java
+abstract class DataMiner {
+    // THE TEMPLATE - Final so kids can't mess up the flow
+    final void mine() {
+        open();
+        parse(); // Abstract
+        close();
+    }
+    abstract void parse();
+}
+```
+*   **Verdict**: Enforces structure. Guarantees `open()` happens before `parse()`.
+
+---
+
+### **4. Implementation I: The ETL Data Pipeline**
+A robust generic pipeline for processing different file formats.
+
+```java
+import java.io.File;
+
+// 1. ABSTRACT BASE CLASS
+abstract class DataProcessor {
+    
+    // THE TEMPLATE METHOD (Skeleton)
+    // Declared 'final' to prevent overriding the workflow
+    public final void process(String path) {
+        File file = openFile(path);
+        
+        try {
+            if (validate(file)) { // Hook
+                byte[] rawData = extractRawData(file);
+                Object parsedData = parseData(rawData); // Abstract Step
+                analyze(parsedData);
+                saveReport(parsedData);
+            } else {
+                System.out.println("❌ Validation Failed for " + path);
+            }
+        } catch (Exception e) {
+            handleError(e); // Hook
+        } finally {
+            closeFile(file);
+        }
+    }
+
+    // Common Step: Shared by all
+    private File openFile(String path) {
+        System.out.println("📂 Opening file: " + path);
+        return new File(path);
+    }
+
+    // Common Step
+    private byte[] extractRawData(File f) {
+        System.out.println("   Reading bytes from disk...");
+        return new byte[1024]; // Dummy data
+    }
+    
+    private void saveReport(Object data) {
+        System.out.println("💾 Saving report to Database...");
+    }
+
+    private void closeFile(File f) {
+        System.out.println("🔒 Closing file handle.");
+    }
+
+    // ABSTRACT STEP: Must be implemented by children
+    protected abstract Object parseData(byte[] data);
+    protected abstract void analyze(Object data);
+
+    // HOOK: Child CAN override, but defaults to true
+    protected boolean validate(File f) {
+        return true; 
+    }
+    
+    // HOOK: Empty default implementation
+    protected void handleError(Exception e) {
+        System.err.println("Generic Error Handler: " + e.getMessage());
+    }
+}
+
+// 2. CONCRETE CLASS 1 (PDF)
+class PdfProcessor extends DataProcessor {
+    @Override
+    protected Object parseData(byte[] data) {
+        System.out.println("   [PDF] Parsing PDF structure/fonts...");
+        return "PDF Content";
+    }
+
+    @Override
+    protected void analyze(Object data) {
+        System.out.println("   [PDF] Analyzing word count...");
+    }
+    
+    // Overriding a Hook
+    @Override
+    protected boolean validate(File f) {
+        System.out.println("   [PDF] Checking signature...");
+        return f.getName().endsWith(".pdf");
+    }
+}
+
+// 3. CONCRETE CLASS 2 (CSV)
+class CsvProcessor extends DataProcessor {
+    @Override
+    protected Object parseData(byte[] data) {
+        System.out.println("   [CSV] Splitting by commas...");
+        return "CSV,Values,Here";
+    }
+
+    @Override
+    protected void analyze(Object data) {
+        System.out.println("   [CSV] Calculating sums...");
+    }
+}
+
+// 4. USAGE
+public class TemplateMethodDemo {
+    public static void main(String[] args) {
+        System.out.println("--- Processing PDF ---");
+        DataProcessor pdf = new PdfProcessor();
+        pdf.process("document.pdf");
+        
+        System.out.println("\n--- Processing CSV ---");
+        DataProcessor csv = new CsvProcessor();
+        csv.process("data.csv");
+        
+        System.out.println("\n--- Invalid File ---");
+        pdf.process("virus.exe"); // Validation hook will fail
+    }
+}
+```
+
+---
+
+### **5. Implementation II: The "Hollywood Principle"**
+"Don't call us, we'll call you."
+The Parent class calls the Child class. The Child never calls the Parent's flow control logic.
+
+*In the example above*: `DataProcessor` calls `parseData()`. `PdfProcessor` does not call `process()`.
+
+---
+
+### **6. Implementation III: Functional Template (Java 8+)**
+You don't always need inheritance. You can pass functions (lambdas) to fill inside the holes.
+
+```java
+import java.util.function.Consumer;
+
+class FunctionalPipeline {
+    // The Template is a static method taking lambdas
+    public static void process(String data, Consumer<String> parser, Consumer<String> analyzer) {
+        System.out.println("Start");
+        System.out.println("Common Prep...");
+        
+        parser.accept(data);   // Hole 1
+        analyzer.accept(data); // Hole 2
+        
+        System.out.println("End");
+    }
+}
+
+public class LambdaTemplate {
+    public static void main(String[] args) {
+        FunctionalPipeline.process("MyData", 
+            d -> System.out.println("Parsing " + d),
+            d -> System.out.println("Analyzing " + d)
+        );
+    }
+}
+```
+
+---
+
+### **7. Multi-Language Perspectives**
+
+#### Python: Abstract Base Classes (ABC)
+```python
+from abc import ABC, abstractmethod
+
+class DataMiner(ABC):
+    def mine(self, path): # Template Method
+        self.open_file(path)
+        self.parse_data() # Abstract
+        self.close_file()
+        
+    def open_file(self, path): print(f"Opening {path}")
+    def close_file(self): print("Closing")
+    
+    @abstractmethod
+    def parse_data(self): pass
+
+class PdfMiner(DataMiner):
+    def parse_data(self): print("Parsing PDF")
+
+# Usage
+p = PdfMiner()
+p.mine("doc.pdf")
+```
+
+#### JavaScript: Higher Order Functions
+JS prefers Composition/Functions over Class Inheritance.
+```javascript
+// The Template Function
+function executePipeline(data, parseFn, analyzeFn) {
+    console.log("Start Pipeline");
+    const parsed = parseFn(data);
+    analyzeFn(parsed);
+    console.log("End Pipeline");
+}
+
+// Concrete Steps
+const jsonParse = (d) => JSON.parse(d);
+const logAnalyze = (d) => console.log(d);
+
+executePipeline('{"a":1}', jsonParse, logAnalyze);
+```
+
+#### C: Structs with Function Pointers
+Manually building a vtable.
+```c
+typedef struct {
+    void (*parse)(void);
+    void (*analyze)(void);
+} MinerOps;
+
+// Template Method
+void mine(MinerOps* ops) {
+    printf("Opening...\n");
+    ops->parse();   // Call hook
+    ops->analyze(); // Call hook
+    printf("Closing...\n");
+}
+
+void pdfParse() { printf("Parsing PDF\n"); }
+void pdfAnalyze() { printf("Analyzing PDF\n"); }
+
+int main() {
+    MinerOps pdfOps = { pdfParse, pdfAnalyze };
+    mine(&pdfOps);
+    return 0;
+}
+```
+
+#### Go: Embedding & Interfaces
+Go doesn't have inheritance, but it can use embedding or simple interface injection.
+```go
+type Miner interface {
+    Parse()
+    Analyze()
+}
+
+// Template Logic
+func ExecuteMine(m Miner) {
+    fmt.Println("Opening...")
+    m.Parse()
+    m.Analyze()
+    fmt.Println("Closing...")
+}
+
+type PdfMiner struct {}
+func (p PdfMiner) Parse() { fmt.Println("PDF Parse") }
+func (p PdfMiner) Analyze() { fmt.Println("PDF Analyze") }
+
+// Usage: ExecuteMine(PdfMiner{})
+```
+
+---
+
+### **8. Practice & Assessment**
+
+#### Core Exercises
+1.  **Game AI Turn**:
+    -   Template: `takeTurn()` -> `collectResources()`, `buildStructures()`, `attack()`.
+    -   Classes: `OrcAI` (Aggressive attack), `HumanAI` (Defensive build).
+2.  **Report Generator**:
+    -   Template: `generate()` -> `fetchData()`, `formatHeader()`, `formatBody()`, `formatFooter()`.
+    -   Classes: `HTMLReport`, `PDFReport`.
+3.  **Pizza Maker**:
+    -   Template: `makePizza()` -> `prepareDough()`, `addSauce()`, `addToppings()`, `bake()`.
+    -   Classes: `VeggiePizza` (overrides toppings), `DeepDish` (overrides dough).
+
+#### Edge Case Drills
+1.  **Breaking the Flow**:
+    -   *Q*: How to prevent a child class from overriding `mine()` and deleting the validation step?
+    -   *A*: In Java, mark the template method as `final`.
+2.  **Optional Steps**:
+    -   *Q*: I want `analyze()` to be optional.
+    -   *A*: Create a Hook `shouldAnalyze()` returning `true` by default. Child can return `false`.
+3.  **Too Many Hooks**:
+    -   *Critique*: If you have 20 hooks, the template is probably trying to do too much. Split it up.
+
+---
+
+### **9. Security Analysis: Hook Vulnerabilities**
+
+**Vulnerability**: A malicious subclass overrides a security hook to bypass checks.
+**Scenario**:
+Parent: `authenticate(); if (isAuth) { execute(); }`
+Child: Overrides `authenticate()` to always return `true` (if not final) or bypasses the check if the flow isn't `final`.
+
+**Mitigation**:
+1.  **Final Template**: Mark the `templateMethod` as `final`.
+2.  **Private Core Logic**: Keep critical security logic in `private` methods that children cannot see or touch.
+3.  **Sealed Classes** (Java 15+): Restrict who can extend the class.
+
+```java
+public abstract sealed class SecureTransaction permits CreditCardTransaction {
+    public final void execute() { // Final!
+        if (!auth()) throw new SecurityException();
+        doTransfer();
+    }
+    private boolean auth() { return true; } // Private!
+}
+```
+
+---
+
+### **10. Cheatsheet & Summary**
+
+| Pattern | Goal | Key Feature |
+| :--- | :--- | :--- |
+| **Template Method** | Fixed Structure, Variable Steps | `final` method with `abstract` calls. |
+| **Strategy** | Interchangeable Algorithms | Interface + Composition. |
+| **Factory Method** | Creation Logic Steps | Subclasses decide *what* to create. |
+
+**Verdict**: Use Template Method when you have a standard procedure (algorithm) that shouldn't change, but specific steps within it need to vary.
+
+---
+
+### **11. References**
+1.  *Design Patterns (GoF)* - Template Method.
+2.  *Clean Architecture* - The Hollywood Principle.
+3.  *Spring Framework Source Code* - `JdbcTemplate`.
+
+---
+
+
+#### Q64: How does the Builder Pattern solve the "Telescoping Constructor" problem?
+**Companies**: Google (Protocol Buffers), Amazon (AWS SDKs), Java (StringBuilder/Stream.Builder), Lombok (@Builder)
+**Difficulty**: **Easy** (Creational Pattern / API Design)
+**Category**: Creational Patterns, Fluent Interface
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The Telescoping Constructor Nightmare**
+You are designing a `Pizza` class.
+```java
+// Constructor Hell
+new Pizza(12); // Size
+new Pizza(12, true); // Size, Cheese
+new Pizza(12, true, false); // Size, Cheese, Pepperoni
+new Pizza(12, true, false, true); // Size, Cheese, Pepperoni, Bacon
+new Pizza(12, true, false, true, false, true...); // 🤯
+```
+**Problem**: Hard to read (`true, false, true`). Hard to maintain. What if I *only* want Bacon? `new Pizza(12, false, false, true)`?
+
+**The Solution**: The Builder Pattern.
+Separate the **Construction** of a complex object from its **Representation**.
+Use a **Fluent Interface** (Method Chaining) for readability.
+
+**Real-World Analogies**:
+1.  **Subway Sandwich Artist**: "Start with Wheat Bread" -> "Add Turkey" -> "Add Lettuce" -> "No Onions" -> "Wrap it up". Steps are optional and ordered.
+2.  **SQL Queries**: `SELECT * FROM User WHERE age > 18 ORDER BY name`. You build the query clause by clause.
+3.  **PC Part Picker**: CPU + RAM + GPU... then "Build".
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Separates the construction of a complex object from its representation so that the same construction process can create different representations.
+
+**The Key Roles**:
+1.  **Product**: The complex object (e.g., `HttpRequest`). usually immutable.
+2.  **Builder**: Inner class with setters that return `this`. Holds temporary state.
+3.  **Director (Optional)**: Orchestrates the Builder for common configs (e.g., `createDefaultRequest()`).
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Telescoping Constructors
+```java
+public User(String name) { ... }
+public User(String name, int age) { ... }
+public User(String name, int age, String phone) { ... }
+```
+*   **Critique**: Unreadable with many parameters of the same type (`String, String, String`).
+
+#### Approach 2: JavaBeans (Setters)
+```java
+User u = new User();
+u.setName("Alice");
+u.setAge(25);
+```
+*   **Critique**: **Inconsistent State**. The object is mutable. What if I use `u` before calling `setAge()`? It's half-baked. Thread-safety is impossible without locking.
+
+#### Approach 3: The Builder (Effective Java Item 2)
+```java
+User u = new User.Builder("Alice") // Required
+            .age(25) // Optional
+            .build();
+```
+*   **Verdict**: Immutable Product + Readable Construction + Atomic Creation.
+
+---
+
+### **4. Implementation I: The HTTP Request Builder**
+Building a robust HttpClient request object (like `java.net.http.HttpRequest`).
+
+```java
+import java.net.URI;
+import java.util.HashMap;
+import java.util.Map;
+
+// 1. THE PRODUCT (Immutable)
+class HttpRequest {
+    private final String method;
+    private final String url;
+    private final Map<String, String> headers;
+    private final String body;
+    private final int timeoutMs;
+
+    // Private Constructor: Only Builder can call this
+    private HttpRequest(Builder b) {
+        this.method = b.method;
+        this.url = b.url;
+        this.headers = b.headers;
+        this.body = b.body;
+        this.timeoutMs = b.timeoutMs;
+    }
+
+    public void send() {
+        System.out.println("🚀 Sending " + method + " to " + url);
+        System.out.println("   Headers: " + headers);
+        System.out.println("   Body: " + body);
+        System.out.println("   Timeout: " + timeoutMs + "ms");
+    }
+
+    // 2. THE BUILDER (Static Inner Class)
+    public static class Builder {
+        // Required parameters
+        private final String url;
+        private final String method;
+
+        // Optional parameters (initialized to defaults)
+        private Map<String, String> headers = new HashMap<>();
+        private String body = "";
+        private int timeoutMs = 3000;
+
+        public Builder(String url, String method) {
+            this.url = url;
+            this.method = method;
+        }
+
+        public Builder header(String key, String val) {
+            this.headers.put(key, val);
+            return this; // Return self for chaining
+        }
+
+        public Builder body(String json) {
+            this.body = json;
+            return this;
+        }
+
+        public Builder timeout(int ms) {
+            this.timeoutMs = ms;
+            return this;
+        }
+
+        public HttpRequest build() {
+            // Validate here! "Fail Fast"
+            if (timeoutMs < 0) throw new IllegalArgumentException("Timeout cannot be negative");
+            if (url == null) throw new IllegalStateException("URL is required");
+            
+            return new HttpRequest(this);
+        }
+    }
+}
+
+// 3. USAGE
+public class BuilderDemo {
+    public static void main(String[] args) {
+        // Fluent API
+        HttpRequest request = new HttpRequest.Builder("https://api.google.com", "POST")
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer xyz")
+            .body("{ 'q': 'design patterns' }")
+            .timeout(5000)
+            .build(); // Returns the Immutable Product
+
+        request.send();
+        
+        // Cannot modify request after build!
+        // request.setTimeout(100); // Compilation Error (No setters)
+    }
+}
+```
+
+---
+
+### **5. Implementation II: The SQL Query Builder**
+Building complex SQL strings dynamically.
+
+```java
+class SQLQuery {
+    private String table;
+    private String columns = "*";
+    private String where;
+    
+    public static class Builder {
+        private SQLQuery query = new SQLQuery();
+        
+        public Builder select(String... cols) {
+            query.columns = String.join(", ", cols);
+            return this;
+        }
+        
+        public Builder from(String table) {
+            query.table = table;
+            return this;
+        }
+        
+        public Builder where(String condition) {
+            query.where = condition;
+            return this;
+        }
+        
+        public String build() {
+            StringBuilder sb = new StringBuilder();
+            sb.append("SELECT ").append(query.columns);
+            sb.append(" FROM ").append(query.table);
+            if (query.where != null) sb.append(" WHERE ").append(query.where);
+            return sb.toString();
+        }
+    }
+}
+
+// Result: new SQLQuery.Builder().select("id", "name").from("users").where("age > 18").build();
+```
+
+---
+
+### **6. Implementation III: Lombok `@Builder`**
+In Modern Java, we rarely write Builders manually. We use the Lombok library.
+
+```java
+/*
+@Builder
+@Getter
+class User {
+    private String name;
+    private int age;
+    private String email;
+}
+
+// Auto-generated Usage:
+User u = User.builder()
+    .name("Bob")
+    .age(30)
+    .build();
+*/
+```
+*   **Deep Dive**: Lombok generates the static inner class and methods at compile-time (RetentionPolicy.SOURCE).
+
+---
+
+### **7. Multi-Language Perspectives**
+
+#### JavaScript: Method Chaining or Config Object
+Method 1 (Config Object):
+```javascript
+function createRequest(url, config = {}) {
+    const { method = 'GET', timeout = 1000 } = config; // Destructuring with defaults
+    console.log(`Req to ${url}, method ${method}`);
+}
+createRequest('api.com', { method: 'POST', timeout: 5000 });
+```
+
+Method 2 (Class Builder):
+```javascript
+class RequestBuilder {
+    constructor(url) { this.url = url; this.headers = {}; }
+    setHeader(k, v) { this.headers[k] = v; return this; } // Return this
+    build() { return new Request(this); }
+}
+```
+
+#### Python: Named Arguments
+Python doesn't really need Builder because of Named Arguments.
+```python
+class Request:
+    def __init__(self, url, method="GET", timeout=30):
+        self.url = url
+       pass
+
+# Usage feels like a Builder
+r = Request(
+    url="http://api.com",
+    method="POST",
+    timeout=5000
+)
+```
+
+#### Go: Functional Options Pattern
+Go doesn't have method overloading or optional params.
+```go
+type Server struct {
+    Port int
+    Timeout int
+}
+
+type Option func(*Server)
+
+func WithPort(p int) Option {
+    return func(s *Server) { s.Port = p }
+}
+
+func NewServer(opts ...Option) *Server {
+    s := &Server{Port: 80, Timeout: 30}
+    for _, opt := range opts { opt(s) }
+    return s
+}
+
+// Usage
+srv := NewServer(WithPort(8080))
+```
+
+---
+
+### **8. Practice & Assessment**
+
+#### Core Exercises
+1.  **Email Builder**:
+    -   `to()`, `cc()`, `bcc()`, `subject()`, `body()`, `attachment()`.
+    -   Validate: Must have at least one recipient (`to`, `cc`, or `bcc`).
+2.  **Burger Layout**:
+    -   `bun()`, `patty()`, `cheese()`, `mustard()`.
+    -   `build()` returns `Burger`.
+3.  **Computer Configurator**:
+    -   `cpu()`, `ram()`, `gpu()`.
+    -   Validate: `Result`: "Gaming PC" vs "Office PC".
+
+#### Edge Case Drills
+1.  **Required vs Optional**:
+    -   *Q*: How to enforce "URL is mandatory"?
+    -   *A*: Require it in the `Builder(String url)` constructor, not a setter method.
+2.  **Immutability**:
+    -   *Q*: Can I reuse a Builder?
+    -   *A*: Yes. Call `build()`, then `timeout(9000).build()` to create a *similar* request.
+3.  **Thread Safety**:
+    -   *Fact*: The Builder itself is *not* thread-safe (usually). But the object it builds (Product) *should* be thread-safe (Immutable).
+
+---
+
+### **9. Security Analysis: Incomplete Object State**
+
+**Vulnerability**: Creating an object in an invalid state leads to exploits.
+**Scenario**: `User` object created without `Role`. Default is `null`. System crashes or assumes `Guest` but logic fails.
+
+**The Builder Fix**: **Fail Fast in `build()`**.
+```java
+public User build() {
+    if (this.role == null) {
+        throw new SecurityException("User Role cannot be null!");
+    }
+    if (this.password.length() < 8) {
+        throw new SecurityException("Password too weak");
+    }
+    return new User(this);
+}
+```
+**Conclusion**: Builder is the *last line of defense* before an object enters the system application logic.
+
+---
+
+### **10. Cheatsheet & Summary**
+
+| Pattern | Goal | Analogy |
+| :--- | :--- | :--- |
+| **Builder** | Complex Construction | Subway Sandwich |
+| **Factory** | Polymorphic Creation | Pizza Store (NY vs Chicago Style) |
+| **Prototype** | Cloning Objects | DNA Replication |
+
+**Verdict**: Use Builder when constructors have > 4 parameters or some are optional.
+
+---
+
+### **11. References**
+1.  *Effective Java* - Item 2 (Builder).
+2.  *Clean Code* - Object Construction.
+3.  *GoF* - Creational Patterns.
+
+---
+
+
+#### Q65: How does the Prototype Pattern optimize object creation?
+**Companies**: Amazon (EC2 Provisioning), Unity (Prefabs), Java (ArrayList.clone), JavaScript (Prototypes)
+**Difficulty**: **Medium** (Creational Pattern / Memory Management)
+**Category**: Creational Patterns, Performance Optimization
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Expensive Creation Logic**
+You are building a Cloud Provider (AWS).
+Creating a Virtual Machine (VM) involves:
+1.  Allocate Hardware.
+2.  Install OS (Linux).
+3.  Configure Network IP.
+4.  Install Software Packages (Docker, K8s).
+**Cost**: 5 minutes per VM.
+
+**Problem**: User asks for 100 identical VMs.
+**Slow Way**: Run the 5-minute setup loop 100 times. (500 minutes).
+
+**The Solution**: The Prototype Pattern.
+Create **One** Master VM ("Golden Image").
+**Clone** it 99 times.
+Cloning (Memory Copy) takes ms.
+
+**Real-World Analogies**:
+1.  **Biology**: Cell Mitosis. Cells don't build from scratch; they split (clone).
+2.  **Printing**: You don't hand-write 1000 flyers. You make one Master and photocopy it.
+3.  **Game Dev**: Spawning 1000 enemies. Load the model/texture once, then clone instances.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Specify the kinds of objects to create using a prototypical instance, and create new objects by copying this prototype.
+
+**The Key Roles**:
+1.  **Prototype Interface**: Declares `clone()`.
+2.  **Concrete Prototype**: Implements the actual copying logic.
+3.  **Client**: Creates new object by asking a prototype to clone itself.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: The "New" Operator
+```java
+VM vm1 = new VM("Linux", "8GB");
+VM vm2 = new VM("Linux", "8GB"); // Redoing all setup work
+```
+*   **Critique**: Slow. Violates dry.
+
+#### Approach 2: Serialization Clone (Hack)
+Serialize to JSON -> Deserialize back.
+*   **Critique**: Very expensive cpu wise.
+
+#### Approach 3: Prototype (Native Clone)
+```java
+VM vm2 = vm1.clone(); 
+```
+*   **Verdict**: Fast (Memory copy).
+
+---
+
+### **4. Implementation I: The Virtual Machine Cloner**
+Simulating a Cloud Provisioning System.
+
+```java
+import java.util.ArrayList;
+import java.util.List;
+
+// 1. PROTOTYPE INTERFACE
+interface CloudInstance extends Cloneable {
+    CloudInstance cloneInstance();
+    void showDetails();
+}
+
+// 2. CONCRETE PROTOTYPE
+class VirtualMachine implements CloudInstance {
+    private String os;
+    private String instanceType; // e.g., "t2.micro"
+    // MUTABLE FIELD - DANGER!
+    private List<String> installedSoftware; 
+
+    public VirtualMachine(String os, String type) {
+        this.os = os;
+        this.instanceType = type;
+        this.installedSoftware = new ArrayList<>();
+        // Simulate heavy setup
+        System.out.println("⏳ Booting OS... (Expensive Operation)");
+    }
+    
+    public void installSoftware(String pkg) {
+        this.installedSoftware.add(pkg);
+    }
+
+    // THE CLONE METHOD
+    @Override
+    public CloudInstance cloneInstance() {
+        try {
+            // Shallow Copy (Java Default)
+            VirtualMachine clone = (VirtualMachine) super.clone();
+            
+            // DEEP COPY MANUALLY (Critical Security Step)
+            // If we don't do this, both VMs share the same software list!
+            clone.installedSoftware = new ArrayList<>(this.installedSoftware);
+            
+            return clone;
+        } catch (CloneNotSupportedException e) {
+            return null;
+        }
+    }
+    
+    @Override
+    public void showDetails() {
+        System.out.println("VM [" + System.identityHashCode(this) + "]: " + os + ", Apps: " + installedSoftware);
+    }
+}
+
+// 3. USAGE
+public class PrototypeDemo {
+    public static void main(String[] args) {
+        // 1. Create Golden Image (Expensive)
+        VirtualMachine goldenImage = new VirtualMachine("Ubuntu 22.04", "c5.large");
+        goldenImage.installSoftware("Nginx");
+        goldenImage.installSoftware("Java 21");
+        
+        System.out.println("--- Cloning Started ---");
+        
+        // 2. Clone it (Cheap)
+        VirtualMachine vm1 = (VirtualMachine) goldenImage.cloneInstance();
+        VirtualMachine vm2 = (VirtualMachine) goldenImage.cloneInstance();
+        
+        // 3. Verify Independence
+        vm1.installSoftware("App-Server"); // Should only affect VM1
+        
+        goldenImage.showDetails();
+        vm1.showDetails();
+        vm2.showDetails();
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: The Java `Cloneable` Broken Promise**
+The `Cloneable` interface in Java is considered a design flaw (Bloch, Effective Java Item 13).
+1.  It's a marker interface implies `clone()` behavior but `clone()` is protected in `Object`.
+2.  `super.clone()` does a **Shallow Copy**.
+3.  It bypasses the Constructor (Validation logic might be skipped!).
+
+**Better Way: Copy Constructor**
+```java
+public VirtualMachine(VirtualMachine source) {
+    this.os = source.os;
+    this.instanceType = source.instanceType;
+    this.installedSoftware = new ArrayList<>(source.installedSoftware); // Deep Copy
+}
+```
+
+---
+
+### **6. Implementation II: Prototype Registry**
+A catalog of prototypes to clone from.
+
+```java
+import java.util.HashMap;
+import java.util.Map;
+
+class VMRegistry {
+    private Map<String, VirtualMachine> cache = new HashMap<>();
+    
+    public VMRegistry() {
+        // Initialize standard types
+        VirtualMachine web = new VirtualMachine("Linux", "Small");
+        web.installSoftware("Apache");
+        cache.put("WEB", web);
+        
+        VirtualMachine db = new VirtualMachine("Linux", "Large");
+        db.installSoftware("Postgres");
+        cache.put("DB", db);
+    }
+    
+    public VirtualMachine get(String type) {
+        return (VirtualMachine) cache.get(type).cloneInstance();
+    }
+}
+```
+
+---
+
+### **7. Multi-Language Perspectives**
+
+#### JavaScript: Prototypal Inheritance
+JS is built on this pattern. Objects inherit directly from other objects.
+```javascript
+const carPrototype = {
+    wheels: 4,
+    start() { console.log("Vroom"); }
+};
+
+// Create object using prototype
+const myCar = Object.create(carPrototype);
+myCar.color = "Red";
+
+console.log(myCar.wheels); // 4 (via prototype chain)
+
+// Modern Cloning (Deep Copy)
+const deepClone = structuredClone(myCar);
+```
+
+#### Python: `copy` module
+```python
+import copy
+
+original_list = [[1, 2], [3, 4]]
+
+# Shallow Copy
+shallow = copy.copy(original_list)
+shallow[0][0] = 99
+# Affects original_list!
+
+# Deep Copy
+deep = copy.deepcopy(original_list)
+deep[1][0] = 55
+# Does NOT affect original_list
+```
+
+#### C: Memory Copy
+```c
+struct Point { int x, y; };
+
+struct Point p1 = {10, 20};
+struct Point p2;
+
+// Raw Memory Copy (Shallow)
+memcpy(&p2, &p1, sizeof(struct Point));
+```
+
+#### Go: Struct Copy
+Assignment copies the struct value (Shimmy).
+```go
+type Robot struct {
+    ID int
+    Data *string // Pointer!
+}
+
+r1 := Robot{ID: 1, Data: new(string)}
+*r1.Data = "AI"
+
+r2 := r1 // Shallow Copy of values. ID is copied. Pointer is copied (shares address!)
+
+// Deep Copy needs manual Method
+func (r Robot) Clone() Robot {
+    clone := r
+    str := *r.Data
+    clone.Data = &str // New address
+    return clone
+}
+```
+
+---
+
+### **8. Practice & Assessment**
+
+#### Core Exercises
+1.  **Dungeon Generator**:
+    -   Create `Room` prototype with standard loot.
+    -   Clone it to build a 100-room dungeon.
+2.  **Document Templates**:
+    -   `ContractTemplate`.
+    -   Clone it and fill in "Name" and "Date".
+3.  **DNA Simulation**:
+    -   Clone `Cell`. Mutate the clone slightly.
+
+#### Edge Case Drills
+1.  **Circular References**:
+    -   *Q*: How to deep clone A references B and B references A?
+    -   *A*: Need a `Map<Original, Clone>` to track visited objects and prevent infinite recursion.
+2.  **Singleton Cloning**:
+    -   *Q*: Can I clone a Singleton?
+    -   *A*: No! It violates the pattern. Override `clone()` to throw exception or return `this`.
+
+---
+
+### **9. Security Analysis: The Shallow Copy Trap**
+
+**Vulnerability**: State Bleeding.
+If you use Shallow Copy on mutable fields (like Lists, Maps, User objects), the Clone and the Original share the memory.
+Attacker modifies the Clone -> Original is corrupted.
+
+**Example**:
+```java
+User admin = new User("Admin", List.of("READ", "WRITE"));
+User guest = admin.clone(); // Shallow Copy!
+guest.getPermissions().clear(); // Clears ADMIN's permissions too!
+```
+**Fix**: Always verify Deep Copy strategy for mutable fields.
+
+---
+
+### **10. Cheatsheet & Summary**
+
+| Copy Type | Description | Speed | Risk |
+| :--- | :--- | :--- | :--- |
+| **Reference Copy** | `a = b` | Instant | Same Object |
+| **Shallow Copy** | `clone()` | Fast | Shared Internals (Danger) |
+| **Deep Copy** | Recursively clone | Slow | Independent |
+
+**Verdict**: Use Prototype when initialization is expensive (DB calls, IO) or complex.
+
+---
+
+### **11. References**
+1.  *Effective Java* - Item 13 (Cloneable).
+2.  *MDN Web Docs* - Object.create().
+
+---
+
+#### Q66: How does the Decorator Pattern enable dynamic behavior extension?
+**Companies**: Java (IO Streams), Python (Decorators), React (HOCs), Go (Middleware)
+**Difficulty**: **Medium** (Structural Pattern / Wrapper)
+**Category**: Structural Patterns, Open/Closed Principle
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Inheritance Explosion**
+You are designing a notification system.
+1.  `Notifier`
+2.  `EmailNotifier`
+3.  `SMSNotifier`
+4.  `SlackNotifier`
+
+**Feature Request**: "I want Email AND SMS".
+**Bad Approach**: `EmailAndSMSNotifier`.
+**Feature Request**: "I want Email AND Slack".
+**Bad Approach**: `EmailAndSlackNotifier`.
+**Combinatorial Explosion**: For N features, you need 2^N subclasses.
+
+**The Solution**: The Decorator Pattern.
+Wrap the object!
+`new SMSDecorator(new EmailDecorator(new Notifier()))`.
+Behaviors are **Stackable**.
+
+**Real-World Analogies**:
+1.  **Coffee Shop**: Base = Espresso. Decorators = Milk, Sugar, Caramel, Whip. You don't fail a class `CaramelWhipSugarEspresso`. You wrap flavors.
+2.  **Winter Clothing**: You don't grow a thicker skin. You put on a Sweater (Decorator) over a Shirt (Decorator) over your Body.
+3.  **Gift Wrapping**: Box -> Paper -> Ribbon -> Card.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Attach additional responsibilities to an object dynamically. Decorators provide a flexible alternative to subclassing for extending functionality.
+
+**The Key Roles**:
+1.  **Component Interface**: The common supertype (e.g., `DataSource`).
+2.  **Concrete Component**: The base object (e.g., `FileDataSource`).
+3.  **Base Decorator**: Implements Interface, holds a reference to a wrapped Component.
+4.  **Concrete Decorators**: Adds usage before/after delegating to the wrapped component.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Subclassing (Static)
+```java
+class EncryptedFile extends File { ... }
+class CompressedFile extends File { ... }
+class EncryptedCompressedFile extends File { ... } // 🤯
+```
+*   **Critique**: Rigid. Cannot change behavior at runtime.
+
+#### Approach 2: Strategy Pattern?
+Strategy changes *the* guts. Decorator changes the *skin*.
+You usually have *one* strategy, but *many* decorators.
+
+#### Approach 3: Decorator (Wrapper)
+```java
+DataSource source = new FileDataSource("data.txt");
+source = new CompressionDecorator(source);
+source = new EncryptionDecorator(source);
+source.writeData("Hello");
+```
+*   **Verdict**: Flexible nesting.
+
+---
+
+### **4. Implementation I: The I/O Stream Simulator**
+Simulating `java.io` streams for reading/writing data with layers.
+
+```java
+// 1. COMPONENT INTERFACE
+interface DataSource {
+    void writeData(String data);
+    String readData();
+}
+
+// 2. CONCRETE COMPONENT (The Base)
+class FileDataSource implements DataSource {
+    private String filename;
+    private StringBuilder storage = new StringBuilder(); // Simulating Disk
+    
+    public FileDataSource(String filename) { this.filename = filename; }
+    
+    @Override
+    public void writeData(String data) {
+        System.out.println("💾 Writing to file: " + data);
+        storage.append(data);
+    }
+    
+    @Override
+    public String readData() {
+        System.out.println("📂 Reading from file...");
+        return storage.toString();
+    }
+}
+
+// 3. BASE DECORATOR
+abstract class DataSourceDecorator implements DataSource {
+    protected DataSource wrappee; // The wrapped object
+    
+    public DataSourceDecorator(DataSource source) {
+        this.wrappee = source;
+    }
+    
+    @Override
+    public void writeData(String data) {
+        wrappee.writeData(data); // Forward call
+    }
+    
+    @Override
+    public String readData() {
+        return wrappee.readData(); // Forward call
+    }
+}
+
+// 4. CONCRETE DECORATOR A (Encryption)
+class EncryptionDecorator extends DataSourceDecorator {
+    public EncryptionDecorator(DataSource source) { super(source); }
+    
+    @Override
+    public void writeData(String data) {
+        String encrypted = "ENCRYPTED(" + data + ")";
+        System.out.println("🔒 Encrypting...");
+        super.writeData(encrypted);
+    }
+    
+    @Override
+    public String readData() {
+        String data = super.readData();
+        System.out.println("🔓 Decrypting...");
+        return data.replace("ENCRYPTED(", "").replace(")", "");
+    }
+}
+
+// 5. CONCRETE DECORATOR B (Compression)
+class CompressionDecorator extends DataSourceDecorator {
+    public CompressionDecorator(DataSource source) { super(source); }
+    
+    @Override
+    public void writeData(String data) {
+        String compressed = "ZIP(" + data + ")";
+        System.out.println("🗜️ Compressing...");
+        super.writeData(compressed);
+    }
+    
+    @Override
+    public String readData() {
+        String data = super.readData();
+        System.out.println("📦 Decompressing...");
+        return data.replace("ZIP(", "").replace(")", "");
+    }
+}
+
+// 6. USAGE
+public class DecoratorDemo {
+    public static void main(String[] args) {
+        String salaryRecords = "Name,Salary\nJohn,100000\nJane,120000";
+        
+        // Stack: Encryption -> Compression -> File
+        DataSource source = new FileDataSource("salary.csv");
+        source = new CompressionDecorator(source);
+        source = new EncryptionDecorator(source);
+        
+        // Write Path: Encr -> Comp -> File
+        System.out.println("--- WRITING ---");
+        source.writeData(salaryRecords);
+        // Output: ZIP(ENCRYPTED(Name,Salary...))
+        
+        // Read Path: File -> Comp -> Encr
+        System.out.println("\n--- READING ---");
+        System.out.println(source.readData());
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Java I/O Architecture**
+The `java.io` package is the most famous example of Decorator.
+`InputStream` (Component)
+`FileInputStream` (Concrete Component)
+`FilterInputStream` (Base Decorator)
+`BufferedInputStream` (Concrete Decorator - adds buffering)
+`GZIPInputStream` (Concrete Decorator - adds decompression)
+`ObjectInputStream` (Concrete Decorator - adds serialization)
+
+**Usage**:
+```java
+new ObjectInputStream(
+    new GZIPInputStream(
+        new BufferedInputStream(
+            new FileInputStream("data.bin")
+        )
+    )
+);
+```
+
+---
+
+### **6. Implementation II: Python Decorators (Syntactic Sugar)**
+Python has built-in support for decorators using `@`. Not exactly the OOP pattern (it's function composition), but solves similar problems.
+
+```python
+def log_execution(func):
+    def wrapper(*args, **kwargs):
+        print(f"Calling {func.__name__}")
+        result = func(*args, **kwargs)
+        print(f"Finished {func.__name__}")
+        return result
+    return wrapper
+
+def authenticate(func):
+    def wrapper(*args, **kwargs):
+        if not kwargs.get("user"): raise Exception("No User!")
+        return func(*args, **kwargs)
+    return wrapper
+
+@log_execution
+@authenticate
+def get_dashboard(user=None):
+    print("Dashboard Data")
+
+# Usage
+get_dashboard(user="admin")
+```
+
+---
+
+### **7. Multi-Language Perspectives**
+
+#### Go: Middleware (The Decorator Pattern)
+Web servers (like built-in `http` or `Gin`) use Decorator for Middleware.
+```go
+type ApplicationHandler func(resp http.ResponseWriter, req *http.Request)
+
+func LoggingMiddleware(next ApplicationHandler) ApplicationHandler {
+    return func(w http.ResponseWriter, r *http.Request) {
+        fmt.Println("Log Request")
+        next(w, r) // Delegate
+    }
+}
+
+func AuthMiddleware(next ApplicationHandler) ApplicationHandler {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if r.Header.Get("Token") == "" { return }
+        next(w, r) // Delegate
+    }
+}
+```
+
+#### JavaScript: Higher Order Components (HOC)
+Used heavily in React.
+```javascript
+function withStyles(Component) {
+    return function DecoratedComponent(props) {
+        const style = { color: 'red' };
+        return <Component style={style} {...props} />;
+    };
+}
+
+const Button = (props) => <button style={props.style}>Click</button>;
+const RedButton = withStyles(Button);
+```
+
+---
+
+### **8. Practice & Assessment**
+
+#### Core Exercises
+1.  **Starbucks App**:
+    -   Base: `Beverage` (cost, description).
+    -   Decorators: `Mocha`, `Soy`, `Whip`.
+    -   Task: Calculate cost of `new Whip(new Mocha(new DarkRoast()))`.
+2.  **API Rate Limiter**:
+    -   Decorator wraps an API client and throws exception if called too often.
+3.  **UI Border**:
+    -   Decorator wraps a `Window` and draws a border around it.
+
+#### Edge Case Drills
+1.  **Order Matters**:
+    -   *Q*: Does `Encryption(Compression(Data))` equal `Compression(Encryption(Data))`?
+    -   *A*: NO! Encrypting random compressed bytes is fine. Compressing encrypted bytes (high entropy) is useless (size won't shrink).
+2.  **Identity Crisis**:
+    -   *Q*: `source instanceof FileDataSource`?
+    -   *A*: `false` if it's wrapped! The wrapper hides the identity. Be careful with type checks.
+
+---
+
+### **9. Security Analysis: The Stack Overflow Risk**
+
+**Vulnerability**: Decorator Explosion.
+If you wrap objects infinitely dynamically (e.g., in a loop based on user input), you create a massive reference chain.
+Calling `read()` triggers a recursion stack of depth N.
+**Result**: `StackOverflowError` (DoS).
+
+**Mitigation**: Limit the recursion depth or the number of active decorators.
+
+---
+
+### **10. Cheatsheet & Summary**
+
+| Pattern | Goal | Key Feature |
+| :--- | :--- | :--- |
+| **Decorator** | Add behavior dynamically | Wrapper implementing same interface. |
+| **Adapter** | Change interface | Wrapper implementing *different* interface. |
+| **Proxy** | Control access | Wrapper with same interface (but no behavior addition usually). |
+
+**Verdict**: Use Decorator to avoid class explosion when features can be mixed and matched.
+
+---
+
+### **11. References**
+1.  *Head First Design Patterns* - Chapter 3 (Starbuzz Coffee).
+2.  *Java IO APIs*.
+3.  *Python Decorators PEP*.
+
+---
+
+
+#### Q67: How do you implement lazy initialization thread-safely?
+**Companies**: Google (Guava Suppliers), Amazon (AWS Clients), Singleton Implementation, Spring (Lazy Beans)
+**Difficulty**: **Hard** (Memory Model / Concurrency)
+**Category**: Concurrency Patterns, Optimization
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Expensive Startup Cost**
+You have a `HeavyResource` (e.g., Database Connection, AI Model 4GB).
+Cost to create: 10 seconds.
+Memory usage: 4GB.
+
+**Problem**:
+If you put it in a `static final` field:
+```java
+static final HeavyResource RES = new HeavyResource(); // 10s delay at app start!
+```
+The App startup is slow. Maybe the user *never* clicks the button that needs this resource. You wasted 4GB RAM.
+
+**The Solution**: Lazy Initialization.
+Create it **only** when requested.
+**Challenge**: Two threads ask for it at the exact same nanosecond. You might create *two* instances (Race Condition).
+
+**Real-World Analogies**:
+1.  **Ghost in Video Games**: The level boss isn't loaded into RAM until you walk through the dungeon door.
+2.  **Web Images**: "Lazy Loading" images only when the user scrolls them into view.
+
+---
+
+### **2. Progressive Solution Evolution**
+
+#### Approach 1: Naive Null Check (Thread-Unsafe)
+```java
+public class UnsafeLazy {
+    private HeavyResource resource;
+    
+    public HeavyResource get() {
+        if (resource == null) { // RACE CONDITION HERE
+            resource = new HeavyResource();
+        }
+        return resource;
+    }
+}
+```
+*   **Critique**: If Thread A and Thread B enter line 5 together, both create objects. One is overwritten. **Bug**.
+
+#### Approach 2: Synchronized Method (Slow)
+```java
+public synchronized HeavyResource get() {
+    if (resource == null) resource = new HeavyResource();
+    return resource;
+}
+```
+*   **Critique**: Safe, but **Slow**. Every access (even after initialization) acquires a lock. 1000 threads reading = bottleneck.
+
+#### Approach 3: Double-Checked Locking (DCL)
+Check null, lock only if null, check null again.
+**Essential**: The field MUST be `volatile` to prevent Instruction Reordering.
+
+#### Approach 4: Initialization-on-demand Holder (The "Bill Pugh" Solution)
+Leverages the JVM's ClassLoader guarantees. Thread-safe by definition, no synchronization cost.
+
+---
+
+### **3. Implementation I: The Database Connection Pool (DCL)**
+Implementing a robust, thread-safe lazy loader for a heavy DB pool.
+
+```java
+// THE HEAVY RESOURCE
+class ConnectionPool {
+    public ConnectionPool() {
+        System.out.println("🔥 Initializing massive DB connection pool (5s cost)...");
+        try { Thread.sleep(1000); } catch (InterruptedException e) {}
+    }
+    public void query(String sql) { System.out.println("Executing: " + sql); }
+}
+
+// 1. DOUBLE-CHECKED LOCKING (Standard Pattern)
+class GenericLazyLoader<T> {
+    // VOLATILE IS MANDATORY!
+    // Without volatile, other threads might see a "half-initialized" object reference
+    private volatile T instance;
+    
+    public T get(java.util.function.Supplier<T> creator) {
+        T result = instance;
+        // First check (no locking) - Fast path
+        if (result == null) {
+            synchronized (this) {
+                result = instance;
+                // Second check (with locking) - Critical
+                if (result == null) {
+                    instance = result = creator.get();
+                }
+            }
+        }
+        return result;
+    }
+}
+
+// 2. USAGE
+public class DCLDemo {
+    private static GenericLazyLoader<ConnectionPool> loader = new GenericLazyLoader<>();
+    
+    public static void main(String[] args) {
+        Runnable task = () -> {
+            System.out.println(Thread.currentThread().getName() + " requesting DB...");
+            ConnectionPool pool = loader.get(ConnectionPool::new);
+            pool.query("SELECT * FROM Users");
+        };
+        
+        // Simulate massive concurrency
+        for (int i = 0; i < 10; i++) {
+            new Thread(task).start();
+        }
+    }
+}
+```
+
+---
+
+### **4. Implementation II: The Initialization-on-demand Holder**
+The "Perfect" Singleton/Lazy pattern in Java.
+It is lazy because the `Holder` inner class is not loaded until the `getInstance()` method is called.
+It is safe because Class Initialization is atomic in the JVM.
+
+```java
+class SmartLazy {
+    private SmartLazy() {
+        System.out.println("Initialized!");
+    }
+    
+    // Inner static class - NOT loaded when SmartLazy is loaded
+    private static class Holder {
+        static final SmartLazy INSTANCE = new SmartLazy();
+    }
+    
+    public static SmartLazy getInstance() {
+        // Triggers Holder class loading and initializes INSTANCE
+        return Holder.INSTANCE;
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Why `volatile` is required for DCL**
+Without `volatile`, the JVM/CPU can reorder instructions.
+Code: `instance = new HeavyResource();`
+Steps:
+1.  Allocate Memory.
+2.  Initialize Object (Constructor).
+3.  Assign pointer to `instance` variable.
+
+**Reordering**: The CPU might do **1 -> 3 -> 2**.
+1.  Allocate.
+2.  Assign pointer (instance is now NON-NULL).
+3.  **Context Switch to Thread B**.
+4.  Thread B sees `instance != null`.
+5.  Thread B tries to use `instance`.
+6.  **CRASH**: Object is not initialized yet!
+
+`volatile` enforces a "Happens-Before" relationship, preventing step 3 from happening before step 2.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### JavaScript (Node.js): Singleton Module
+Modules are cached after the first `require`.
+```javascript
+// db.js
+console.log("Initializing DB..."); // Runs once
+class DB { query() {} }
+module.exports = new DB();
+
+// main.js
+const db1 = require('./db');
+const db2 = require('./db'); // Returns cached instance
+```
+
+#### Python: Cached Property
+```python
+class DataService:
+    @property
+    def heavy_data(self):
+        if not hasattr(self, '_data'):
+            print("Loading Data...")
+            self._data = [i for i in range(1000000)]
+        return self._data
+
+# Or usage @functools.lru_cache
+```
+
+#### C: `pthread_once`
+Platform-standard way to ensure one-time execution.
+```c
+#include <pthread.h>
+#include <stdio.h>
+
+pthread_once_t once = PTHREAD_ONCE_INIT;
+void* global_resource;
+
+void init_routine() {
+    printf("Initializing Resource...\n");
+    global_resource = malloc(100);
+}
+
+void* get_resource() {
+    pthread_once(&once, init_routine); // Thread-safe, runs once
+    return global_resource;
+}
+```
+
+#### Go: `sync.Once`
+The idiomatic Go way.
+```go
+import "sync"
+
+type DB struct {}
+var instance *DB
+var once sync.Once
+
+func GetDB() *DB {
+    once.Do(func() {
+        fmt.Println("Init DB")
+        instance = &DB{}
+    })
+    return instance
+}
+```
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Lazy Config Loader**:
+    -   Load a 10MB JSON config file only when `getConfig("key")` is called.
+    -   Use DCL.
+2.  **Lazy React Component**:
+    -   Implement `React.lazy()` concept manually (simulated).
+3.  **Singleton Breaker**:
+    -   Try to break the "UnsafeLazy" implementation by spawning 1000 threads. Count how many instances were created.
+
+#### Edge Case Drills
+1.  **Exception Handling**:
+    -   *Q*: What if the Constructor throws an Exception inside the DCL block?
+    -   *A*: Need to ensure the `instance` field remains null so next retry can happen. Or mark as "Failed" state.
+2.  **Serialization**:
+    -   *Q*: If I serialize a Singleton, can I get two instances?
+    -   *A*: Yes! Unless you implement `readResolve()`.
+
+---
+
+### **8. Security Analysis: Race Conditions**
+
+**Vulnerability**: Time-of-Check to Time-of-Use (TOCTOU).
+If you check `if (securityContext == null)` and then initialize it without locks, an attacker might flood requests to force multiple initializations, potentially bypassing init-logic counters or quotas.
+
+**Fix**: Always use atomic initialization (like `AtomicReference.compareAndSet`) or proper locking for security-critical lazy loading.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Mechanism | Thread Safe? | Performant? | Notes |
+| :--- | :--- | :--- | :--- |
+| **Naive `if(null)`** | ❌ NO | ✅ YES | Buggy. |
+| **Synchronized Method** | ✅ YES | ❌ NO | Bottleneck. |
+| **Double-Checked Locking** | ✅ YES | ✅ YES | Requires `volatile`. |
+| **Static Holder** | ✅ YES | ✅ YES | JVM Native. Best for static singletons. |
+
+**Verdict**: Use **Initialization-on-demand Holder** for Statics. Use **DCL** (with volatile) for instance fields.
+
+---
+
+### **10. References**
+1.  *Java Concurrency in Practice* - Safe Publication.
+2.  *Effective Java* - Item 83: Lazy Initialization.
+
+---
+
+
+#### Q68: How does the Mediator Pattern reduce coupling between objects?
+**Companies**: Apple (iOS ViewControllers), Facebook (React/Flux/Redux), Java (ExecutorService), Air Traffic Control
+**Difficulty**: **Medium** (Behavioral Pattern / Decoupling)
+**Category**: Behavioral Patterns, Architectural
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The M-to-N Connection Problem**
+You are building an Airport System.
+1.  Plane A needs to tell Plane B: "I'm landing".
+2.  Plane B needs to tell Helicopter C: "Move over".
+3.  Ground Crew needs to tell Plane A: "Refuel".
+
+**Problem**: If every object talks to every other object, you have a **Mesh Topology** (M * N connections).
+Adding a new "Drone" requires updating logic in Plane, Helicopter, and Ground Crew.
+**Spaghetti Code**: Everything is coupled to everything.
+
+**The Solution**: The Mediator Pattern.
+Introduce a **Central Hub** (Control Tower).
+1.  Plane A -> Hub: "I'm landing".
+2.  Hub -> Plane B: "Move over".
+**Star Topology**: Objects only talk to the Mediator.
+Complexity drops from `O(N^2)` to `O(N)`.
+
+**Real-World Analogies**:
+1.  **Air Traffic Control**: Pilots don't radio each other. They radio the Tower.
+2.  **Chat Room**: You don't send IP packets to every user. You send to the Server (Mediator), which broadcasts.
+3.  **Redux/Flux**: Components don't update other components. They dispatch Actions to the Store (Mediator).
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Define an object that encapsulates how a set of objects interact. Mediator promotes loose coupling by keeping objects from referring to each other explicitly, and it allows you to vary their interaction independently.
+
+**The Key Roles**:
+1.  **Mediator**: Interface for communicating with Colleagues.
+2.  **Concrete Mediator**: Coordinates the Colleague objects.
+3.  **Colleague**: Components that interact via the Mediator. They know the Mediator, but not each other.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Direct Coupling (The Spaghetti)
+```java
+class Button {
+    TextField textField;
+    Checkbox checkbox;
+    
+    void click() {
+        if (checkbox.isChecked()) textField.setText("Hello"); // Tight Coupling!
+    }
+}
+```
+*   **Critique**: Cannot reuse `Button` in another dialog without `TextField`.
+
+#### Approach 2: Observer (Decoupled but Distributed Logic)
+Objects emit events. Logic is scattered across listeners.
+*   **Critique**: Hard to understand the *flow*. "Who triggered this?".
+
+#### Approach 3: Mediator (Centralized Logic)
+```java
+class DialogMediator {
+    void notify(Component sender, String event) {
+        if (sender == button && event.equals("click")) {
+            if (checkbox.checked) textField.show();
+        }
+    }
+}
+```
+*   **Verdict**: Logic is centralized. Components are dumb and reusable.
+
+---
+
+### **4. Implementation I: The Chat Room**
+Simulating a multi-user chat system where users are decoupled.
+
+```java
+import java.util.ArrayList;
+import java.util.List;
+
+// 1. MEDIATOR INTERFACE
+interface ChatMediator {
+    void sendMessage(String msg, User user);
+    void addUser(User user);
+}
+
+// 2. CONCRETE MEDIATOR
+class ChatRoom implements ChatMediator {
+    private List<User> users;
+
+    public ChatRoom() {
+        this.users = new ArrayList<>();
+    }
+
+    @Override
+    public void addUser(User user) {
+        this.users.add(user);
+    }
+
+    @Override
+    public void sendMessage(String msg, User sender) {
+        for (User u : this.users) {
+            // Message should not be received by the user sending it
+            if (u != sender) {
+                u.receive(msg);
+            }
+        }
+    }
+}
+
+// 3. COLLEAGUE (Abstract)
+abstract class User {
+    protected ChatMediator mediator;
+    protected String name;
+
+    public User(ChatMediator med, String name) {
+        this.mediator = med;
+        this.name = name;
+    }
+
+    public abstract void send(String msg);
+    public abstract void receive(String msg);
+}
+
+// 4. CONCRETE COLLEAGUE
+class ChatUser extends User {
+    public ChatUser(ChatMediator med, String name) {
+        super(med, name);
+    }
+
+    @Override
+    public void send(String msg) {
+        System.out.println(this.name + " Sending: " + msg);
+        mediator.sendMessage(msg, this);
+    }
+
+    @Override
+    public void receive(String msg) {
+        System.out.println(this.name + " Received: " + msg);
+    }
+}
+
+// 5. USAGE
+public class MediatorDemo {
+    public static void main(String[] args) {
+        ChatMediator chatRoom = new ChatRoom();
+        
+        User user1 = new ChatUser(chatRoom, "Alice");
+        User user2 = new ChatUser(chatRoom, "Bob");
+        User user3 = new ChatUser(chatRoom, "Charlie"); // New user added easily!
+        
+        chatRoom.addUser(user1);
+        chatRoom.addUser(user2);
+        chatRoom.addUser(user3);
+        
+        user1.send("Hello World!");
+        // Output:
+        // Alice Sending: Hello World!
+        // Bob Received: Hello World!
+        // Charlie Received: Hello World!
+    }
+}
+```
+
+---
+
+### **5. Implementation II: Air Traffic Control (Complex Logic)**
+
+```java
+class ControlTower {
+    private boolean runwayAvailable = true;
+    
+    public void requestLanding(Airplane plane) {
+        if (runwayAvailable) {
+            runwayAvailable = false;
+            plane.notify("Landing Approved. Runway Cleared.");
+        } else {
+            plane.notify("Hold Position. Runway Busy.");
+        }
+    }
+    
+    public void notifyLanded(Airplane plane) {
+        runwayAvailable = true;
+        System.out.println("Runway is now free.");
+    }
+}
+```
+
+---
+
+### **6. Deep Dive: Mediator vs Facade vs Observer**
+
+| Feature | Mediator | Facade | Observer |
+| :--- | :--- | :--- | :--- |
+| **Direction** | Multi-directional (A <-> B) | Uni-directional (Client -> System) | One-to-Many |
+| **Goal** | **Centralize Communication** | **Simplify Interface** | **React to Changes** |
+| **Coupling** | Colleagues coupled to Mediator | Client coupled to Facade | Subject decoupled from Observers |
+
+**Nuance**: A Mediator often *uses* Observer to listen to its colleagues!
+
+---
+
+### **7. Multi-Language Perspectives**
+
+#### JavaScript: Event Bus (Mediator)
+```javascript
+class EventBus {
+    constructor() { this.listeners = {}; }
+    
+    subscribe(event, callback) {
+        if (!this.listeners[event]) this.listeners[event] = [];
+        this.listeners[event].push(callback);
+    }
+    
+    publish(event, data) {
+        if (this.listeners[event]) {
+            this.listeners[event].forEach(cb => cb(data));
+        }
+    }
+}
+
+// Usage
+const hub = new EventBus();
+hub.subscribe('login', user => console.log('Welcome', user)); // Colleague A
+hub.publish('login', 'Alice'); // Colleague B (doesn't know A exist)
+```
+
+#### Go: Channels (The Ultimate Mediator)
+Go's channels act as a built-in mediator.
+```go
+func worker(id int, jobs <-chan int, results chan<- int) {
+    for j := range jobs {
+        fmt.Println("Worker", id, "processing", j)
+        results <- j * 2
+    }
+}
+
+func main() {
+    jobs := make(chan int, 100)
+    results := make(chan int, 100)
+    
+    // Start workers (Colleagues)
+    for w := 1; w <= 3; w++ {
+        go worker(w, jobs, results)
+    }
+    
+    jobs <- 5
+    jobs <- 10
+    // Logic is mediated by the channels
+}
+```
+
+#### Python: Tkinter GUI
+Standard GUI programming uses Mediator.
+```python
+class LoginDialog:
+    def __init__(self):
+        self.username = Entry()
+        self.ok_btn = Button(state='disabled')
+        # Mediator Logic inside the class mainly
+        self.username.bind("<Key>", self.check_input)
+    
+    def check_input(self, event):
+        if len(self.username.get()) > 0:
+            self.ok_btn.config(state='normal')
+```
+
+---
+
+### **8. Practice & Assessment**
+
+#### Core Exercises
+1.  **Smart Home Hub**:
+    -   Mediator: `Hub`. Colleagues: `Light`, `Thermostat`, `Alarm`.
+    -   Rule: When `Alarm` triggers, `Light` turns Red, `Thermostat` stops.
+2.  **Form Validator**:
+    -   Mediator checks `Name`, `Email`, `Password` fields.
+    -   Enables `SubmitButton` only when all valid.
+3.  **Chat Bot**:
+    -   Add a `BotUser` to the ChatRoom that auto-replies to specific keywords.
+
+#### Edge Case Drills
+1.  **God Object Anti-Pattern**:
+    -   *Q*: My Mediator is 5000 lines long!
+    -   *A*: Common risk. Split it using **Chain of Responsibility** or multiple sub-mediators.
+2.  **Broadcasting**:
+    -   *Q*: How to send message to *specific* user only?
+    -   *A*: Mediator logic needs routing tables (Map<ID, User>).
+
+---
+
+### **9. Security Analysis: Single Point of Failure**
+
+**Vulnerability**: The Mediator Node is a critical target.
+If an attacker compromises the Mediator:
+1.  **Eavesdropping**: They see ALL communication (Chat logs).
+2.  **DoS**: Crashing the Mediator halts the entire system.
+3.  **Spoofing**: They can impersonate any colleague.
+
+**Mitigation**:
+-   Encrypt channels *within* the mediator.
+-   Use distributed mediators (Federation) rather than a single monolithic instance.
+
+---
+
+### **10. Cheatsheet & Summary**
+
+| Pattern | Goal | Key Feature |
+| :--- | :--- | :--- |
+| **Mediator** | Centralize interaction | "Star Topology". Hub & Spoke. |
+| **Observer** | Notify dependants | "Publish/Subscribe". |
+| **Facade** | Simplify usage | "Front Desk". |
+
+**Verdict**: Use Mediator when object dependencies form a "Mesh" and logic is distributed/duplicated.
+
+---
+
+### **11. References**
+1.  *Design Patterns (GoF)* - Mediator.
+2.  *Enterprise Integration Patterns* - Message Broker.
+
+---
+
+
+#### Q69: How does the Bridge Pattern solve the "Cartesian Product" explosion?
+**Companies**: Meta (React Native), Google (Flutter), Java (JDBC), Qt
+**Difficulty**: **Hard** (Structural Pattern / Abstraction)
+**Category**: Structural Patterns, Architecture
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The Class Explosion**
+You are building a GUI toolkit.
+You need `Window`.
+You support:
+1.  **Mac**
+2.  **Windows**
+And you have 2 types of Window:
+1.  **Normal**
+2.  **Dialog**
+
+**Inheritance Approach**:
+1.  `MacNormalWindow`
+2.  `MacDialogWindow`
+3.  `WindowsNormalWindow`
+4.  `WindowsDialogWindow`
+
+**Problem**: If you add Linux? (Total 6 classes). If you add "PoptartWindow"? (Total 9).
+If you have **M** platforms and **N** window types, you need **M * N** classes.
+This is the **Cartesian Product Explosion**.
+
+**The Solution**: The Bridge Pattern.
+Separate the **Abstraction** (Window Type) from the **Implementation** (Platform APIs).
+Refactor inheritance into composition.
+Total classes: **M + N** (Instead of M * N).
+
+**Real-World Analogies**:
+1.  **Remote Control & TV**: The Remote is the Abstraction (Buttons). The TV is the Implementation (Hardware). Any Remote can control any TV if they share the protocol.
+2.  **Light Switch**: The Switch (Abstraction) connects to a Bulb or Fan (Implementation).
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Decouple an abstraction from its implementation so that the two can vary independently.
+
+**The Key Roles**:
+1.  **Abstraction**: High-level control logic (e.g., `Window`).
+2.  **Refined Abstraction**: Extends Abstraction (e.g., `DialogWindow`).
+3.  **Implementor**: Interface for low-level primitive ops (e.g., `WindowImpl`).
+4.  **Concrete Implementor**: Platform-specific code (e.g., `MacWindowImpl`).
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Massive One-Class
+`if (OS == MAC) drawCircle()` else `drawSquare()`.
+*   **Critique**: Unmaintainable spaghetti.
+
+#### Approach 2: Deep Inheritance Hierarchy
+`class MacIconWindow extends MacWindow ...`
+*   **Critique**: Class count explodes. `O(M*N)`.
+
+#### Approach 3: Bridge (Composition)
+`Window` HAS-A `WindowImpl`.
+`Window` calls `impl.drawLine()`.
+*   **Verdict**: Clean separation. `O(M+N)`.
+
+---
+
+### **4. Implementation I: The Cross-Platform GUI**
+Building a toolkit that works on Mac and Windows (simulated).
+
+```java
+// 1. IMPLEMENTOR INTERFACE (Low Level)
+interface WindowImpl {
+    void drawHeader(String title);
+    void drawBody(String content);
+    void close();
+}
+
+// 2. CONCRETE IMPLEMENTORS
+class WindowsImpl implements WindowImpl {
+    @Override public void drawHeader(String title) {
+        System.out.println("🪟 [WIN32 API] Drawing Blue Header: " + title);
+    }
+    @Override public void drawBody(String content) {
+        System.out.println("🪟 [WIN32 API] Rendering GDI Text: " + content);
+    }
+    @Override public void close() { System.out.println("🪟 [WIN32 API] Closing Window Handle."); }
+}
+
+class MacImpl implements WindowImpl {
+    @Override public void drawHeader(String title) {
+        System.out.println("🍎 [COCOA API] Drawing Grey Gradient: " + title);
+    }
+    @Override public void drawBody(String content) {
+        System.out.println("🍎 [COCOA API] Rendering Helvetica: " + content);
+    }
+    @Override public void close() { System.out.println("🍎 [COCOA API] Destroy NSWindow."); }
+}
+
+// 3. ABSTRACTION (High Level)
+abstract class Window {
+    protected WindowImpl impl; // THE BRIDGE
+    
+    public Window(WindowImpl impl) { this.impl = impl; }
+    
+    // Low-level delegation
+    public void close() { impl.close(); }
+    
+    // High-level operation required by refined abstractions
+    public abstract void draw(String title, String body);
+}
+
+// 4. REFINED ABSTRACTIONS
+class NormalWindow extends Window {
+    public NormalWindow(WindowImpl impl) { super(impl); }
+    
+    @Override
+    public void draw(String title, String body) {
+        impl.drawHeader(title);
+        impl.drawBody(body);
+        System.out.println("-- Drawn Normal Window --");
+    }
+}
+
+class SecureWindow extends Window {
+    public SecureWindow(WindowImpl impl) { super(impl); }
+    
+    @Override
+    public void draw(String title, String body) {
+        impl.drawHeader("🔒 SECURE: " + title);
+        impl.drawBody("******"); // Mask content
+        System.out.println("-- Drawn Secure Window --");
+    }
+}
+
+// 5. USAGE (Dependency Injection at Runtime)
+public class BridgeDemo {
+    public static void main(String[] args) {
+        boolean isMac = true;
+        WindowImpl platform = isMac ? new MacImpl() : new WindowsImpl();
+        
+        // Same Abstraction, Different Implementation
+        Window w1 = new NormalWindow(platform);
+        w1.draw("Files", "List of secrets");
+        
+        System.out.println();
+        
+        // Different Abstraction, Same Implementation
+        Window w2 = new SecureWindow(platform);
+        w2.draw("Passwords", "123456");
+    }
+}
+```
+
+---
+
+### **5. Implementation II: JDBC (The Ultimate Bridge)**
+JDBC is a Bridge.
+-   **Abstraction**: `Connection`, `Statement`, `ResultSet` (Java interfaces).
+-   **Implementation**: `OracleDriver`, `MySQLDriver`.
+
+**Without Bridge**:
+You would write code like:
+```java
+OracleConnection conn = new OracleConnection(); // Tied to Oracle!
+```
+
+**With Bridge**:
+```java
+Connection conn = DriverManager.getConnection("jdbc:mysql:..."); // Generic!
+```
+
+---
+
+### **6. Deep Dive: Adapter vs Bridge**
+
+| Pattern | Phase | Intent |
+| :--- | :--- | :--- |
+| **Adapter** | Retrospective | Make *existing* disparate interfaces work together. (Fixing a mismatch). |
+| **Bridge** | Upfront Design | Separate abstraction from implementation so they can *vary*. (Preventing a mismatch). |
+
+---
+
+### **7. Multi-Language Perspectives**
+
+#### C++: Pimpl Idiom (Pointer to Implementation)
+Using Bridge to hide private members and speed up compilation.
+```cpp
+// Window.h
+class WindowImpl; // Forward decl
+class Window {
+    WindowImpl* impl; // The Bridge
+public:
+    void draw();
+};
+```
+
+#### Python: Duct Typing (Implicit Bridge)
+Python doesn't need interfaces, but the structure remains.
+```python
+class MacRenderer:
+    def render(self): print("Mac")
+
+class WinRenderer:
+    def render(self): print("Win")
+
+class Window:
+    def __init__(self, renderer):
+        self.renderer = renderer
+    
+    def draw(self):
+        self.renderer.render()
+```
+
+#### JavaScript: React Native
+React (Efficiency Abstraction) -> Bridge -> iOS/Android (Implementation).
+The "Bridge" in React Native is literally called "The Bridge" (communicating JS thread to Native UI thread).
+
+---
+
+### **8. Practice & Assessment**
+
+#### Core Exercises
+1.  **Device Remote**:
+    -   Abstractions: `Remote`, `AdvancedRemote` (has Mute).
+    -   Implementations: `TV`, `Radio`.
+2.  **Payment Gateway**:
+    -   Abstractions: `Payment`, `RecurringPayment`.
+    -   Impls: `StripeProvider`, `PayPalProvider`.
+3.  **Logger**:
+    -   Abstractions: `InfoLogger`, `ErrorLogger`.
+    -   Impls: `FileWriter`, `DatabaseWriter`.
+
+#### Edge Case Drills
+1.  **Leaky Abstractions**:
+    -   *Q*: What if `WindowsImpl` has a feature `flashTaskbar()` that Mac lacks?
+    -   *A*: You either ignore it in Abstraction (Lowest Common Denominator) or cast `impl` in Windows-specific code (breaking the pattern purity).
+2.  **Runtime Switching**:
+    -   *Q*: Can I change Implementation at runtime?
+    -   *A*: Yes! `window.setImpl(newLinuxImpl())`. This creates a mutable bridge.
+
+---
+
+### **9. Security Analysis: The Abstraction Gap**
+
+**Vulnerability**: Abstraction Leaks.
+If the Abstraction assumes behavior (e.g., "File Write is Atomic") but one Implementation violates it (e.g., "NFS Network Write is NOT atomic"), bugs/race conditions occur.
+
+**Case Study**: Java's `SecureRandom`.
+It's a Bridge to OS PRNGs (`/dev/random` vs Windows CryptoAPI).
+If the underlying OS implementation blocks (runs out of entropy), the Java thread hangs indefinitely.
+**Fix**: Understand the limits of your Implementors.
+
+---
+
+### **10. Cheatsheet & Summary**
+
+| Pattern | Use When... | Key Benefit |
+| :--- | :--- | :--- |
+| **Bridge** | Cartesian Product (Classes * Types) | O(MxN) -> O(M+N) |
+| **Strategy** | Algorithms change | Swap logic at runtime |
+| **State** | State changes behavior | FSM management |
+
+**Verdict**: Use Bridge when you are designing a library/driver that needs to run on multiple underlying platforms.
+
+---
+
+### **11. References**
+1.  *Design Patterns (GoF)* - Bridge.
+2.  *Head First Design Patterns*.
+
+---
+
+#### Q70: How do you implement a Type-Safe Heterogeneous Container?
+**Companies**: Google (Guava), Java (Collections), Dependency Injection Containers
+**Difficulty**: **Hard** (Generics / Type Safety)
+**Category**: System Design, Generics
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The Limits of Generics**
+Standard Collections are homogeneous:
+`List<String>` holds only Strings.
+`Map<Integer, String>` maps Integer -> String.
+
+**Problem**: You are building a "Service Registry" or "Favorites" store.
+You want to store:
+-   `String` -> "Alice"
+-   `Integer` -> 0xcafebabe
+-   `Class` -> `String.class`
+-   `Runnable` -> `() -> {}`
+
+**Naive Approach**: `Map<String, Object>`.
+```java
+map.put("thread", new Thread());
+String s = (String) map.get("thread"); // ClassCastException at Runtime! 💥
+```
+You lost compilation type safety. You have to cast everything manually, and if you cast wrong, you crash.
+
+**The Solution**: The Type-Safe Heterogeneous Container (TSHC).
+Use the **Class Object** (`Class<T>`) as the key.
+`favorites.put(String.class, "Java")`.
+`String s = favorites.get(String.class)`.
+The return type is **inferred** from the key! No casting needed by client.
+
+---
+
+### **2. Progressive Solution Evolution**
+
+#### Approach 1: Map<String, Object> (Unsafe)
+```java
+Map<String, Object> context = new HashMap<>();
+context.put("timeout", 1000); // 1000 is Integer
+// ... later ...
+String t = (String) context.get("timeout"); // CRASH!
+```
+*   **Critique**: No Type Safety. "Stringly Typed".
+
+#### Approach 2: Separate Maps
+```java
+Map<String, String> strings;
+Map<String, Integer> ints;
+```
+*   **Critique**: Rigid. Doesn't scale to arbitrary types.
+
+#### Approach 3: TSHC (Effective Java Item 33)
+Use `Class<T>` as the key.
+The method signature guarantees `T` in = `T` out.
+
+---
+
+### **3. Implementation I: The Favorites API**
+A type-safe store for arbitrary objects.
+
+```java
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+
+public class Favorites {
+    // Key is a Wildcard Class. Value is Object.
+    // We cannot express the "Key type matches Value type" relationship in the Map Declaration.
+    private Map<Class<?>, Object> favorites = new HashMap<>();
+
+    // 1. PUT METHOD
+    // The Compiler knows 'type' is Class<T> and 'instance' is T.
+    public <T> void putFavorite(Class<T> type, T instance) {
+        Objects.requireNonNull(type);
+        // Runtime Check (Security against Raw Types)
+        // Ensure instance is actually subtype of T
+        favorites.put(type, type.cast(instance));
+    }
+
+    // 2. GET METHOD
+    // The return type T matches the key Class<T>
+    public <T> T getFavorite(Class<T> type) {
+        // Dynamic Cast: Returns Object cast to T
+        // This is safe because we controlled the 'put' method.
+        return type.cast(favorites.get(type));
+    }
+    
+    // USAGE
+    public static void main(String[] args) {
+        Favorites f = new Favorites();
+        
+        f.putFavorite(String.class, "Java");
+        f.putFavorite(Integer.class, 0xcafebabe);
+        f.putFavorite(Class.class, Favorites.class);
+        
+        // NO CASTING REQUIRED!
+        String s = f.getFavorite(String.class);
+        int i = f.getFavorite(Integer.class);
+        Class<?> c = f.getFavorite(Class.class);
+        
+        System.out.printf("%s %x %s%n", s, i, c.getName());
+    }
+}
+```
+
+---
+
+### **4. Implementation II: Extensible Service Locator**
+A generic registry for system services.
+
+```java
+interface Service {}
+class DatabaseService implements Service { void connect() {} }
+class LoggerService implements Service { void log() {} }
+
+class ServiceRegistry {
+    // Map specific Class<? extends Service> to Service implementation
+    private Map<Class<? extends Service>, Service> services = new HashMap<>();
+
+    public <T extends Service> void register(Class<T> type, T instance) {
+        services.put(type, type.cast(instance));
+    }
+
+    public <T extends Service> T resolve(Class<T> type) {
+        return type.cast(services.get(type));
+    }
+}
+
+// Usage
+ServiceRegistry registry = new ServiceRegistry();
+registry.register(DatabaseService.class, new DatabaseService());
+registry.resolve(DatabaseService.class).connect();
+```
+
+---
+
+### **5. Deep Dive: Generics, Erasure, and Heaps**
+
+**Why `Class<T>`?**
+In Java Generics, `List<String>.class` does NOT exist.
+There is only `List.class`.
+This is called **Type Erasure**.
+So `Favorites` works great for `String`, `Integer`, `Date`.
+It **fails** for `List<String>`.
+You cannot put `List<String>` and `List<Integer>` as separate keys because they share the same class object!
+
+**Solution**: Super Type Tokens (Neal Gafter's Gadget).
+used in libraries like Jackson (`TypeReference<T>`) or Guice (`Key<T>`).
+```java
+// Hack to store Generic Types
+abstract class TypeReference<T> {
+    Type type;
+    protected TypeReference() {
+        Type superClass = getClass().getGenericSuperclass();
+        type = ((ParameterizedType) superClass).getActualTypeArguments()[0];
+    }
+}
+```
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### C++: `std::any` (C++17)
+Type-safe container for single values.
+```cpp
+#include <any>
+#include <map>
+#include <typeindex>
+#include <iostream>
+
+std::map<std::type_index, std::any> container;
+
+template<typename T>
+void put(T value) {
+    container[std::type_index(typeid(T))] = value;
+}
+
+template<typename T>
+T get() {
+    return std::any_cast<T>(container.at(std::type_index(typeid(T))));
+}
+
+int main() {
+    put<int>(42);
+    put<std::string>("Start");
+    
+    std::cout << get<int>() << std::endl; // 42
+}
+```
+
+#### TypeScript: Map with Generics
+JS Maps are unsafe by default (key is any, value is any). TS adds boundaries.
+```typescript
+class TypedMap {
+    private map = new Map<any, any>();
+
+    // Using Constructor as key
+    set<T>(key: new () => T, value: T): void {
+        this.map.set(key, value);
+    }
+
+    get<T>(key: new () => T): T {
+        return this.map.get(key);
+    }
+}
+
+class User {}
+const tm = new TypedMap();
+tm.set(User, new User());
+const u = tm.get(User); // Type inferred as User
+```
+
+#### Go: `interface{}` and Type Assertions
+Go doesn't have Generics on methods (historically).
+```go
+// Map of Type -> Value
+registry := make(map[reflect.Type]interface{})
+
+func Register(t interface{}) {
+    registry[reflect.TypeOf(t)] = t
+}
+```
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Config Context**:
+    -   `Context` object that holds `User`, `HttpRequest`, `Locale`.
+    -   Access via `ctx.get(User.class)`.
+2.  **Event Bus**:
+    -   Register handlers for specific *Event Types*.
+    -   `bus.register(LoginEvent.class, handler)`.
+3.  **JSON Parser**:
+    -   Implement a mini `fromJson(String json, Class<T> class)` using reflection.
+
+#### Edge Case Drills
+1.  **Nulls**:
+    -   *Q*: Can I put `null`?
+    -   *A*: Yes, `Map` supports it. But `type.cast(null)` returns null, so it's safe.
+2.  **Unmodifiable**:
+    -   *Q*: How to make the TSHC read-only after init?
+    -   *A*: Wrap the internal map with `Collections.unmodifiableMap`.
+
+---
+
+### **8. Security Analysis: Class Token Spoofing**
+
+**Vulnerability**: Raw Types.
+If a client ignores generics:
+```java
+Favorites f = new Favorites();
+((Favorites)f).putFavorite((Class)Integer.class, "Not Integer"); // Compilation Warning, but runs!
+int x = f.getFavorite(Integer.class); // ClassCastException here!
+```
+**Fix**: The `type.cast(instance)` inside `putFavorite` catches this at insertion time!
+This is why `type.cast()` is critical for security—it enforces the invariant immediately (fail-fast) rather than corrupting the heap.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Container | Key | Value | Safety |
+| :--- | :--- | :--- | :--- |
+| **Map<K, V>** | Fixed K | Fixed V | Homogeneous. Safe. |
+| **Map<K, Object>** | Variable | Any | Heterogeneous. **Unsafe**. |
+| **TSHC** | `Class<T>` | `T` | Heterogeneous. **Safe**. |
+
+**Verdict**: Use TSHC when you need a flexible "Bag of Things" where each thing has a distinct type.
+
+---
+
+### **10. References**
+1.  *Effective Java* - Item 33: Consider typesafe heterogeneous containers.
+2.  *Java Reflection API*.
+
+---
+
+
+#### Q71: How does the Abstract Factory Pattern manage "Families of Objects"?
+**Companies**: Microsoft (UI Toolkits), Amazon (Cloud Providers), Spring (`BeanFactory`), Cross-Platform Development
+**Difficulty**: **Medium** (Creational Pattern / Abstraction)
+**Category**: Creational Patterns, Architecture
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Incompatible Families**
+You are building an app that runs on:
+1.  **Light Mode** (White Buttons, Black Text).
+2.  **Dark Mode** (Black Buttons, White Text).
+
+**The Risk**: Mixing them up.
+A `LightButton` with `DarkText` is invisible!
+You need to ensure that **if** you are in Light Mode, **all** UI elements (Buttons, TextFields, Scrollbars) are created from the "Light Family".
+
+**The Solution**: The Abstract Factory Pattern.
+Define an Interface `UIFactory`:
+-   `createButton()`
+-   `createTextField()`
+
+Concrete Factories:
+-   `LightFactory` -> returns `new LightButton()`, `new LightTextField()`.
+-   `DarkFactory` -> returns `new DarkButton()`, `new DarkTextField()`.
+
+The Client code uses the Factory Interface. It doesn't know (or care) which theme is active. It just calls `factory.createButton()`.
+
+**Real-World Analogies**:
+1.  **Furniture Store**: You buy a "Victorian" set (Chair + Sofa + Table). You don't mix a Modern Glass Table with a Victorian Chair.
+2.  **Car Manufacturing**: A Honda Factory produces standard Civic parts. A Ferrari Factory produces luxury parts. They don't mix on the assembly line.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Provide an interface for creating families of related or dependent objects without specifying their concrete classes.
+
+**The Key Roles**:
+1.  **Abstract Factory**: Interface declaring distinct create methods for each product.
+2.  **Concrete Factory**: Implements creation methods for a specific variant.
+3.  **Abstract Product**: Interface for a product (e.g., `Button`).
+4.  **Concrete Product**: Specific implementation (e.g., `VictorianChair`).
+5.  **Client**: Uses interfaces only.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Plain Constructor Calls
+```java
+Button btn;
+if (config.os == "Windows") btn = new WindowsButton();
+else btn = new MacButton();
+```
+*   **Critique**: `if-else` everywhere. Violates OCP.
+
+#### Approach 2: Factory Method
+One method to create *one* product.
+*   **Critique**: Doesn't enforce **families**. You might accidentally create a Windows Button and a Mac Menu.
+
+#### Approach 3: Abstract Factory
+One wrapper to create *all* related products.
+*   **Verdict**: Enforces consistency.
+
+---
+
+### **4. Implementation I: The Cross-Platform Cloud Provider**
+Simulating an app that can deploy to AWS or Azure seamlessly.
+
+```java
+// 1. ABSTRACT PRODUCTS
+interface Storage { void upload(String file); }
+interface Server { void start(); }
+
+// 2. CONCRETE PRODUCTS (AWS)
+class S3Storage implements Storage {
+    public void upload(String file) { System.out.println("☁️ Uploading " + file + " to S3 Bucket"); }
+}
+class EC2Server implements Server {
+    public void start() { System.out.println("🚀 Booting EC2 Instance"); }
+}
+
+// 3. CONCRETE PRODUCTS (Azure)
+class BlobStorage implements Storage {
+    public void upload(String file) { System.out.println("🔷 Uploading " + file + " to Azure Blob"); }
+}
+class VMServer implements Server {
+    public void start() { System.out.println("🖥️ Booting Azure VM"); }
+}
+
+// 4. ABSTRACT FACTORY
+interface CloudProviderFactory {
+    Storage createStorage();
+    Server createServer();
+}
+
+// 5. CONCRETE FACTORIES
+class AWSFactory implements CloudProviderFactory {
+    @Override public Storage createStorage() { return new S3Storage(); }
+    @Override public Server createServer() { return new EC2Server(); }
+}
+
+class AzureFactory implements CloudProviderFactory {
+    @Override public Storage createStorage() { return new BlobStorage(); }
+    @Override public Server createServer() { return new VMServer(); }
+}
+
+// 6. CLIENT
+class AppDeployment {
+    private Server server;
+    private Storage storage;
+    
+    // Dependency Injection via Constructor
+    public AppDeployment(CloudProviderFactory factory) {
+        this.server = factory.createServer();
+        this.storage = factory.createStorage();
+    }
+    
+    public void deploy() {
+        server.start();
+        storage.upload("app-binary.jar");
+    }
+}
+
+// 7. USAGE
+public class AbstractFactoryDemo {
+    public static void main(String[] args) {
+        String env = "AWS"; // Config
+        
+        CloudProviderFactory factory;
+        if (env.equals("AWS")) factory = new AWSFactory();
+        else factory = new AzureFactory();
+        
+        // App logic is oblivious to the concrete cloud provider
+        AppDeployment app = new AppDeployment(factory);
+        app.deploy();
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Dependency Injection vs Abstract Factory**
+Modern frameworks (Spring, Guice, Dagger) act as a giant Abstract Factory.
+Typical Java:
+```java
+@Configuration
+class AppConfig {
+    @Bean
+    public CloudProviderFactory factory() { return new AWSFactory(); }
+}
+
+@Service
+class MyService {
+    // Spring injects the factory (or the products directly)
+    @Autowired CloudProviderFactory factory; 
+}
+```
+**Insight**: Abstract Factory is the *manual* implementation of what DI containers do automatically.
+
+---
+
+### **6. Implementation II: Cross-Browser Testing Tool**
+Factory creates `WebDriver` and `ScreenshotTaker`.
+-   `ChromeFactory` -> `ChromeDriver`, `ChromeScreenshot`
+-   `FirefoxFactory` -> `FirefoxDriver`, `FirefoxScreenshot`
+
+This ensures you don't try to take a Firefox screenshot using a Chrome Driver context.
+
+---
+
+### **7. Multi-Language Perspectives**
+
+#### TypeScript: Interfaces w/ Structural Typing
+```typescript
+interface UIFactory {
+    createButton(): Button;
+    createInput(): Input;
+}
+
+class MaterialFactory implements UIFactory {
+    createButton() { return new MaterialButton(); }
+    createInput() { return new MaterialInput(); }
+}
+// Usage is identical to Java
+```
+
+#### Go: Interface Return Types
+Go doesn't have classes but uses Interfaces to achieve the same.
+```go
+type GUIFactory interface {
+    CreateButton() Button
+    CreateText() Text
+}
+
+func GetFactory(os string) GUIFactory {
+    if os == "mac" { return &MacFactory{} }
+    return &WinFactory{}
+}
+```
+
+#### Python: Classes as First-Class Citizens
+Python doesn't always need a Factory *class*. You can pass the *classes* themselves.
+```python
+def create_ui(button_cls, input_cls):
+    btn = button_cls()
+    inp = input_cls()
+    btn.render()
+
+# Usage
+create_ui(MacButton, MacInput)
+```
+**Note**: This is simpler but strictly less type-safe than the full pattern.
+
+---
+
+### **8. Practice & Assessment**
+
+#### Core Exercises
+1.  **Kingdom Game**:
+    -   `ElfKingdomFactory`: Creates `ElfArcher`, `ElfCastle`.
+    -   `OrcKingdomFactory`: Creates `OrcGrunt`, `OrcFortress`.
+2.  **Report Generator**:
+    -   `PDFReportFactory`: Creates `PDFHeader`, `PDFBody`, `PDFFooter`.
+    -   `HTMLReportFactory`: Creates HTML equivalents.
+3.  **Pizza Store**:
+    -   `NYPizzaFactory`: Creates ThinCrust, MarinaraSauce.
+    -   `ChicagoPizzaFactory`: Creates ThickCrust, PlumTomatoSauce.
+
+#### Edge Case Drills
+1.  **Adding New Product**:
+    -   *Q*: What if I want to add `createSlider()`?
+    -   *A*: Painful! You must update the Interface and ALL Concrete Factories. (Main drawback of Abstract Factory).
+2.  **Singleton Factory**:
+    -   *Q*: How many factory instances do I need?
+    -   *A*: Usually one per runtime. The Concrete Factory is often a Singleton.
+
+---
+
+### **9. Security Analysis: Malicious Factory Injection**
+
+**Vulnerability**: Supply Chain Attack.
+If an attacker can control the configuration file that selects the Factory class name:
+`config.yaml: factory: com.evil.BackdoorFactory`
+The app will happily instantiate and use the Evil Factory, creating Evil objects (e.g., `SpywareStorage` instead of `S3Storage`).
+
+**Mitigation**:
+-   Allow-list valid Factory class names.
+-   Do not load classes purely based on user input strings (`Class.forName()`).
+
+---
+
+### **10. Cheatsheet & Summary**
+
+| Pattern | Goal | Scale |
+| :--- | :--- | :--- |
+| **Simple Factory** | Encapsulate `new` | 1 Class |
+| **Factory Method** | Subclass decides | 1 Method per Product |
+| **Abstract Factory** | Family Consistency | **Interface for Families** |
+
+**Verdict**: Use Abstract Factory when you have >1 platform or theme and need to enforce "don't mix and match" rules.
+
+---
+
+### **11. References**
+1.  *Design Patterns (GoF)* - Abstract Factory.
+2.  *Dependency Injection in Action*.
+
+---
+
+
+#### Q72: How does the Chain of Responsibility Pattern decouple senders from receivers?
+**Companies**: Java (Servlet Filters), Spring (Security Chain), ATM Design, Support Systems
+**Difficulty**: **Medium** (Behavioral Pattern / Decoupling)
+**Category**: Behavioral Patterns, Middleware
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Hardcoded Order of Operations**
+You are building a Web Server Request Processor.
+1.  Check Authentication.
+2.  Check Throttling (Rate Limit).
+3.  Log Request.
+4.  Compress Response.
+
+**Bad Approach**: Big `if-else` nested block inside `Server.handle(req)`.
+**Problem**:
+-   What if I want to swap Auth and Throttling?
+-   What if I want to add "Bot Detection" in the middle?
+-   The `Server` class becomes a God Object.
+
+**The Solution**: The Chain of Responsibility.
+Create a linked list of `Handlers`.
+`AuthHandler` -> `ThrottlingHandler` -> `LogHandler` -> `BusinessLogic`.
+Each handler decides: "Do I handle this? Do I pass it to the next guy? Do I reject it?"
+
+**Real-World Analogies**:
+1.  **Tech Support**: Level 1 (Restart PC) -> Level 2 (Reinstall App) -> Level 3 (Code Bug). If Level 1 solves it, the chain stops.
+2.  **ATM Cash Dispense**: Client asks for $180.
+    -   $100 Handler: Gives 1 bill, passes $80 remainder.
+    -   $50 Handler: Gives 1 bill, passes $30 remainder.
+    -   $20 Handler: Gives 1 bill, passes $10 remainder.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Avoid coupling the sender of a request to its receiver by giving more than one object a chance to handle the request. Chain the receiving objects and pass the request along the chain until an object handles it.
+
+**The Key Roles**:
+1.  **Handler Interface**: Declares `handleRequest()` and `setNext()`.
+2.  **Concrete Handlers**: Implements processing logic. Decides to pass or stop.
+3.  **Client**: Assembles the chain and triggers the first node.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Sequential Method Calls
+```java
+auth.check();
+log.write();
+compress.zip();
+```
+*   **Critique**: Rigid pairing. The Client must know *all* steps and their order.
+
+#### Approach 2: The Chain (Linked List)
+```java
+Handler h1 = new AuthHandler();
+Handler h2 = new LogHandler();
+h1.setNext(h2);
+h1.handle(req);
+```
+*   **Verdict**: Dynamic. Client treats the entire chain as a single object (the first handler).
+
+---
+
+### **4. Implementation I: The Middleware Pipeline**
+Simulating a robust HTTP Request processing pipeline (Spring Security Style).
+
+```java
+// 1. DATA OBJECT
+class HttpRequest {
+    String username;
+    String password;
+    String path;
+    
+    public HttpRequest(String u, String p, String path) {
+        this.username = u; this.password = p; this.path = path;
+    }
+}
+
+// 2. HANDLER ABSTRACT CLASS
+abstract class Middleware {
+    private Middleware next;
+
+    // Fluent API to build chain
+    public static Middleware link(Middleware first, Middleware... chain) {
+        Middleware head = first;
+        for (Middleware nextInChain : chain) {
+            head.next = nextInChain;
+            head = nextInChain;
+        }
+        return first;
+    }
+
+    public abstract boolean check(HttpRequest request);
+
+    protected boolean checkNext(HttpRequest request) {
+        if (next == null) {
+            return true; // End of chain, success
+        }
+        return next.check(request);
+    }
+}
+
+// 3. CONCRETE HANDLERS
+class ThrottlingMiddleware extends Middleware {
+    private int requestPerMinute;
+    private int request;
+    private long currentTime;
+
+    public ThrottlingMiddleware(int requestPerMinute) {
+        this.requestPerMinute = requestPerMinute;
+        this.currentTime = System.currentTimeMillis();
+    }
+
+    public boolean check(HttpRequest request) {
+        if (System.currentTimeMillis() > currentTime + 60_000) {
+            request = 0;
+            currentTime = System.currentTimeMillis();
+        }
+        request++;
+        if (request > requestPerMinute) {
+            System.out.println("⛔ Request limit exceeded!");
+            Thread.currentThread().stop(); // Hard stop (simulated)
+            return false;
+        }
+        System.out.println("✅ Request Throttling: OK");
+        return checkNext(request);
+    }
+}
+
+class UserExistsMiddleware extends Middleware {
+    private Server server; // Mock DB
+    public UserExistsMiddleware(Server server) { this.server = server; }
+
+    public boolean check(HttpRequest request) {
+        if (!server.hasEmail(request.username)) {
+            System.out.println("⛔ User not found!");
+            return false;
+        }
+        if (!server.isValidPassword(request.username, request.password)) {
+            System.out.println("⛔ Wrong password!");
+            return false;
+        }
+        System.out.println("✅ Auth: OK");
+        return checkNext(request);
+    }
+}
+
+class RoleCheckMiddleware extends Middleware {
+    public boolean check(HttpRequest request) {
+        if (request.path.equals("/admin") && !request.username.equals("admin_user")) {
+            System.out.println("⛔ 403 Forbidden!");
+            return false;
+        }
+        System.out.println("✅ Role: OK");
+        return checkNext(request);
+    }
+}
+
+// 4. USAGE (The Server)
+class Server {
+    private Middleware middleware;
+    
+    public void setMiddleware(Middleware middleware) {
+        this.middleware = middleware;
+    }
+    
+    public boolean logIn(String email, String password) {
+        if (middleware.check(new HttpRequest(email, password, "/dashboard"))) {
+            System.out.println("🚀 Login Success!");
+            return true;
+        }
+        return false;
+    }
+    
+    // Mock Data
+    public boolean hasEmail(String email) { return "admin_user".equals(email) || "user".equals(email); }
+    public boolean isValidPassword(String email, String password) { return true; }
+}
+
+public class ChainDemo {
+    public static void main(String[] args) {
+        Server server = new Server();
+        
+        // Build the Chain
+        // Throttling -> Auth -> Role
+        Middleware chains = Middleware.link(
+            new ThrottlingMiddleware(2),
+            new UserExistsMiddleware(server),
+            new RoleCheckMiddleware()
+        );
+        
+        server.setMiddleware(chains);
+        
+        // Test
+        server.logIn("user", "password"); // OK
+        server.logIn("user", "password"); // OK
+        server.logIn("user", "password"); // THROTTLED!
+    }
+}
+```
+
+---
+
+### **5. Implementation II: Support Ticket Escalation**
+Strict Chain Example (One handles, rest ignore).
+
+```java
+enum Priority { BASIC, INTERMEDIATE, CRITICAL }
+
+abstract class SupportHandler {
+    protected SupportHandler next;
+    protected Priority level;
+    
+    public void setNext(SupportHandler next) { this.next = next; }
+    
+    public void handleRequest(String issue, Priority priority) {
+        if (this.level == priority) {
+            solve(issue);
+        } else if (next != null) {
+            System.out.println(this.getClass().getSimpleName() + ": Cannot handle. Passing to next.");
+            next.handleRequest(issue, priority);
+        } else {
+            System.out.println("Condition Critical: Nobody can handle this!");
+        }
+    }
+    
+    abstract void solve(String issue);
+}
+
+class Level1Support extends SupportHandler {
+    public Level1Support() { this.level = Priority.BASIC; }
+    void solve(String issue) { System.out.println("L1 Solved: " + issue); }
+}
+
+// Level2, Level3 similar...
+```
+
+---
+
+### **6. Deep Dive: Chain vs Decorator**
+
+| Feature | Chain of Responsibility | Decorator |
+| :--- | :--- | :--- |
+| **Flow** | Object handles OR passes. | Object handles AND passes. |
+| **Intent** | Unknown handler (someone will do it). | Dynamic behavior addition. |
+| **Structure** | Linked List. | Recursive Wrapper. |
+
+**Nuance**: A Filter Chain (e.g., Servlet) is technically a hybrid. Every filter *does* something (Decorator-like) and then passes to the next (Chain-like).
+
+---
+
+### **7. Multi-Language Perspectives**
+
+#### JavaScript: Express/Connect Middleware
+The most famous example of CoR.
+```javascript
+const app = express();
+
+// Middleware 1
+app.use((req, res, next) => {
+    console.log('Time:', Date.now());
+    next(); // Pass control
+});
+
+// Middleware 2
+app.use('/user/:id', (req, res, next) => {
+    console.log('Request Type:', req.method);
+    next();
+});
+```
+
+#### Python: Exception Handling
+`try-except` blocks are a built-in Chain of Responsibility.
+The runtime walks up the stack (the chain) looking for a handler matching the Exception type.
+
+#### Go: Handler Chaining
+```go
+type Handler interface {
+    ServeHTTP(ResponseWriter, *Request)
+}
+
+// Chaining function
+func WithLogging(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        log.Println(r.URL.Path)
+        next.ServeHTTP(w, r)
+    })
+}
+```
+
+---
+
+### **8. Practice & Assessment**
+
+#### Core Exercises
+1.  **ATM Dispenser**:
+    -   Implement the `$100`, `$50`, `$20` bill dispenser logic.
+2.  **Logger System**:
+    -   `DebugLogger` -> `InfoLogger` -> `ErrorLogger`.
+    -   Debug message prints in all 3? Or just Debug? (Configurable).
+3.  **Spam Filter**:
+    -   `IPBlocker` -> `KeywordFilter` -> `BayesianFilter`.
+
+#### Edge Case Drills
+1.  **Broken Chain**:
+    -   *Q*: What if I forget to call `next()`?
+    -   *A*: The request is dropped silently. This is a common bug in Middleware (hanging request).
+2.  **Cycles**:
+    -   *Q*: Can I link A -> B -> A?
+    -   *A*: Yes, causing `StackOverflowError`. Always ensure the graph is a DAG or List.
+
+---
+
+### **9. Security Analysis: DoS via Long Chains**
+
+**Vulnerability**: Infinite Loop / Deep Stack.
+If the chain is dynamically configurable by user input, an attacker could inject:
+`Auth -> Auth -> Auth ... (10,000 times)`
+This causes `StackOverflowError` (Java) or heavy CPU usage (Iterative impl).
+
+**Mitigation**:
+-   Limit Chain Depth.
+-   Detect cycles during chain construction.
+
+---
+
+### **10. Cheatsheet & Summary**
+
+| Pattern | Goal | Key Failure Mode |
+| :--- | :--- | :--- |
+| **Chain of Resp** | Loose coupling of sender/receiver | Dropped request (nobody handles it). |
+| **Command** | Encapsulate request as object | Massive Command class explosion. |
+| **Observer** | One-to-many notification | Memory leaks (Lapsed Listener). |
+
+**Verdict**: Use Chain for Middleware, Event Bubbling (DOM), or Logging hierarchies.
+
+---
+
+### **11. References**
+1.  *Design Patterns (GoF)* - Chain of Responsibility.
+2.  *Servlet Specification* - Filter Chains.
+
+---
+
+
+#### Q73: How does the Iterator Pattern decouple algorithms from data structures?
+**Companies**: Google (Graph Traversals), Amazon (Pagination), Java Collections, Python Iterators
+**Difficulty**: **Medium** (Behavioral Pattern / Traversal)
+**Category**: Behavioral Patterns, Algorithms
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Encapsulation of Structure**
+You have a `SocialNetwork` object. 
+Internally, it might store users in a `List<User>`, a `HashSet<User>`, or a complex `AdjacencyMatrix` (Graph).
+
+**Problem**: If you expose the internal structure:
+```java
+List<User> users = network.getUsers(); // Leaking Implementation!
+for(int i=0; i<users.size(); i++) ...
+```
+If you change the internal storage to a Graph later, you break all client code.
+
+**The Solution**: The Iterator Pattern.
+Ask the collection for an **Iterator**.
+The Iterator knows how to traverse the structure. The Client only knows `hasNext()` and `next()`.
+Client Code:
+```java
+Iterator<User> it = network.iterator();
+while(it.hasNext()) { User u = it.next(); }
+```
+Works for Lists, Trees, Graphs, Files, DB Cursors—Client doesn't care.
+
+**Real-World Analogies**:
+1.  **TV Remote**: You click "Next Channel". You don't know the exact frequency map or the array index of the channel inside the TV's memory.
+2.  **Spotify Shuffle**: The Playlist gives you the "Next Song". It handles the logic (randomness, no Repeats). You just listen.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Provide a way to access the elements of an aggregate object sequentially without exposing its underlying representation.
+
+**The Key Roles**:
+1.  **Iterator Interface**: Defines `hasNext()` and `next()`.
+2.  **Concrete Iterator**: Tracks current position in the traversal.
+3.  **Aggregate (Iterable)**: Interface defining `createIterator()`.
+4.  **Concrete Aggregate**: Returns a new instance of the specific Iterator.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Exposed Indices (For-Loop)
+```java
+for (int i = 0; i < list.size(); i++) { list.get(i); }
+```
+*   **Critique**: Only works for Indexed collections. Fails for Sets, Linked Lists (O(N^2)), and Trees.
+
+#### Approach 2: Java Enumeration (Legacy)
+Old `hasMoreElements()` implementation.
+*   **Critique**: No remove method. Too verbose.
+
+#### Approach 3: Iterator & Iterable (Standard)
+Supports the `for-each` loop syntax sugar.
+```java
+for (User u : socialNetwork) { ... }
+```
+*   **Verdict**: The Gold Standard.
+
+---
+
+### **4. Implementation I: Social Graph Traversal (DFS/BFS)**
+Iterating over a non-linear data structure (Graph) using different algorithms.
+
+```java
+import java.util.*;
+
+// 1. DATA NODE
+class Profile {
+    public String name;
+    public List<Profile> friends = new ArrayList<>();
+    public Profile(String name) { this.name = name; }
+    public void addFriend(Profile p) { friends.add(p); }
+}
+
+// 2. AGGREGATE INTERFACE (ITERABLE)
+interface SocialNetwork extends Iterable<Profile> {
+    Iterator<Profile> iterator(String type);
+}
+
+// 3. CONCRETE AGGREGATE
+class FacebookGraph implements SocialNetwork {
+    private Profile root;
+    
+    public FacebookGraph(Profile root) { this.root = root; }
+    
+    public Iterator<Profile> iterator() { return new DepthFirstIterator(root); }
+    
+    public Iterator<Profile> iterator(String type) {
+        if (type.equals("BFS")) return new BreadthFirstIterator(root);
+        return new DepthFirstIterator(root);
+    }
+    
+    // 4. CONCRETE ITERATOR (DFS)
+    private class DepthFirstIterator implements Iterator<Profile> {
+        private Stack<Profile> stack = new Stack<>();
+        private Set<Profile> visited = new HashSet<>();
+        
+        public DepthFirstIterator(Profile root) {
+            stack.push(root);
+        }
+
+        @Override
+        public boolean hasNext() {
+            return !stack.isEmpty();
+        }
+
+        @Override
+        public Profile next() {
+            if (!hasNext()) throw new NoSuchElementException();
+            
+            Profile current = stack.pop();
+            visited.add(current);
+            
+            for (Profile friend : current.friends) {
+                if (!visited.contains(friend) && !stack.contains(friend)) {
+                    stack.push(friend);
+                }
+            }
+            return current;
+        }
+    }
+    
+    // 5. CONCRETE ITERATOR (BFS - Inner Class)
+    private class BreadthFirstIterator implements Iterator<Profile> {
+        private Queue<Profile> queue = new LinkedList<>();
+        private Set<Profile> visited = new HashSet<>();
+        
+        public BreadthFirstIterator(Profile root) {
+            queue.add(root);
+            visited.add(root);
+        }
+
+        @Override
+        public boolean hasNext() { return !queue.isEmpty(); }
+
+        @Override
+        public Profile next() {
+            if (!hasNext()) throw new NoSuchElementException();
+            Profile current = queue.poll();
+            
+            for (Profile friend : current.friends) {
+                if (!visited.contains(friend)) {
+                    visited.add(friend);
+                    queue.add(friend);
+                }
+            }
+            return current;
+        }
+    }
+}
+
+// 6. USAGE
+public class IteratorDemo {
+    public static void main(String[] args) {
+        Profile me = new Profile("Me");
+        Profile friend1 = new Profile("Friend 1");
+        Profile friend2 = new Profile("Friend 2");
+        Profile friendOfFriend = new Profile("Friend of Friend 1");
+        
+        me.addFriend(friend1);
+        me.addFriend(friend2);
+        friend1.addFriend(friendOfFriend);
+        
+        FacebookGraph network = new FacebookGraph(me);
+        
+        System.out.println("--- DFS Traversal ---");
+        for (Profile p : network) { // Uses default DFS
+            System.out.println(p.name);
+        }
+        
+        System.out.println("\n--- BFS Traversal ---");
+        Iterator<Profile> bfs = network.iterator("BFS");
+        while (bfs.hasNext()) {
+            System.out.println(bfs.next().name);
+        }
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Fail-Fast vs Fail-Safe**
+
+**Concept**: Concurrent Modification.
+What happens if you delete an element from the list *while* iterating over it?
+
+**Fail-Fast (ArrayList)**:
+-   Maintains a `modCount` variable.
+-   If `modCount` changes during iteration (via direct list access), throws `ConcurrentModificationException`.
+-   **Safe Way**: Use `iterator.remove()`.
+
+**Fail-Safe (CopyOnWriteArrayList)**:
+-   Iterates over a snapshot of the array.
+-   Modifications do not affect the iterator.
+-   No Exception, but iterator operates on stale data.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Python: Generators (`yield`)
+Python makes Iterators trivial using `yield`. Does not require class boilerplate.
+```python
+class SocialGraph:
+    def __init__(self, root):
+        self.root = root
+        
+    def __iter__(self):
+        # DFS Implementation using Yield
+        visited = set()
+        stack = [self.root]
+        while stack:
+            node = stack.pop()
+            if node not in visited:
+                visited.add(node)
+                yield node # Pauses execution, returns value
+                stack.extend(node.friends)
+
+# Usage
+for user in graph:
+    print(user.name)
+```
+
+#### C++: STL Iterators
+C++ iterators behave like Pointers.
+```cpp
+std::vector<int> v = {1, 2, 3};
+for (auto it = v.begin(); it != v.end(); ++it) {
+    std::cout << *it << " "; // Dereference
+}
+```
+
+#### JavaScript: Protocol
+Any object with `[Symbol.iterator]` is iterable.
+```javascript
+const iterable = {
+  [Symbol.iterator]() {
+    let step = 0;
+    return {
+      next() {
+        step++;
+        if (step <= 3) return { value: step, done: false };
+        return { value: undefined, done: true };
+      }
+    };
+  }
+};
+
+for (const x of iterable) console.log(x); // 1, 2, 3
+```
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **File Walker**:
+    -   Create an Iterator that walks a directory tree recursively.
+    -   `new FileIterator("/home/user")`.
+2.  **Reverse Iterator**:
+    -   Iterate over a List backwards.
+    -   `list.reverseIterator()`.
+3.  **Filtering Iterator**:
+    -   Wrap another iterator and skip elements that don't match a predicate.
+    -   `new FilterIterator(originalIter, x -> x > 10)`.
+
+#### Edge Case Drills
+1.  **Infinite Streams**:
+    -   *Q*: Can an Iterator traverse an infinite series (Fibonacci)?
+    -   *A*: Yes! `hasNext()` always returns true. Code must `break` manually.
+2.  **Empty Collections**:
+    -   *Q*: How to handle `next()` on empty?
+    -   *A*: Must throw `NoSuchElementException`.
+
+---
+
+### **8. Security Analysis: Denial of Service**
+
+**Vulnerability**: Resource Exhaustion via Iterator.
+If an attacker triggers an iterator that expands a compressed file (Zip Bomb) or generates infinite data:
+```java
+while(it.hasNext()) { buffer.add(it.next()); } // OOM Error!
+```
+**Mitigation**:
+-   Limit the number of iterations.
+-   Use `Stream.limit(n)`.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Pattern | Goal | Key Roles |
+| :--- | :--- | :--- |
+| **Iterator** | Traverse w/o exposure | `hasNext`, `next` |
+| **Composite** | Tree Structure | `Leaf`, `Node` |
+| **Visitor** | Operation on structure | `accept(Visitor)` |
+
+**Verdict**: Use Iterator for EVERYTHING that is a collection. It is the standard glue between Algorithms and Data Structures.
+
+---
+
+### **10. References**
+1.  *Design Patterns (GoF)* - Iterator.
+2.  *Java Iterable Interface*.
+
+---
+
+
+#### Q74: How does the Visitor Pattern enable "Double Dispatch"?
+**Companies**: Google (Compilers), Facebook (AST Transformations), IntelliJ IDEA (PsiFiles)
+**Difficulty**: **Hard** (Double Dispatch / Cyclic Dependency)
+**Category**: Behavioral Patterns, Algorithms
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Adding Operations to Locked Classes**
+You have a stable class hierarchy: `Shape`, `Circle`, `Rectangle`.
+You want to add a new operation: `exportToXML()`.
+
+**Naive Approach**: Add `exportToXML()` method to `Shape` interface and all subclasses.
+**Problem**:
+1.  **Violation of SRP**: Shapes should handle geometry, not XML serialization.
+2.  **Violation of OCP**: You are modifying existing tested classes.
+3.  **Future Bloat**: Next week you need `exportToJSON()`, `exportToYAML()`. The classes grow forever.
+
+**The Solution**: The Visitor Pattern.
+Move the operation logic into a separate class (`XmlExportVisitor`).
+The Shapes just need *one* method: `accept(Visitor v)`.
+When you call `shape.accept(v)`, the shape "calls back" the visitor: `v.visit(this)`.
+
+**Real-World Analogies**:
+1.  **Taxi Driver (Visitor)**: Visits different places.
+    -   At a **Hotel**: Picks up passenger.
+    -   At a **Gas Station**: Refuels.
+    -   The places don't know how to drive a taxi; they just "accept" the driver.
+2.  **Tax Auditor**: Visits a `Factory` (checks inventory), Visits a `Shop` (checks sales). The logic resides in the Auditor, not the buildings.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Represent an operation to be performed on the elements of an object structure. Visitor lets you define a new operation without changing the classes of the elements on which it operates.
+
+**The Key Roles**:
+1.  **Visitor Interface**: Declares `visit(ConcreteElementA)`, `visit(ConcreteElementB)`.
+2.  **Concrete Visitor**: Implements the operation (e.g., `XmlVisitor`).
+3.  **Element Interface**: Declares `accept(Visitor)`.
+4.  **Concrete Element**: Implements `accept(v) { v.visit(this); }`.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: InstanceOf Checks (The Anti-Pattern)
+```java
+void export(Shape s) {
+    if (s instanceof Circle) exportCircle((Circle) s);
+    else if (s instanceof Rect) exportRect((Rect) s);
+}
+```
+*   **Critique**: You lose polymorphism. If you add `Triangle`, this code breaks silently (or requires updating every `if-else` chain).
+
+#### Approach 2: Method Overloading (Static Dispatch)
+```java
+export(Circle c);
+export(Shape s);
+// Calling export(myShape) calls export(Shape), NOT export(Circle)!
+```
+*   **Critique**: Java chooses method overloads at **compile time**. It doesn't know the runtime type.
+
+#### Approach 3: Double Dispatch (Visitor)
+1.  Dynamic dispatch on `element.accept(v)` (Selects correct Element).
+2.  Dynamic dispatch on `v.visit(this)` (Selects correct Visitor method for that Element).
+*   **Verdict**: Correctly routes (Visitor Type, Element Type) -> Method.
+
+---
+
+### **4. Implementation I: The Tax Calculation System**
+Applying different tax rules to different items (Liquor, Tobacco, Necessity).
+
+```java
+import java.util.ArrayList;
+import java.util.List;
+
+// 1. VISITOR INTERFACE
+interface TaxVisitor {
+    double visit(Liquor l);
+    double visit(Tobacco t);
+    double visit(Necessity n);
+}
+
+// 2. ELEMENT INTERFACE
+interface Item {
+    double accept(TaxVisitor v);
+}
+
+// 3. CONCRETE ELEMENTS
+class Liquor implements Item {
+    private double price;
+    public Liquor(double price) { this.price = price; }
+    public double getPrice() { return price; }
+    
+    @Override
+    public double accept(TaxVisitor v) {
+        return v.visit(this); // Double Dispatch
+    }
+}
+
+class Tobacco implements Item {
+    private double price;
+    public Tobacco(double price) { this.price = price; }
+    public double getPrice() { return price; }
+    
+    @Override
+    public double accept(TaxVisitor v) {
+        return v.visit(this);
+    }
+}
+
+class Necessity implements Item {
+    private double price;
+    public Necessity(double price) { this.price = price; }
+    public double getPrice() { return price; }
+    
+    @Override
+    public double accept(TaxVisitor v) {
+        return v.visit(this);
+    }
+}
+
+// 4. CONCRETE VISITORS
+class HolidayTaxVisitor implements TaxVisitor {
+    @Override
+    public double visit(Liquor l) {
+        System.out.println("Liquor: +10% Tax");
+        return l.getPrice() * 0.10;
+    }
+
+    @Override
+    public double visit(Tobacco t) {
+        System.out.println("Tobacco: +30% Tax");
+        return t.getPrice() * 0.30;
+    }
+
+    @Override
+    public double visit(Necessity n) {
+        System.out.println("Necessity: 0% Tax");
+        return 0;
+    }
+}
+
+class VATVisitor implements TaxVisitor {
+    // Different logic for VAT
+    public double visit(Liquor l) { return l.getPrice() * 0.20; }
+    public double visit(Tobacco t) { return t.getPrice() * 0.50; }
+    public double visit(Necessity n) { return l.getPrice() * 0.05; }
+}
+
+// 5. USAGE
+public class VisitorDemo {
+    public static void main(String[] args) {
+        TaxVisitor holidayCalc = new HolidayTaxVisitor();
+        
+        List<Item> cart = new ArrayList<>();
+        cart.add(new Liquor(100)); // 10
+        cart.add(new Tobacco(50)); // 15
+        cart.add(new Necessity(20)); // 0
+        
+        double totalTax = 0;
+        for (Item item : cart) {
+            totalTax += item.accept(holidayCalc);
+        }
+        System.out.println("Total Tax: " + totalTax);
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: The Open/Closed Principle Tradeoff**
+
+The Visitor Pattern has a unique property:
+1.  **Easy to add Operations**: Just create `JsonVisitor`. No classes touched.
+2.  **Hard to add Elements**: If you add `Electronics` class, you must change `Visitor` interface and ALL concrete visitors (`HolidayVisitor`, `VATVisitor`, `AuditVisitor`).
+
+**Rule of Thumb**:
+-   Use Visitor if the **Class Hierarchy is stable** (like AST nodes in a language), but **Operations change frequently**.
+-   Do NOT use Visitor if you frequently add new types of Elements.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Scala: Pattern Matching
+Scala doesn't need Visitor. It uses structural pattern matching.
+```scala
+def calculateTax(item: Item): Double = item match {
+  case l: Liquor => l.price * 0.10
+  case t: Tobacco => t.price * 0.30
+  case n: Necessity => 0
+}
+```
+This achieves the same goal (separating logic from data) without the double-dispatch boilerplate.
+
+#### Rust: Enums
+Similar to Scala, Rust uses `match` on Enums.
+```rust
+enum Item {
+    Liquor(f64),
+    Tobacco(f64),
+}
+
+fn calculate_tax(item: Item) -> f64 {
+    match item {
+        Item::Liquor(price) => price * 0.10,
+        Item::Tobacco(price) => price * 0.30,
+    }
+}
+```
+
+#### Go: Type Switches
+```go
+func CalculateTax(i Item) float64 {
+    switch v := i.(type) {
+    case Liquor:
+        return v.Price * 0.10
+    case Tobacco:
+        return v.Price * 0.30
+    }
+    return 0
+}
+```
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Shopping Cart Export**:
+    -   Visitor that converts `Book`, `Fruit`, `Electronic` objects into a JSON string.
+2.  **Area Calculator**:
+    -   Visitor that sums the area of `Circle`, `Rectangle`, `Triangle`.
+3.  **AST Printer**:
+    -   Given an Expression Tree (`3 + 4 * 5`), write a Visitor that pretty-prints it: `(+ 3 (* 4 5))`.
+
+#### Edge Case Drills
+1.  **Access Privileges**:
+    -   *Q*: Visitor needs access to private fields of Element?
+    -   *A*: Elements might need to expose getters/setters, or use package-private visibility (Java) so the Visitor can see internals.
+2.  **Traversal Responsibility**:
+    -   *Q*: Who traverses the list? The Client or the Visitor?
+    -   *A*: Usually the Client iterates and calls `accept`. Sometimes the Visitor iterates children (Composite Pattern).
+
+---
+
+### **8. Security Analysis: Broken Encapsulation**
+
+**Vulnerability**: Exposing Internals.
+To make Visitor work, Elements often have to expose their internal state (via getters) that was previously private.
+**Risk**: A malicious Visitor (`StealDataVisitor`) could traverse the structure and exfiltrate sensitive data.
+
+**Mitigation**:
+-   Restrict Visitor access using Module Systems (Java 9 modules).
+-   Ensure Visitors are trusted code (e.g., final classes, signed).
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Pattern | Solves... | Cost |
+| :--- | :--- | :--- |
+| **Visitor** | Adding operations | Hard to add new classes. |
+| **Decoration** | Adding behavior | Object identity issues. |
+| **Strategy** | Swapping algorithms | No double dispatch. |
+
+**Verdict**: Use Visitor for Compilers, Code Analyzers, and Document Exporters where the Data Model is stable.
+
+---
+
+### **10. References**
+1.  *Design Patterns (GoF)* - Visitor.
+2.  *Crafting Interpreters (Nystrom)* - Uses Visitor for ASTs.
+
+---
+
+
+#### Q75: How does the Composite Pattern allow treating Leaf and Node uniformly?
+**Companies**: Amazon (S3 Folders), Microsoft (Filesystem), React (Component Tree)
+**Difficulty**: **Medium** (Structural Pattern / Recursion)
+**Category**: Structural Patterns, Trees
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Recursive Structures**
+You are building a File System.
+-   **File**: Has size, name.
+-   **Directory**: Has size (sum of children), name, and contains Files OR Directories.
+
+**Problem**:
+If you treat them differently:
+```java
+if (node instanceof File) return file.getSize();
+if (node instanceof Directory) {
+    sum = 0;
+    for (File f : dir.getFiles()) sum += f.getSize();
+    for (Directory d : dir.getDirs()) sum += d.getSize(); // Recursive nightmare
+}
+```
+Client code becomes complex, checking types everywhere.
+
+**The Solution**: The Composite Pattern.
+Define a common interface `FileSystemNode`.
+Both `File` and `Directory` implement `getSize()`.
+-   `File.getSize()`: Returns self size.
+-   `Directory.getSize()`: Returns sum of children's `getSize()`.
+The client just calls `node.getSize()`. It works whether it's a single file or a root folder with 1TB of data.
+
+**Real-World Analogies**:
+1.  **Organization Chart**: CEO -> VP -> Manager -> Employee. A "Manager" is an Employee who *has* Employees.
+2.  **Arithmetic Expression**: `(1 + 2) * 3`. The `*` node has children which are `+` node and `3` node.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Compose objects into tree structures to represent part-whole hierarchies. Composite lets clients treat individual objects and compositions of objects uniformly.
+
+**The Key Roles**:
+1.  **Component**: Common interface (`getSize`).
+2.  **Leaf**: Implements Component, has no children (`File`).
+3.  **Composite**: Implements Component, has children (`Directory`).
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Separate Classes (No Interface)
+`File` class and `Directory` class are unrelated.
+*   **Critique**: Cannot put them in a single `List<Stuff>`. Need `List<File>` AND `List<Directory>`.
+
+#### Approach 2: Container Inheritance
+`File extends Directory`? No, a File can't have children.
+`Directory extends File`? No, a Directory isn't just a file with bytes.
+*   **Verdict**: Bad IS-A relationships.
+
+#### Approach 3: Composite (Common Interface)
+Both implement `IComponent`.
+*   **Verdict**: Correct polymorphism.
+
+---
+
+### **4. Implementation I: The File System**
+Modeling a simple recursive directory structure.
+
+```java
+import java.util.ArrayList;
+import java.util.List;
+
+// 1. COMPONENT
+abstract class FileSystemNode {
+    protected String name;
+    public FileSystemNode(String name) { this.name = name; }
+    
+    public abstract void print(String indent);
+    public abstract int getSize();
+    
+    // Optional Management Methods
+    public void add(FileSystemNode node) {
+        throw new UnsupportedOperationException("Leaves cannot add children");
+    }
+}
+
+// 2. LEAF
+class File extends FileSystemNode {
+    private int size;
+    
+    public File(String name, int size) {
+        super(name);
+        this.size = size;
+    }
+    
+    @Override
+    public int getSize() { return size; }
+    
+    @Override
+    public void print(String indent) {
+        System.out.println(indent + "📄 " + name + " (" + size + "kb)");
+    }
+}
+
+// 3. COMPOSITE
+class Directory extends FileSystemNode {
+    private List<FileSystemNode> children = new ArrayList<>();
+    
+    public Directory(String name) { super(name); }
+    
+    @Override
+    public void add(FileSystemNode node) {
+        children.add(node);
+    }
+    
+    @Override
+    public int getSize() {
+        return children.stream().mapToInt(FileSystemNode::getSize).sum();
+    }
+    
+    @Override
+    public void print(String indent) {
+        System.out.println(indent + "📂 " + name);
+        for (FileSystemNode child : children) {
+            child.print(indent + "  ");
+        }
+    }
+}
+
+// 4. USAGE
+public class CompositeDemo {
+    public static void main(String[] args) {
+        Directory root = new Directory("root");
+        Directory usr = new Directory("usr");
+        Directory bin = new Directory("bin");
+        
+        File bash = new File("bash", 1200);
+        File cat = new File("cat", 50);
+        File manual = new File("man.txt", 10);
+        
+        root.add(usr);
+        usr.add(bin);
+        usr.add(manual);
+        bin.add(bash);
+        bin.add(cat);
+        
+        // Treat Root (Composite) exactly like a File (Leaf) if we wanted
+        root.print("");
+        System.out.println("Total Size: " + root.getSize() + "kb");
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Safety vs Uniformity**
+
+**The Design Dilemma**:
+Where do you declare `add()`, `remove()`, `getChild()`?
+
+**Option A: Uniformity (In Component)**
+-   Declare `add()` in `antigravity-sdev-kiro`.
+-   **Pro**: Client doesn't care if it's Leaf or Composite. `node.add(child)` works polymorphic-ally.
+-   **Con**: Leaves must implement `add()` (usually throwing Exception), which is unsafe at runtime.
+
+**Option B: Safety (In Composite)**
+-   Declare `add()` only in `Directory`.
+-   **Pro**: Compile-time safety. You can't call `file.add()`.
+-   **Con**: Client must cast! `if (node instanceof Directory) ((Directory)node).add(child)`.
+
+**Verdict**: Most modern designs prefer **Safety** (Option B) for writes, but **Uniformity** for reads (`getSize()`, `print()`).
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### JavaScript: DOM Tree
+The HTML DOM is a massive Composite.
+`div` contains `p`, which contains `span` (Text Node).
+```javascript
+const div = document.createElement('div');
+const p = document.createElement('p');
+div.appendChild(p); // Component methods
+```
+
+#### React: Children Prop
+React Components are Composites.
+```jsx
+const Card = ({ children }) => <div className="card">{children}</div>;
+// Usage
+<Card>
+    <h1>Title</h1>   {/* Leaf */}
+    <p>Text</p>      {/* Leaf */}
+</Card>
+```
+
+#### Python: Tree Handling
+```python
+class Node:
+    def __init__(self, name):
+        self.children = []
+        self.name = name
+        
+    def add(self, node):
+        self.children.append(node)
+        
+    def walk(self):
+        print(self.name)
+        for child in self.children:
+            child.walk()
+```
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Menu System**:
+    -   `Menu` (Composite) contains `MenuItem` (Leaf) or `SubMenu` (Composite).
+2.  **Graphic Editor**:
+    -   `Group` contains `Circle`, `Square`, or another `Group`.
+    -   `group.move(x, y)` moves all children.
+3.  **Expression Evaluator**:
+    -   Evaluating `(5 + 2) * 10` using a Tree.
+
+#### Edge Case Drills
+1.  **Cycles**:
+    -   *Q*: Can I add Folder A into Folder B, and Folder B into Folder A?
+    -   *A*: In strict Composite (Tree), No. In a Graph, Yes, but `getSize()` will StackOverflow (Infinite Recursion).
+    -   **Fix**: Maintain a `visited` set if cycles are possible (Reference Loop).
+2.  **Parent Pointer**:
+    -   *Q*: Should children know their parent?
+    -   *A*: Often useful (`child.getParent().delete(child)`). Adds complexity to keep consistent.
+
+---
+
+### **8. Security Analysis: Recursive DoS**
+
+**Vulnerability**: Recursive Stack Overflow.
+If an attacker can create a deeply nested structure (e.g., JSON with 10k nested objects), calling `composite.operation()` will blow the Stack.
+**Mitigation**:
+-   Limit recursion depth `MAX_DEPTH`.
+-   Use iterative tree traversal algorithms instead of recursion where possible.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Pattern | Structure | Key Benefit |
+| :--- | :--- | :--- |
+| **Composite** | `Tree` | Uniform leaf/node handling. |
+| **Decorator** | `Wrapper` | Adding behavior dynamically. |
+| **Chain** | `List` | Decoupling sender/receiver. |
+
+**Verdict**: Use Composite whenever you have "Part-Whole" hierarchies and want to ignore the difference between single and groups.
+
+---
+
+### **10. References**
+1.  *Design Patterns (GoF)* - Composite.
+2.  *Head First Design Patterns*.
+
+---
+
 
 #### Q76-Q100: Expert-Level OOP Questions
 
-**Q76: How do you implement a lock-free data structure?**  
-**Companies**: Google, Meta  
-**Answer**: Use atomic operations, compare-and-swap (CAS), memory barriers, and careful algorithm design to avoid locks while maintaining thread safety.
+#### Q76: How does the Interpreter Pattern define and execute a grammar?
+**Companies**: Google (Search Queries), Microsoft (Excel Formulas), Elastic (Query DSL)
+**Difficulty**: **Hard** (Formal Grammars / Recursion)
+**Category**: Behavioral Patterns, Domain Specific Languages
 
-**Q77: Explain the double dispatch technique.**  
-**Companies**: Microsoft, Amazon  
-**Answer**: Method call depends on runtime types of two objects. Achieved through method overloading and polymorphism.
+---
 
-**Q78: How do you implement custom serialization?**  
-**Companies**: Google, Apple  
-**Answer**: Implement writeObject() and readObject() methods, handle versioning, consider security implications, use transient for non-serializable fields.
+### **1. Conceptual Overview & Motivation**
 
-**Q79: What is the difference between covariance and contravariance?**  
-**Companies**: Microsoft, Meta  
-**Answer**: Covariance allows subtypes in output positions, contravariance allows supertypes in input positions. Java has limited support through wildcards.
+**The "Why": Custom Languages**
+You need to support a search query like:
+`"name='Alice' AND (age>30 OR role='Admin')"`
+Or a pricing rule:
+`"IF customer.isVIP() THEN discount = 20%"`
 
-**Q80: How do you implement a custom class loader?**  
-**Companies**: Google, Amazon  
-**Answer**: Extend ClassLoader, override findClass() method, handle class loading delegation, consider security and performance implications.
+**Problem**: Hardcoding this logic is impossible because the rules change dynamically.
+Writing a full Compiler (Lexer/Parser) is overkill.
 
-**Q81: Explain the concept of phantom types.**  
-**Companies**: Apple, Microsoft  
-**Answer**: Types that exist only at compile time to enforce constraints, erased at runtime. Used for type-safe APIs and preventing misuse.
+**The Solution**: The Interpreter Pattern.
+1.  Define a **Grammar** (Rules).
+2.  Represent the sentence as an **Abstract Syntax Tree (AST)**.
+3.  Each node in the tree knows how to `interpret()` itself.
 
-**Q82: How do you implement aspect-oriented programming in Java?**  
-**Companies**: Meta, Google  
-**Answer**: Use frameworks like AspectJ or Spring AOP, define pointcuts and advice, implement cross-cutting concerns like logging and security.
+**Real-World Analogies**:
+1.  **Music Notation**: A musician ("Interpreter") reads a sheet ("AST"). A note 🎵 means "Play C#". A rest 𝄽 means "Silence".
+2.  **Regular Expressions**: The pattern `^[a-z]+$` is compiled into an internal tree structure that "interprets" input strings to match/fail.
 
-**Q83: What is the difference between composition and delegation?**  
-**Companies**: Microsoft, Amazon  
-**Answer**: Composition is structural (has-a relationship), delegation is behavioral (forwarding method calls to another object).
+---
 
-**Q84: How do you implement a custom annotation processor?**  
-**Companies**: Google, Apple  
-**Answer**: Extend AbstractProcessor, process annotations at compile time, generate code or validate constraints, handle multiple rounds.
+### **2. Comprehensive Definition**
 
-**Q85: Explain the concept of mixins in OOP.**  
-**Companies**: Meta, Microsoft  
-**Answer**: Classes that provide methods for use by other classes without being a parent class. Java achieves this through interfaces with default methods.
+**Formal Definition**:
+> Given a language, define a represention for its grammar along with an interpreter that uses the representation to interpret sentences in the language.
 
-**Q86: How do you implement a domain-specific language (DSL)?**  
-**Companies**: Google, Amazon  
-**Answer**: Use builder pattern, method chaining, custom annotations, or external parsing. Focus on readability and domain concepts.
+**The Key Roles**:
+1.  **Expression Interface**: Declares `interpret(Context)`.
+2.  **Terminal Expression**: Leaf node (e.g., Number, String Literal).
+3.  **Non-Terminal Expression**: Composite node (e.g., Plus, And, Or). Recursively calls children.
+4.  **Context**: Global information (Variables map).
 
-**Q87: What is the difference between static and dynamic typing in OOP context?**  
-**Companies**: Apple, Microsoft  
-**Answer**: Static typing checks types at compile time (Java), dynamic typing checks at runtime (Python). Affects performance, safety, and flexibility.
+---
 
-**Q88: How do you implement a plugin architecture?**  
-**Companies**: Meta, Google  
-**Answer**: Use interfaces for plugin contracts, service loader pattern, reflection for discovery, class loaders for isolation.
+### **3. Progressive Solution Evolution**
 
-**Q89: Explain the concept of algebraic data types.**  
-**Companies**: Microsoft, Amazon  
-**Answer**: Types formed by combining other types. Sum types (unions) and product types (tuples/records). Java has limited support through sealed classes.
+#### Approach 1: String Parsing (Spaghetti)
+```java
+if (input.contains("AND")) {
+    String[] parts = input.split("AND");
+    // ... messy nesting logic ...
+}
+```
+*   **Critique**: Brittle. Cannot handle precedence `(A OR B) AND C`. Regex is not enough for nested structures.
 
-**Q90: How do you implement a reactive programming model?**  
-**Companies**: Google, Apple  
-**Answer**: Use observer pattern, event streams, functional composition, backpressure handling. Libraries like RxJava implement these concepts.
+#### Approach 2: Full Compiler (Lex/Yacc/ANTLR)
+Generate Java code from a grammar file.
+*   **Critique**: Heavyweight. Requires build steps. Overkill for simple logic.
 
-**Q91: What is the difference between nominal and structural typing?**  
-**Companies**: Meta, Microsoft  
-**Answer**: Nominal typing (Java) considers types equal if they have the same name. Structural typing considers types equal if they have the same structure.
+#### Approach 3: Interpreter Pattern (AST)
+Build a tree of objects manually or via a simple parser.
+*   **Verdict**: Good for simple grammars.
 
-**Q92: How do you implement a type-safe builder with compile-time validation?**  
-**Companies**: Google, Amazon  
-**Answer**: Use phantom types, method chaining with different return types, or annotation processing to enforce build order at compile time.
+---
 
-**Q93: Explain the concept of higher-kinded types.**  
-**Companies**: Apple, Microsoft  
-**Answer**: Types that take other types as parameters (like generics for generics). Java has limited support, but useful for functional programming patterns.
+### **4. Implementation I: The SQL "Where" Clause Parser**
+Implementing a mini-engine to evaluate: `name='John' OR age=30`.
 
-**Q94: How do you implement a custom garbage collector?**  
-**Companies**: Meta, Google  
-**Answer**: Understand JVM internals, implement mark-and-sweep or copying algorithms, handle object graphs, consider performance and pause times.
+```java
+import java.util.HashMap;
+import java.util.Map;
 
-**Q95: What is the difference between inheritance and subtyping?**  
-**Companies**: Microsoft, Amazon  
-**Answer**: Inheritance is implementation sharing, subtyping is interface compatibility. You can have subtyping without inheritance (interfaces).
+// 1. CONTEXT (Database Row)
+class Row {
+    Map<String, Object> data = new HashMap<>();
+    public Row(String name, int age) {
+        data.put("name", name);
+        data.put("age", age);
+    }
+    public Object get(String col) { return data.get(col); }
+}
 
-**Q96: How do you implement a distributed object system?**  
-**Companies**: Google, Apple  
-**Answer**: Use serialization, remote method invocation, handle network failures, implement location transparency, consider consistency models.
+// 2. EXPRESSION INTERFACE
+interface Expression {
+    boolean interpret(Row row);
+}
 
-**Q97: Explain the concept of effect systems in OOP.**  
-**Companies**: Meta, Microsoft  
-**Answer**: Type systems that track side effects (I/O, exceptions, state changes). Help reason about program behavior and enable optimizations.
+// 3. TERMINAL EXPRESSION (e.g., name='John')
+class EqualsExpression implements Expression {
+    private String column;
+    private Object value;
+    
+    public EqualsExpression(String column, Object value) {
+        this.column = column;
+        this.value = value;
+    }
+    
+    @Override
+    public boolean interpret(Row row) {
+        return row.get(column).equals(value);
+    }
+}
 
-**Q98: How do you implement a custom memory allocator?**  
-**Companies**: Google, Amazon  
-**Answer**: Understand memory layout, implement allocation strategies (pool, stack, heap), handle fragmentation, consider thread safety.
+class GreaterThanExpression implements Expression {
+    private String column;
+    private int value;
+    
+    public GreaterThanExpression(String column, int value) {
+        this.column = column;
+        this.value = value;
+    }
+    
+    @Override
+    public boolean interpret(Row row) {
+        // Warning: Simplified casting
+        return (int)row.get(column) > value;
+    }
+}
 
-**Q99: What is the difference between parametric and ad-hoc polymorphism?**  
-**Companies**: Apple, Microsoft  
-**Answer**: Parametric polymorphism works uniformly across types (generics). Ad-hoc polymorphism has different implementations for different types (method overloading).
+// 4. NON-TERMINAL EXPRESSION (AND, OR)
+class OrExpression implements Expression {
+    private Expression left;
+    private Expression right;
+    
+    public OrExpression(Expression left, Expression right) {
+        this.left = left;
+        this.right = right;
+    }
+    
+    @Override
+    public boolean interpret(Row row) {
+        return left.interpret(row) || right.interpret(row);
+    }
+}
 
-**Q100: How do you implement a type-safe heterogeneous container with variance?**  
-**Companies**: Meta, Google  
-**Answer**: Use bounded wildcards, type tokens, careful API design to maintain type safety while allowing flexibility in type relationships.
+class AndExpression implements Expression {
+    private Expression left;
+    private Expression right;
+    
+    public AndExpression(Expression left, Expression right) {
+        this.left = left;
+        this.right = right;
+    }
+    
+    @Override
+    public boolean interpret(Row row) {
+        return left.interpret(row) && right.interpret(row);
+    }
+}
+
+// 5. USAGE
+public class InterpreterDemo {
+    public static void main(String[] args) {
+        // Rule: name='Alice' OR (age > 20)
+        Expression rule = new OrExpression(
+            new EqualsExpression("name", "Alice"),
+            new GreaterThanExpression("age", 20)
+        );
+        
+        Row u1 = new Row("Bob", 15);
+        Row u2 = new Row("Alice", 10);
+        Row u3 = new Row("Charlie", 25);
+        
+        System.out.println("Bob: " + rule.interpret(u1));     // False
+        System.out.println("Alice: " + rule.interpret(u2));   // True
+        System.out.println("Charlie: " + rule.interpret(u3)); // True
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Lexer vs Parser vs Interpreter**
+
+1.  **Lexer (Scanner)**:
+    -   Input: `age > 30`
+    -   Output: Tokens `[IDENTIFIER:age, GT, NUMBER:30]`
+2.  **Parser**:
+    -   Input: Tokens.
+    -   Output: AST `GreaterThanExpr(col="age", val=30)`.
+3.  **Interpreter**:
+    -   Input: AST + Context.
+    -   Output: `true` / `false`.
+
+**The Pattern** strictly covers Step 3 (The AST formulation), but practically you need Step 2 to build the AST.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Java: `java.util.regex`
+Regex is an interpreted language.
+`Pattern.compile("a*b")` builds the AST (Finite State Machine).
+`matcher.matches()` runs the interpreter.
+
+#### Python: `eval()` (Dangerous!)
+Python has a built-in interpreter for itself.
+```python
+rule = "age > 30 and name == 'John'"
+context = {"age": 40, "name": "John"}
+print(eval(rule, {}, context)) # True
+```
+**Warning**: `eval()` allows Arbitrary Code Execution (ACE). Never use on untrusted input.
+
+#### Spring: SpEL (Spring Expression Language)
+`@Value("#{systemProperties['user.timezone']}")` uses an Interpreter to parse the string inject the value.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Reverse Polish Notation (RPN)**:
+    -   Evaluate `"5 1 2 + 4 * + 3 -"`.
+    -   Stack-based Interpreter.
+2.  **Roman Numeral Converter**:
+    -   Interpret `"MCMXCIX"` -> `1999`.
+    -   Context holds current sum.
+3.  **Cron Expression**:
+    -   Interpret `"0 0 12 * * ?"` -> `nextRunTime()`.
+
+#### Edge Case Drills
+1.  **Infinite Loops**:
+    -   *Q*: Can an Interpreter loop forever?
+    -   *A*: If the grammar allows loops (`WHILE`), yes. It's Turing Complete.
+2.  **Performance**:
+    -   *Q*: Is this slow?
+    -   *A*: Yes. Interpreting an AST is much slower than compiled code. For high performance, you Compile the AST to Bytecode (JIT).
+
+---
+
+### **8. Security Analysis: ReDoS (Regex Denial of Service)**
+
+**Vulnerability**: Catastrophic Backtracking.
+If a grammar allows recursive ambiguity (like `(a+)+$`), an attacker can supply `aaaaaaaaaaaaaaaaaaaaX`.
+The Interpreter will try every possible permutation of the nested groups, taking O(2^N) time.
+**Result**: CPU sits at 100% for years.
+
+**Mitigation**:
+-   Set timeout for execution.
+-   Avoid nested quantifiers in Regex.
+-   Limit AST depth.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Pattern | Scope | Tradeoff |
+| :--- | :--- | :--- |
+| **Interpreter** | Custom Grammar | High Complexity, Slow. |
+| **Strategy** | Algorithms | Hardcoded Logic, Fast. |
+| **Composite** | Structure | Tree storage. |
+
+**Verdict**: Use Interpreter only for **Domain Specific Languages (DSLs)** that change frequently but are not complex enough for a full compiler.
+
+---
+
+### **10. References**
+1.  *Abelson & Sussman* - Structure and Interpretation of Computer Programs (SICP).
+2.  *Compilers: Principles, Techniques, and Tools* (Dragon Book).
+
+---
+
+
+#### Q77: How does Double Dispatch differ from Method Overloading?
+**Companies**: Microsoft (Game Engines), Amazon (Rule Engines), Adobe (Graphics Hit-Testing)
+**Difficulty**: **Hard** (Polymorphism / Language Features)
+**Category**: Behavioral Patterns, Type System
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Interaction Between Two Unknowns**
+You are building a Game Engine.
+You have a method `collide(GameObject a, GameObject b)`.
+-   If `Asteroid` hits `Ship` -> Ship takes damage.
+-   If `Asteroid` hits `Asteroid` -> Both bounce.
+-   If `Missile` hits `Asteroid` -> Asteroid explodes.
+
+**The Problem**: Single Dispatch (Java/C++/Python).
+When you call `a.collide(b)`:
+1.  Runtime decides which class `a` is (Dynamic Dispatch).
+2.  But `b` is treated as the *compile-time* type (usually `GameObject`).
+3.  You end up in a generic `collide(GameObject)` method, losing the specific type of `b`.
+
+**The Solution**: Double Dispatch.
+We need two rounds of polymorphism.
+1.  Round 1: `a.collide(b)` -> Decides `a` is `Asteroid`.
+2.  Round 2: Inside `Asteroid`, call `b.collideWith(this)` -> Decides `b` is `Ship`.
+Now we are in `Ship.collideWith(Asteroid)`, where we know exact types of BOTH.
+
+**Real-World Analogies**:
+1.  **Hiring Process**:
+    -   HR Manager sends Candidate to Dept Manager ("I accept you").
+    -   Dept Manager looks at Candidate ("Ah, Java Dev. I interview you for Backend").
+    -   Depends on type of Manager AND type of Candidate.
+2.  **File Converters**: `converter.convert(file)`.
+    -   PDFConverter + WordFile -> PDF.
+    -   HTMLConverter + WordFile -> HTML.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> A mechanism that dispatches a function call to different concrete functions depending on the runtime types of two arguments involved in the call.
+
+**The Key Roles**:
+1.  **Single Dispatch**: `target.method(arg)` -> Outcome depends on `target` runtime type.
+2.  **Double Dispatch**: `target.method(arg)` -> Outcome depends on `target` AND `arg` runtime type. (Used in Visitor Pattern).
+3.  **Multiple Dispatch**: Outcome depends on ALL arguments (CLOS, Julia, C# dynamic).
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: `instanceof` Chain (The "Code Smell")
+```java
+void collide(GameObject other) {
+    if (other instanceof Ship) crashShip();
+    else if (other instanceof Missile) explode();
+}
+```
+*   **Critique**: O(N) checks. If you add `UFO` class, you must edit `Asteroid`, `Ship`, `Missile` classes to handle it. Violates OCP.
+
+#### Approach 2: Overloading (Static Dispatch)
+```java
+class Asteroid {
+    void collide(Ship s) { ... }
+    void collide(Missile m) { ... }
+}
+// Usage
+GameObject a = new Asteroid();
+GameObject b = new Ship();
+a.collide(b); // ERROR or calls generic collide(GameObject)
+```
+*   **Critique**: Java overloading is determined at **Compile Time**. If variable is `GameObject`, it calls the `GameObject` version, ignoring the runtime object.
+
+#### Approach 3: Double Dispatch (Visitor Style)
+```java
+// Round 1
+a.collide(b); 
+// inside Asteroid:
+b.collideWithAsteroid(this); // Round 2
+```
+*   **Verdict**: Validates strict typing at compile time + runtime resolution.
+
+---
+
+### **4. Implementation I: The Collision Detection System**
+Simulating a physics engine where objects handle collisions differently.
+
+```java
+// 1. ROOT INTERFACE
+interface GameObject {
+    // Phase 1: The entry point
+    void collide(GameObject other);
+    
+    // Phase 2: The callback methods (One for each concrete type)
+    void collideWith(Asteroid asteroid);
+    void collideWith(Spaceship ship);
+    void collideWith(Missile missile);
+}
+
+// 2. CONCRETE OBJECTS
+class Asteroid implements GameObject {
+    @Override
+    public void collide(GameObject other) {
+        // Double Dispatch: "I am an Asteroid. Deal with me."
+        other.collideWith(this);
+    }
+
+    // HANDLERS
+    @Override
+    public void collideWith(Asteroid asteroid) {
+        System.out.println("🪨💥🪨 Asteroids bounce off each other.");
+    }
+
+    @Override
+    public void collideWith(Spaceship ship) {
+        System.out.println("🪨💥🚀 Asteroid damages Ship (Callback).");
+    }
+
+    @Override
+    public void collideWith(Missile missile) {
+        System.out.println("🪨💥🧨 Asteroid pulverized by Missile!");
+    }
+}
+
+class Spaceship implements GameObject {
+    @Override
+    public void collide(GameObject other) {
+        other.collideWith(this);
+    }
+
+    @Override
+    public void collideWith(Asteroid asteroid) {
+        System.out.println("🚀💥🪨 Ship crashes into Asteroid.");
+    }
+
+    @Override
+    public void collideWith(Spaceship ship) {
+        System.out.println("🚀💥🚀 Two ships trade insurance info.");
+    }
+
+    @Override
+    public void collideWith(Missile missile) {
+        System.out.println("🚀💥🧨 Friendly Fire! Missile hits Ship.");
+    }
+}
+
+class Missile implements GameObject {
+    @Override
+    public void collide(GameObject other) {
+        other.collideWith(this);
+    }
+
+    @Override
+    public void collideWith(Asteroid asteroid) {
+        System.out.println("🧨💥🪨 Missile destroys Asteroid (Callback).");
+    }
+    
+    @Override
+    public void collideWith(Spaceship ship) {
+        System.out.println("🧨💥🚀 Missile hits Ship (Callback).");
+    }
+    
+    @Override
+    public void collideWith(Missile missile) {
+        System.out.println("🧨💥🧨 Missiles intercept each other.");
+    }
+}
+
+// 3. USAGE
+public class DoubleDispatchDemo {
+    public static void main(String[] args) {
+        // All typed as GameObject (Unknown at compile time)
+        GameObject rock = new Asteroid();
+        GameObject player = new Spaceship();
+        GameObject weapon = new Missile();
+        
+        System.out.println("--- Round 1: Rock hits Player ---");
+        rock.collide(player); 
+        // 1. rock.collide() -> calls other.collideWith(this) [Asteroid]
+        // 2. player.collideWith(Asteroid) -> "Ship crashes into Asteroid"
+        
+        System.out.println("\n--- Round 2: Weapon hits Rock ---");
+        weapon.collide(rock);
+        // 1. weapon.collide() -> rock.collideWith(this) [Missile]
+        // 2. rock.collideWith(Missile) -> "Asteroid pulverized"
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: The N^2 Complexity Problem**
+
+**The Check Matrix**:
+With 3 Classes (A, S, M), we implemented 3x3 = 9 interaction methods.
+If we have 20 classes (Unit Types):
+20 * 20 = **400 Methods**.
+
+**Scalability Solution**:
+1.  **Base Class Defaults**: `GameObject` implements default `collideWith` (do nothing). Overrides specific ones.
+2.  **Collision Map (Strategy)**:
+    -   Use a `Map<Pair<Class, Class>, CollisionHandler>` to lookup logic.
+    -   This moves logic out of the Entity classes (Clean Architecture).
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### C# / Julia: Dynamic / Multiple Dispatch
+Some languages support this natively.
+**C# (dynamic)**:
+```csharp
+void Collide(dynamic a, dynamic b) {
+    Solve(a, b); // Runtime resolution for BOTH args
+}
+void Solve(Asteroid a, Ship b) { ... }
+```
+
+**Julia**:
+```julia
+collide(a::Asteroid, s::Ship) = println("Boom")
+collide(a::Asteroid, b::Asteroid) = println("Bounce")
+# Julia engine picks the most specific method automatically.
+```
+
+#### Clojure: Multimethods
+```clojure
+(defmulti collide (fn [a b] [(class a) (class b)]))
+(defmethod collide [Asteroid Ship] [a b] (println "Boom"))
+```
+
+#### Java (Core):
+Strict Single Dispatch. Receiver is dynamic, Arguments are static. Exceptions: `Visitor` pattern is essentially the canonical implementation of Double Dispatch in Java.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Payment Processing**:
+    -   `Region` (EU, US) vs `CardType` (Visa, Amex).
+    -   `process(Region, CardType)` -> Logic varies by both.
+2.  **Document Printing**:
+    -   `Printer` (Inkjet, Laser) vs `Document` (PDF, Image).
+    -   Double dispatch to select optimized print driver settings.
+
+#### Edge Case Drills
+1.  **Null Arguments**:
+    -   *Q*: What if `other` is null in `collide(other)`?
+    -   *A*: `other.collideWith(this)` throws NPE. Must check null.
+2.  **Inheritance Depth**:
+    -   *Q*: If `MegaAsteroid extends Asteroid`, does it trigger `collideWith(Asteroid)`?
+    -   *A*: Yes, unless `collideWith(MegaAsteroid)` exists. Standard polymorphism rules apply.
+
+---
+
+### **8. Security Analysis: Type Confusion**
+
+**Vulnerability**: Attacker Exploiting Dispatch.
+If you rely on `instanceof` or casting manually without Double Dispatch, an attacker might create a subclass `MaliciousShip extends Ship`.
+If your code does `(Ship) obj`, it succeeds, but the object might have overridden behavior (e.g., return negative damage).
+Double Dispatch forces the execution path into the exact concrete type's codebase, making spoofing harder if classes are final/sealed.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Mechanism | Description | Example |
+| :--- | :--- | :--- |
+| **Overloading** | Same Name, Different Args | `print(int)`, `print(String)` (Static) |
+| **Overriding** | Subclass replaces Superclass | `Shape.draw()` -> `Circle.draw()` (Dynamic) |
+| **Double Dispatch** | 2x Dynamic Lookup | `Visitor` pattern. |
+
+**Verdict**: Use Double Dispatch when interactions depend on the concrete types of **two** objects, and you want to avoid `instanceof` soup.
+
+---
+
+### **10. References**
+1.  *Design Patterns (GoF)* - Visitor (The mechanics of Double Dispatch).
+2.  *More Effective C++* (Scott Meyers).
+
+---
+
+
+#### Q78: Why is Java Serialization considered a vulnerability, and how do you customize it securely?
+**Companies**: Google (Protobuf), LinkedIn (Kafka), Redis (User Sessions)
+**Difficulty**: **Hard** (IO / Security / JVM Internals)
+**Category**: IO, Security, Distributed Systems
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Persisting State**
+You have a User Session object in memory: `User(id=1, role=ADMIN)`.
+You need to send it to Redis (to survive a reboot) or over the network.
+You convert memory -> bytes -> memory.
+
+**Problem 1: Performance**
+Default Java Serialization (`implements Serializable`) is slow and verbose. It writes full class names, metadata, and handles cyclic graphs recursively.
+
+**Problem 2: Security (Gadget Chains)**
+If you accept serialized data from the wild, an attacker can send a malicious byte stream.
+When `readObject()` deserializes it, it can trigger code execution (RCE) *before* your code even checks if the data is valid.
+
+**The Solution**: Custom Serialization.
+1.  **Transient**: Mark sensitive fields (passwords) to skip them.
+2.  **writeObject/readObject**: Manually control the byte format.
+3.  **Serialization Proxy**: Write a safe data-transfer object (DTO) instead of the actual logic class.
+
+**Real-World Analogies**:
+1.  **IKEA Furniture**: You don't ship an assembled cabinet (Memory). You ship a flat-pack box (Bytes) with instructions (Class). The receiver builds it (`readObject`).
+2.  **Teleportation**: Star Trek transporter breaks you into atoms (Bytes), beams you down, and reassembles you. If the "reassemble" protocol is hacked, you might arrive as an Evil Clone.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> The process of converting an object's state to a sequence of bytes, with the ability to revert those bytes into a live object. Customization allows controlling the stream format and enforcing invariants during reconstruction.
+
+**The Key Roles**:
+1.  **Serializable**: Marker interface.
+2.  **Externalizable**: Interface requiring `writeExternal` and `readExternal` (No magic).
+3.  **transient**: Keyword to ignore fields.
+4.  **serialVersionUID**: Version control for classes.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Default Serialization
+```java
+class User implements Serializable { String user; String pass; }
+```
+*   **Critique**: Serializes `pass` (Insecure). Brittle if class changes. Slow.
+
+#### Approach 2: `transient` Keyword
+```java
+transient String pass;
+```
+*   **Verdict**: Better. Passwords aren't written to disk. But deserialization leaves `pass` field null.
+
+#### Approach 3: Custom `writeObject`
+```java
+private void writeObject(ObjectOutputStream oos) {
+    oos.defaultWriteObject();
+    oos.writeUTF(encrypt(pass)); // Encrypt before writing
+}
+```
+*   **Verdict**: Secure, but complex maintenance.
+
+#### Approach 4: Serialization Proxy (Best Practice)
+Write a small `UserDTO` instead of `User`.
+*   **Verdict**: Solves the "Gadget Chain" attack because the deserialized object is just a dumb DTO, not a Logic Class.
+
+---
+
+### **4. Implementation I: Secure Session Token (Redis Style)**
+Persisting a User Session with secure custom serialization.
+
+```java
+import java.io.*;
+import java.util.Base64;
+
+// 1. THE LOGIC CLASS (The Complex Object)
+class UserSession implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
+    // Core data
+    private String username;
+    private long loginTimestamp;
+    
+    // Sensitive / Calculated Data (Skip default serialization)
+    private transient String sessionToken; 
+    private transient Thread backgroundRefresher; // Thread not serializable!
+
+    public UserSession(String u, String token) {
+        this.username = u;
+        this.sessionToken = token;
+        this.loginTimestamp = System.currentTimeMillis();
+        startRefresher();
+    }
+    
+    private void startRefresher() {
+        // Mocking a background task
+        this.backgroundRefresher = new Thread(() -> System.out.println("Refreshing..."));
+    }
+
+    // 2. CUSTOM WRITER
+    private void writeObject(ObjectOutputStream oos) throws IOException {
+        System.out.println("⚡ Custom Writing...");
+        oos.defaultWriteObject(); // Writes 'username' and 'loginTimestamp'
+        
+        // Manually write the token (maybe encrypted)
+        oos.writeUTF("ENCRYPTED_" + sessionToken);
+    }
+
+    // 3. CUSTOM READER
+    private void readObject(ObjectInputStream ois) throws IOException, ClassNotFoundException {
+        System.out.println("⚡ Custom Reading...");
+        ois.defaultReadObject(); // Reads 'username' and 'loginTimestamp'
+        
+        // Manually read token
+        String raw = ois.readUTF();
+        this.sessionToken = raw.replace("ENCRYPTED_", "");
+        
+        // RE-INITIALIZE TRANSIENT STATE
+        // Crucial! Threads/Connections don't survive serialization. Restart them.
+        startRefresher();
+        
+        // VALIDATION (Security)
+        if (loginTimestamp < 0) {
+            throw new InvalidObjectException("Time travel detected");
+        }
+    }
+    
+    @Override
+    public String toString() {
+        return "UserSession{user='" + username + "', token='" + sessionToken + "', bg=" + (backgroundRefresher != null) + "}";
+    }
+}
+
+// 4. USAGE
+public class SerializationDemo {
+    public static void main(String[] args) throws Exception {
+        UserSession session = new UserSession("Alice", "Secret-123");
+        System.out.println("Original: " + session);
+        
+        // SERIALIZE (Memory -> Bytes)
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ObjectOutputStream oos = new ObjectOutputStream(baos);
+        oos.writeObject(session);
+        oos.close();
+        
+        byte[] bytes = baos.toByteArray();
+        System.out.println("Payload Size: " + bytes.length + " bytes");
+        
+        // DESERIALIZE (Bytes -> Memory)
+        ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
+        ObjectInputStream ois = new ObjectInputStream(bais);
+        UserSession restored = (UserSession) ois.readObject();
+        
+        System.out.println("Restored: " + restored);
+        // Notice 'bg=true' means startRefresher() was called!
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: The Singleton Problem**
+
+**The Issue**: `readObject` always creates a **NEW** instance.
+If you serialize a Singleton (e.g., `DatabaseConnection.INSTANCE`), deserialization creates a second copy.
+**Singleton is broken.**
+
+**The Fix**: `readResolve()`
+```java
+private Object readResolve() {
+    return INSTANCE; // Ignore the deserialized copy, return the real one.
+}
+```
+**Better Fix**: Use `enum` for Singletons. Java Enums handle serialization correctly by default.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Python: `pickle` (The Security Nightmare)
+Python's pickle is powerful but extremely dangerous.
+```python
+import pickle
+# Attacker can craft a pickle that runs 'rm -rf /' when loaded.
+data = pickle.loads(malicious_bytes) 
+```
+**Rule**: NEVER unpickle data from untrusted sources. Use JSON.
+
+#### JavaScript: JSON
+JS doesn't serialize class state/functions, only data.
+```javascript
+const obj = { x: 1, func: () => {} };
+JSON.stringify(obj); // "{"x":1}" - Function is lost!
+```
+
+#### Go: Struct Tags
+Go uses explicit tags for field mapping.
+```go
+type User struct {
+    Name string `json:"name"`
+    Pass string `json:"-"` // Ignore this field
+}
+```
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Deep Copy via Serialization**:
+    -   Implement `clone()` by serializing to memory and deserializing immediately.
+    -   Pros: Handles deep graph automatically. Cons: Slow.
+2.  **Singleton Guard**:
+    -   Create a Singleton, serialize it, check `s1 == s2` (should be false).
+    -   Fix with `readResolve()`.
+3.  **Migration**:
+    -   Serialize class `V1`. Add a field. Try to deserialize `V1` bytes into `V2` class.
+    -   Fix with `serialVersionUID` compatibility.
+
+#### Edge Case Drills
+1.  **Circular References**:
+    -   *Q*: `A` refers to `B`, `B` refers to `A`. StackOverflow?
+    -   *A*: No, Java Serialization Handle Table handles graph cycles automatically. JSON parsers (Gson/Jackson) often `StackOverflow`.
+2.  **Non-Serializable Fields**:
+    -   *Q*: What happens if a field isn't serializable?
+    -   *A*: `NotSerializableException`. Mark it `transient` or make it satisfy `Serializable`.
+
+---
+
+### **8. Security Analysis: Deserialization RCE**
+
+**Vulnerability**: Remote Code Execution (RCE).
+Libraries like `Apache Commons Collections` had classes that, when deserialized, executed arbitrary commands (the famous "Gadget Chain").
+**Mechanism**:
+1.  Attacker sends bytes for a `HashSet` containing a `TransformingComparator`.
+2.  The Comparator executes `Runtime.exec("calc.exe")` during sorting.
+3.  `readObject` triggers sorting. RCE achieved.
+
+**Mitigation**:
+-   **Don't use Java Serialization**. Use JSON/Protobuf.
+-   If you must, use a **Whitelist** (Look Ahead Object Input Stream) to allow only `UserSession` class.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Keyword | Purpose |
+| :--- | :--- |
+| **Serializable** | Enable naive serialization. |
+| **transient** | Skip a field. |
+| **serialVersionUID** | Ensure version compatibility. |
+| **readResolve** | Fix Singletons post-deserialization. |
+| **writeReplace** | Swap object for a Proxy before writing. |
+
+**Verdict**: Avoid Default Serialization for long-term storage or network. Use for quick deep-copies or strictly internal caching.
+
+---
+
+### **10. References**
+1.  *Effective Java (Bloch)* - Item: Consider serialization proxies.
+2.  *OWASP Deserialization Cheat Sheet*.
+
+---
+
+
+#### Q79: Why is the Clone method considered broken, and how do Copy Constructors fix it?
+**Companies**: Amazon (Inventory Management), Apple (Obj-C/Swift Migration), Financial Systems (Defensive Copying)
+**Difficulty**: **Medium** (Object Lifecycle / Memory Management)
+**Category**: Creational Patterns, Core Java
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Duplicating State**
+You have an object `Configuration config` with database URLs and timeout settings.
+You want to create a `backupConfig` that starts identical to `config` but can be modified independently.
+
+**Problem 1: Shallow Copy (Assignment)**
+```java
+Config backup = original; 
+backup.setTimeout(0); // OOPS! Modified original too.
+```
+This is because `backup` is just a reference to the **same** object.
+
+**Problem 2: The `clone()` Disaster**
+Java's `Object.clone()` is deeply flawed:
+1.  **Broken Design**: `Cloneable` interface has no methods (marker only). `clone()` is `protected` on `Object`.
+2.  **Shallow by Default**: It copies field-by-field. If fields are mutable objects (e.g., `List` or `Date`), both clones share the same backend list. "State Bleeding".
+3.  **Exception Hell**: Throws `CloneNotSupportedException` (Checked Exception) unnecessarily.
+
+**The Solution**: Copy Constructors.
+A constructor that takes an instance of its own class:
+```java
+public User(User other) {
+    this.name = other.name;
+    this.roles = new ArrayList<>(other.roles); // MANUAL DEEP COPY
+}
+```
+
+**Real-World Analogies**:
+1.  **Xerox Machine (Copy)**: You put a document on the glass. The machine prints a new sheet. Writing on the copy doesn't affect the original.
+2.  **Shared Google Doc (Reference)**: Two people editing the same link see each other's changes. (This is what you want to avoid).
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> A copy constructor is a constructor in a class that creates a new object using an existing object of the same class, ensuring deep copies of mutable fields to prevent shared state.
+
+**The Key Roles**:
+1.  **Shallow Copy**: Copying references. Fast, dangerous for mutable objects.
+2.  **Deep Copy**: Recursively copying the object tree. Slower, safer.
+3.  **Defensive Copy**: Copying data entering/leaving a class to protect internal invariants.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: `Object.clone()`
+```java
+class User implements Cloneable {
+    public Object clone() { return super.clone(); }
+}
+```
+*   **Critique**: Doesn't copy mutable fields (like `Date` or `List`). Requires casting `(User) u.clone()`.
+
+#### Approach 2: Manual Serialization Method
+Serialize to JSON/Bytes and deserialize.
+*   **Critique**: Very slow. Doesn't work for non-serializable objects (Sockets).
+
+#### Approach 3: Copy Constructor (The Best Way)
+```java
+public User(User other) { ... }
+```
+*   **Verdict**: Best Practice in Java/C++.
+
+---
+
+### **4. Implementation I: The Immutable System Config**
+Ensuring a Configuration object is truly immutable and safe from modification.
+
+```java
+import java.util.*;
+
+// 1. MUTABLE COMPONENT (The Risk)
+class DatabaseSettings {
+    String url;
+    public DatabaseSettings(String url) { this.url = url; }
+    
+    // Copy Constructor
+    public DatabaseSettings(DatabaseSettings other) {
+        this.url = other.url;
+    }
+}
+
+// 2. THE MAIN CLASS
+class AppConfig {
+    private final String envName; // Immutable (String)
+    private final DatabaseSettings dbSettings; // Mutable!
+    private final List<String> featureFlags; // Mutable!
+
+    // PRIMARY CONSTRUCTOR
+    public AppConfig(String envName, DatabaseSettings dbSettings, List<String> featureFlags) {
+        this.envName = envName;
+        
+        // DEFENSIVE COPY IN (Don't trust the caller's reference)
+        this.dbSettings = new DatabaseSettings(dbSettings);
+        this.featureFlags = new ArrayList<>(featureFlags);
+    }
+
+    // COPY CONSTRUCTOR (For cloning)
+    public AppConfig(AppConfig other) {
+        this.envName = other.envName;
+        
+        // DEEP COPY: Create NEW instances for mutable fields
+        this.dbSettings = new DatabaseSettings(other.dbSettings);
+        this.featureFlags = new ArrayList<>(other.featureFlags);
+    }
+    
+    // DEFENSIVE COPY OUT (Don't leak internal reference)
+    public List<String> getFeatureFlags() {
+        return new ArrayList<>(featureFlags);
+    }
+    
+    public DatabaseSettings getDbSettings() {
+        // Return a copy, or the caller could mutate our DB URL!
+        return new DatabaseSettings(dbSettings);
+    }
+    
+    @Override
+    public String toString() {
+        return envName + ": " + dbSettings.url + " " + featureFlags;
+    }
+}
+
+// 3. USAGE
+public class DeepCopyDemo {
+    public static void main(String[] args) {
+        // Setup
+        DatabaseSettings initialDb = new DatabaseSettings("jdbc:mysql://localhost:3306");
+        List<String> flags = new ArrayList<>();
+        flags.add("BETA");
+        
+        AppConfig production = new AppConfig("PROD", initialDb, flags);
+        
+        // Create a Clone (Staging)
+        AppConfig staging = new AppConfig(production);
+        
+        System.out.println("Before Mutation:");
+        System.out.println("Prod: " + production);
+        System.out.println("Stage: " + staging);
+        
+        // MUTATE STAGING
+        staging.getDbSettings().url = "jdbc:h2:mem"; // Logic error: getDbSettings returns copy!
+        staging.getFeatureFlags().add("DEBUG_MODE"); // Logic error: returns copy!
+        
+        // Wait, did we actually modify the object?
+        // No, because getters return Defensive Copies.
+        // To modify Staging, we'd need setters (which we removed for immutability)
+        // or modify the internals if passing mutable refs.
+        
+        // Let's simulate distinct mutation logic properly:
+        // Since fields are private final and getters return copies, 
+        // the AppConfig is effectively Immutable.
+        
+        System.out.println("\nState Integrity Check:");
+        System.out.println("Prod is safe.");
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: `Cloneable` vs Copy Factory**
+
+**Why `Cloneable` sucks**:
+-   It breaks the constructor contract (creates objects without calling constructors).
+-   Conflict with `final` fields (cannot reassign them in clone easily).
+
+**Static Factory Option**:
+Instead of `new User(other)`, iterate on `User.copy(other)`.
+```java
+public static User newInstance(User other) {
+    return new User(other); 
+    // Benefits: Can return subclasses, can cache instances.
+}
+```
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### C++: The Rule of Three
+In C++, if you define a Destructor, you **MUST** define a Copy Constructor and Copy Assignment Operator.
+Otherwise, the default copy is bitwise (shallow), failing for pointers.
+
+#### Python: `copy` module
+```python
+import copy
+list1 = [[1], [2]]
+list2 = copy.copy(list1)     # Shallow
+list3 = copy.deepcopy(list1) # Deep (Recursive)
+```
+
+#### JavaScript: Spread Operator / Structure Clone
+```javascript
+const shallow = { ...original }; 
+const deep = structuredClone(original); // Modern Browser API
+```
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Linked List Clone**:
+    -   Deep copy a linked list `Node` structure manually.
+2.  **Date Field Trap**:
+    -   Create a class with `java.util.Date`.
+    -   Demonstrate how `getCreatedDate().setTime(0)` corrupts the object if not defensively copied.
+3.  **Inheritance**:
+    -   How to implement Copy Constructor for `Manager extends Employee`?
+    -   `public Manager(Manager m) { super(m); this.bonus = m.bonus; }`
+
+#### Edge Case Drills
+1.  **Cyclic Graphs**:
+    -   *Q*: Deep Copy a graph where A -> B -> A.
+    -   *A*: Naive recursion StackOverflows. Must use a `Map<Original, Copy>` to track visited nodes.
+2.  **Final Fields**:
+    -   *Q*: Can `clone()` handle `final` fields?
+    -   *A*: Yes, bitwise copy works. But Copy Constructor is cleaner.
+
+---
+
+### **8. Security Analysis: State Bleeding**
+
+**Vulnerability**: Time-of-Check Time-of-Use (TOCTOU).
+If you accept a mutable array in a constructor and don't copy it:
+```java
+// Vulnerable
+public Period(Date start, Date end) {
+    if (start.after(end)) throw ...;
+    this.start = start;
+    this.end = end;
+}
+```
+**Attack**:
+1.  Attacker creates `start` and `end` Dates.
+2.  Calls constructor (Validation passes).
+3.  *In another thread*, Attacker calls `start.setTime(year_3000)`.
+4.  The `Period` object is now invalid (Start > End) but exists in the system.
+
+**Fix**: Always Defensively Copy mutable inputs **before** checking validity.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Technique | Status | Use Case |
+| :--- | :--- | :--- |
+| **Assignment (`=`)** | Reference Copy | Sharing exact same object. |
+| **Clone (`.clone()`)** | Legacy/Broken | Avoid. Only for arrays. |
+| **Copy Constructor** | Recommended | Clear intent, compiler safe. |
+| **Serialization** | Slow | Deep copy graph cycles. |
+
+**Verdict**: Always perform **Defensive Copying** for mutable fields (Dates, Collections, Arrays) in constructors and getters. Use **Copy Constructors** for cloning.
+
+---
+
+### **10. References**
+1.  *Effective Java (Bloch)* - Item 13: Override clone judiciously (prefer Copy Constructor).
+2.  *Java SE Documentation* - Object.clone().
+
+---
+
+
+#### Q80: How do you refactor a Monolith using SOLID Principles?
+**Companies**: Amazon (Leadership Principles), Netflix (Microservices), Uber (Architecture)
+**Difficulty**: **Hard** (Architecture / Design)
+**Category**: Architecture, Refactoring
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The God Class**
+You have an `OrderService` class with 5,000 lines.
+It calculates tax, sends emails, talks to inventory, and logs audits.
+**Problem**:
+-   Change Tax logic? You might break Email.
+-   Deploying `OrderService` requires testing *everything*.
+-   Onboarding a junior dev takes months.
+
+**The Solution**: SOLID.
+1.  **S**RP: Split `OrderService` into `TaxCalculator`, `EmailSender`.
+2.  **O**CP: Allow adding `USATax` without changing `TaxCalculator`.
+3.  **L**SP: `Square` is NOT a `Rectangle`. Avoid bad inheritance.
+4.  **I**SP: Don't force `Admin` interface on `User`.
+5.  **D**IP: Inject `Interface`, not `Class`.
+
+**Real-World Analogies**:
+1.  **Swiss Army Knife (Bad)**: A single tool that does 50 things poorly. Hard to sharpen one blade without breaking the scissors.
+2.  **Surgical Toolkit (Good)**: Scalpel, Forceps, Clamp. Each tool does **one** thing perfectly. If you need a better scalpel, you just upgrade the scalpel.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> A set of five design principles intended to make software designs more understandable, flexible, and maintainable.
+
+**The Key Roles**:
+1.  **Single Responsibility**: A class should have one, and only one, reason to change.
+2.  **Open/Closed**: Open for extension, closed for modification.
+3.  **Liskov Substitution**: Subtypes must be substitutable for their base types.
+4.  **Interface Segregation**: Many client-specific interfaces are better than one general-purpose interface.
+5.  **Dependency Inversion**: Depend on abstractions, not concretions.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Phase 1: The Monolith (Violates Everything)
+```java
+class OrderManagement {
+    void process(Order o) {
+        if (o.type == "US") tax = o.price * 0.1; // Violation: OCP (Hardcoded types)
+        // dbop... // Violation: SRP (DB logic mixed with Biz logic)
+        emailServer.send("Success"); // Violation: DIP (Depends on concrete server)
+    }
+}
+```
+
+#### Phase 2: Extracting Classes (SRP)
+Create `TaxService`, `EmailService`, `OrderRepository`.
+`OrderManagement` now coordinates them.
+
+#### Phase 3: Abstractions (DIP + OCP)
+`OrderManagement` depends on `ITaxService`.
+We can inject `USTaxService` or `EUTaxService` dynamically.
+
+---
+
+### **4. Implementation I: The Refactoring Journey**
+Transforming a legacy Order System into Clean Architecture.
+
+```java
+import java.util.List;
+
+// --- BEFORE: The Anti-Pattern ---
+/*
+class BadOrderService {
+    public void save(Order o) {
+        // Direct SQL - SRP Violation
+        System.out.println("INSERT INTO orders...");
+        
+        // Hardcoded Email - DIP Violation
+        GmailSender.send("Order Saved");
+        
+        // Log - SRP Violation
+        FileLogger.log("Done");
+    }
+}
+*/
+
+// --- AFTER: SOLID ---
+
+// 1. DEPENDENCY INVERSION (DIP) - Abstractions
+interface OrderRepository {
+    void save(Order o);
+}
+
+interface NotificationService {
+    void sendConfirmation(Order o);
+}
+
+interface Logger {
+    void log(String msg);
+}
+
+// 2. OPEN/CLOSED PRINCIPLE (OCP) - Strategy Pattern for Tax
+interface TaxStrategy {
+    double calculate(double price);
+}
+
+class USATax implements TaxStrategy {
+    public double calculate(double price) { return price * 0.10; }
+}
+
+class UKTax implements TaxStrategy {
+    public double calculate(double price) { return price * 0.20; }
+}
+
+// 3. SINGLE RESPONSIBILITY (SRP) - Concrete Implementations
+class SqlOrderRepository implements OrderRepository {
+    public void save(Order o) { System.out.println("SQL: INSERT " + o); }
+}
+
+class EmailNotificationService implements NotificationService {
+    public void sendConfirmation(Order o) { System.out.println("EMAIL: Sent to " + o.customer); }
+}
+
+// 4. INTERFACE SEGREGATION (ISP)
+// Don't force a 'ReadOnlyUser' to implement 'delete()'
+interface OrderReader {
+    Order get(int id);
+}
+
+interface OrderWriter {
+    void save(Order o);
+    void delete(int id);
+}
+
+// 5. THE CLEAN SERVICE (Orchestrator)
+class SolidOrderService implements OrderWriter {
+    private final OrderRepository repo;
+    private final NotificationService notifier;
+    private final TaxStrategy taxStrategy;
+
+    // DIP: Constructor Injection
+    public SolidOrderService(OrderRepository repo, NotificationService notifier, TaxStrategy tax) {
+        this.repo = repo;
+        this.notifier = notifier;
+        this.taxStrategy = tax;
+    }
+
+    @Override
+    public void save(Order o) {
+        double tax = taxStrategy.calculate(o.price);
+        o.total = o.price + tax;
+        
+        repo.save(o);
+        notifier.sendConfirmation(o);
+    }
+    
+    @Override
+    public void delete(int id) {
+        // Implementation...
+    }
+}
+
+// Usage
+class Order { 
+    String customer; double price; double total; 
+    public String toString() { return customer + " $" + total; }
+}
+
+public class SolidDemo {
+    public static void main(String[] args) {
+        Order o = new Order(); o.customer = "Alice"; o.price = 100;
+        
+        // Composing the application (Dependency Injection)
+        SolidOrderService service = new SolidOrderService(
+            new SqlOrderRepository(),
+            new EmailNotificationService(),
+            new USATax() // Easily swap with UKTax()
+        );
+        
+        service.save(o);
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: The Liskov Substitution Principle (LSP)**
+
+**The Classic Violation**: `Square extends Rectangle`.
+```java
+class Rectangle { 
+    void setWidth(int w) { this.w = w; } 
+    void setHeight(int h) { this.h = h; }
+}
+
+class Square extends Rectangle {
+    // To enforce square-ness
+    @Override void setWidth(int w) { this.w = w; this.h = w; }
+    @Override void setHeight(int h) { this.h = h; this.w = h; }
+}
+```
+**The Break**:
+```java
+void resize(Rectangle r) {
+    r.setWidth(5);
+    r.setHeight(10);
+    assert r.area() == 50; // FAILS for Square! (Becomes 10x10=100)
+}
+```
+**Fix**: Square should **not** extend Rectangle. Both should extend `Shape` or be separate.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### TypeScript: Structural Typing (Duck Typing)
+Interfaces are matched by structure, not name. ISP is natural.
+```typescript
+interface Writer { write(): void; }
+class Logger { write() { console.log("hi"); } }
+const w: Writer = new Logger(); // Works!
+```
+
+#### Go: Implicit Interfaces
+Go encourages small interfaces (Writer, Reader).
+```go
+type Reader interface {
+    Read(p []byte) (n int, err error)
+}
+// Any struct implementing Read() creates a Reader. No 'implements' keyword.
+```
+
+#### Python: Protocol (PEP 544)
+Python uses `Protocol` to define structural subtyping, supporting ISP.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Refactor Switch**:
+    -   Take a class with a giant `switch(type)` statement.
+    -   Refactor it to use Polymorphism (Strategy/Factory). (OCP).
+2.  **Interface Split**:
+    -   Take a `SmartDevice` interface (`print`, `scan`, `fax`).
+    -   Split into `Printer`, `Scanner`. (ISP).
+3.  **Injector**:
+    -   Manually write a simple Dependency Injection container that maps Interfaces to Classes. (DIP).
+
+#### Edge Case Drills
+1.  **SRP vs Cohesion**:
+    -   *Q*: Does SRP mean every method gets its own class?
+    -   *A*: No. It means cohesive methods (sharing same actor/reason to change) stay together. Fragmenting too much creates "Anemic Domain Model".
+2.  **Mocking**:
+    -   *Q*: How does DIP help testing?
+    -   *A*: Because `OrderService` depends on `OrderRepository` (Interface), we can inject `MockRepository` during unit tests without a real DB.
+
+---
+
+### **8. Security Analysis: Reducing Attack Surface**
+
+**ISP for Security**:
+If you have a `UserManagement` interface with `changePassword()` and `deleteUser()`.
+-   **Risk**: If a regular user gets a handle to this interface, they might access `deleteUser()` via casting/reflection.
+-   **Fix**: Split into `UserAction` (safe) and `AdminAction` (privileged).
+-   Give the Web Controller only the `UserAction` interface.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Principle | Acronym | Key Concept | Avoids... |
+| :--- | :--- | :--- | :--- |
+| **Simple Responsibility** | SRP | "One reason to change" | God Classes. |
+| **Open/Closed** | OCP | "Extend, don't modify" | Regression bugs. |
+| **Liskov Substitution** | LSP | "Subtypes must stack up" | Unexpected behavior. |
+| **Interface Segragation** | ISP | "Small interfaces" | Fat dependencies. |
+| **Dependency Inversion** | DIP | "Inject abstractions" | Tight coupling. |
+
+**Verdict**: SOLID is the foundation of clean, testable, and maintainable Object-Oriented software.
+
+---
+
+### **10. References**
+1.  *Clean Architecture (Robert C. Martin)*.
+2.  *Agile Software Development, Principles, Patterns, and Practices*.
+
+---
+
+
+#### Q81: What is Clean Architecture effectively, and how does it prevent "Spaghetti Code"?
+**Companies**: Netflix (Hexagonal), Uber, Amazon (Service Oriented)
+**Difficulty**: **Hard** (System Design / Architecture)
+**Category**: Architecture, Design Patterns
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Framework Independence**
+You build an app using Spring Boot + MySQL.
+3 Years later, you need to switch to Quarkus + MongoDB.
+**Problem**: Your business logic (`CalculateTax`, `ApproveLoan`) is littered with `@Entity` (Hibernate) and `HttpServletRequest` (Web) annotations.
+You can't move the logic without rewriting the whole app.
+
+**The Solution**: Clean Architecture.
+Architectural Separation of Concerns.
+-   **Inner Circle (Entities)**: Pure Java/Logic. No Frameworks.
+-   **Middle Circle (Use Cases)**: Orchestration logic.
+-   **Outer Circle (Adapters)**: Controllers, Gateways, Presenters.
+-   **Outest Circle (Details)**: Database, Web Framework, UI.
+
+**The Golden Rule**: The **Dependency Rule**.
+Source Code dependencies can only point **INWARDS**.
+The Database knows about Entities. Entities DO NOT know about the Database.
+
+**Real-World Analogies**:
+1.  **USB Ports**: The Computer (Core Logic) defines the USB standard (Port). It doesn't care if you plug in a Mouse, Keyboard, or Fan (Adapters).
+2.  **Home Electric**: Your house wiring (Core) doesn't catch fire if you switch from a Toaster to a Blender. The outlet interface remains constant.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> An architectural pattern that isolates business logic from technical details (frameworks, databases, UIs) using inversion of control, ensuring the core logic is testable and independent. Requires mapping data between layers.
+
+**The Key Roles**:
+1.  **Entity**: Enterprise-wide business rules (e.g., `Loan`).
+2.  **Use Case**: Application-specific business rules (e.g., `ApplyForLoan`).
+3.  **Interface Adapter**: Converts data from Use Case to UI/DB format.
+4.  **Frameworks & Drivers**: The glue (Main).
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: N-Tier (Layered)
+`Controller -> Service -> Repository -> Database`.
+*   **Critique**: Dependencies point DOWN. The Service depends on the DB. If DB changes, Service breaks. Violates DIP.
+
+#### Approach 2: Hexagonal (Ports & Adapters)
+`Controller -> [Input Port] Core [Output Port] <- Implementation`.
+*   **Verdict**: Better. Core defines Interfaces (Ports). External worlds implement them (Adapters).
+
+#### Approach 3: Clean Architecture (The Standard)
+Refining Hexagonal into concentric circles.
+*   **Verdict**: Best for enterprise longevity.
+
+---
+
+### **4. Implementation I: The Core System**
+Building a "Create User" feature that doesn't know it's running on the Web or saving to SQL.
+
+```java
+// === LAYER 1: ENTITIES (Pure Logic) ===
+// No Frameworks. No SQL annotations. Just Java.
+class User {
+    private final String id;
+    private final String email;
+    
+    public User(String id, String email) {
+        if (email == null || !email.contains("@")) throw new IllegalArgumentException("Invalid Email");
+        this.id = id;
+        this.email = email;
+    }
+    
+    public String getEmail() { return email; }
+}
+
+// === LAYER 2: USE CASES (Application Logic) ===
+// Defines "What happens", not "How it's saved"
+
+// 2a. The Input Port (Interface)
+interface CreateUserInputPort {
+    void execute(String email, String password);
+}
+
+// 2b. The Output Port (Interface) - aka The Gateway
+interface UserRepository {
+    void save(User user);
+    boolean exists(String email);
+}
+
+// 2c. The Interactor (Implementation)
+class CreateUserInteractor implements CreateUserInputPort {
+    private final UserRepository userRepo; // DIP: Depends on Abstraction!
+
+    public CreateUserInteractor(UserRepository userRepo) {
+        this.userRepo = userRepo;
+    }
+
+    @Override
+    public void execute(String email, String password) {
+        if (userRepo.exists(email)) {
+            throw new RuntimeException("User exists");
+        }
+        User user = new User(java.util.UUID.randomUUID().toString(), email);
+        userRepo.save(user);
+    }
+}
+
+// === LAYER 3: INTERFACE ADAPTERS (The Glue) ===
+
+// 3a. Controller (Web Adapter)
+class UserController {
+    private final CreateUserInputPort startUp;
+
+    public UserController(CreateUserInputPort startUp) {
+        this.startUp = startUp;
+    }
+
+    public void handleWebRequest(String jsonBody) {
+        // Parse JSON -> String ...
+        System.out.println("Web: Received Request " + jsonBody);
+        startUp.execute(jsonBody, "password123");
+    }
+}
+
+// 3b. Repository Impl (DB Adapter)
+class SqlUserRepository implements UserRepository {
+    @Override
+    public void save(User user) {
+        System.out.println("SQL: INSERT INTO users VALUES (" + user.getEmail() + ")");
+    }
+
+    @Override
+    public boolean exists(String email) {
+        return false;
+    }
+}
+
+// === LAYER 4: FRAMEWORKS & DRIVERS (Main) ===
+// The only place where "new" is called to wire everything up.
+public class CleanArchDemo {
+    public static void main(String[] args) {
+        // 1. Create Adapters (Outer)
+        UserRepository repo = new SqlUserRepository();
+        
+        // 2. Inject into Interactors (Middle)
+        CreateUserInputPort useCase = new CreateUserInteractor(repo);
+        
+        // 3. Inject into Controllers (Outer)
+        UserController controller = new UserController(useCase);
+        
+        // 4. Run!
+        controller.handleWebRequest("alice@example.com");
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: The Dependency Rule**
+
+Notice `CreateUserInteractor` depends on `UserRepository` (Interface).
+`SqlUserRepository` implements `UserRepository`.
+Dependency points: `SqlUserRepository` -> `UserRepository` (Inwards).
+The Core Logic (`Interactor`) knows **nothing** about `SqlUserRepository`.
+
+**Testing Benefit**:
+We can test `CreateUserInteractor` with a `InMemoryUserRepository` without spinning up MySQL.
+This makes tests run in milliseconds, not seconds.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Go: Implicit Patterns
+Go structure is often:
+-   `domain/` (Entities)
+-   `usecase/` (Interactors)
+-   `delivery/` (http, grpc)
+-   `repository/` (mysql, mongo)
+Go interfaces make Clean Architecture very natural.
+
+#### Python: Dependency Injector
+Frameworks like `FastAPI` use DI heavily (`Depends()`) allowing swapping of dependencies for testing vs prod.
+
+#### Android (Kotlin): MVVM + Clean
+Presenters (ViewModels) talk to UseCases, which talk to Repositories.
+UI (`Activity`) observes ViewModel.
+Changes in UI library (XML vs Compose) don't affect Business Logic.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Swap the DB**:
+    -   Implement a `FileUserRepository` (saving to .txt).
+    -   Swap it in `CleanArchDemo`. Notice the *use cases didn't change*.
+2.  **Add a CLI**:
+    -   Create a `CliController` that reads `System.in`.
+    -   Call the *same* `CreateUserInteractor`.
+3.  **Validation**:
+    -   Where does validation go?
+    -   Syntax (Email format) -> Entity.
+    -   Business (Email unique) -> Use Case.
+
+#### Edge Case Drills
+1.  **performance**:
+    -   *Q*: Isn't all this mapping slow?
+    -   *A*: Mapping Objects (DTO <-> Entity) takes nanoseconds. Network calls take milliseconds. Clean Architecture overhead is negligible compared to IO.
+2.  **Anemic Models**:
+    -   *Q*: Are Entities just data bags?
+    -   *A*: No! They should contain behavior (`user.changePassword()`), not just getters/setters.
+
+---
+
+### **8. Security Analysis: Boundary Enforcement**
+
+**Vulnerability**: SQL Injection via Controller.
+In N-Tier, Controllers often pass raw strings directly to Repositories.
+In Clean Architecture, the **Input Port** defines strict types. The Controller *must* convert the HTTP input into the format the Use Case expects.
+If the Use Case demands a strong `EmailAddress` type, the Controller forces valid data before it reaches the core.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Layer | Responsibility | Dependencies |
+| :--- | :--- | :--- |
+| **Entities** | Enterprise Rules | None. |
+| **Use Cases** | App Specific Logic | Entities. |
+| **Interfaces** | Controllers, Presenters | Use Cases. |
+| **Frameworks** | DB, Web, UI | Interfaces. |
+
+**Verdict**: Use Clean Architecture for long-lived, complex systems where framework independence and testability are paramount. Overkill for simple CRUD apps.
+
+---
+
+### **10. References**
+1.  *Clean Architecture (Robert C. Martin)*.
+2.  *The Onion Architecture (Jeffrey Palermo)*.
+
+---
+
+
+#### Q82: How does Aspect-Oriented Programming (AOP) work under the hood (Dynamic Proxies)?
+**Companies**: Meta (Internal Frameworks), Google (Guice), Spring (Transaction Management)
+**Difficulty**: **Hard** (Meta-Programming / Bytecode)
+**Category**: JVM Internals, Design Patterns, Meta-Programming
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Cross-Cutting Concerns**
+You have 50 different Service classes (`UserService`, `OrderService`, etc.).
+You want to:
+1.  Log every method call entry/exit.
+2.  Start a DB Transaction before, Commit after, Rollback on error.
+3.  Check Security permissions.
+
+**The Problem**:
+Copy-pasting `try { transaction.begin() } catch { rollback }` into 500 methods is a nightmare.
+
+**The Solution**: Aspect-Oriented Programming (AOP).
+"Weave" this logic dynamically at runtime or compile time.
+The code you write: `void saveUser() { repo.save(); }`
+The code that runs:
+```java
+log.info("Enter saveUser");
+tx.begin();
+try {
+    saveUser(); // Your code
+    tx.commit();
+} catch (Exc e) {
+    tx.rollback();
+}
+```
+
+**Real-World Analogies**:
+1.  **Security Checkpoint**: The metal detector (Aspect) sits at the door. Every passenger (Method Call) goes through it. The passenger doesn't know how the detector works.
+2.  **Middleware**: In web servers, middleware intercepts requests to add headers. AOP is middleware for Method Calls.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> A programming paradigm that aims to increase modularity by allowing the separation of cross-cutting concerns. It does this by adding additional behavior to existing code (an advice) without modifying the code itself.
+
+**The Key Roles**:
+1.  **Aspect**: The cross-cutting logic (e.g., Logging).
+2.  **Pointcut**: Where to apply the logic (e.g., "All methods in com.service.*").
+3.  **Advice**: When to run (Before, After, Around).
+4.  **Join Point**: The actual execution event (Method Call).
+5.  **Weaving**: Connecting aspect to target.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Decorator Pattern (Manual)
+Wrap every service manually.
+```java
+new LoggingDecorator(new TransactionDecorator(new UserService()));
+```
+*   **Critique**: Too much boilerplate. Must write a Decorator for every interface.
+
+#### Approach 2: JDK Dynamic Proxy (The Core)
+Available since Java 1.3. Creates classes implementing **Interfaces** at runtime.
+*   **Limitation**: Only works if your class implements an Interface.
+
+#### Approach 3: CGLIB (Code Generation Library)
+Generates **Subclasses** via Bytecode manipulation.
+*   **Verdict**: Used by Spring/Hibernate when Interfaces aren't available.
+
+---
+
+### **4. Implementation I: The Transaction Manager (Mini-Spring)**
+Building a magic "@Transactional" annotation processor using JDK Dynamic Proxies.
+
+```java
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.HashMap;
+import java.util.Map;
+
+// 1. THE BUSINESS LOGIC (Target)
+interface BankService {
+    void transfer(String from, String to, int amount);
+}
+
+class BankServiceImpl implements BankService {
+    @Override
+    public void transfer(String from, String to, int amount) {
+        System.out.println("  [Logic] Moving $" + amount + " from " + from + " to " + to);
+        if (amount > 1000) throw new RuntimeException("Limit Exceeded!");
+    }
+}
+
+// 2. THE ASPECT (Handler)
+class TransactionHandler implements InvocationHandler {
+    private final Object target;
+
+    public TransactionHandler(Object target) {
+        this.target = target;
+    }
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        System.out.println(">>> [TX] BEGIN Transaction");
+        
+        try {
+            // Run the actual business logic
+            Object result = method.invoke(target, args);
+            
+            System.out.println("<<< [TX] COMMIT Transaction");
+            return result;
+        } catch (Exception e) {
+            System.out.println("!!! [TX] ROLLBACK Transaction (Reason: " + e.getCause().getMessage() + ")");
+            throw e.getCause(); // Rethrow the actual business exception
+        }
+    }
+}
+
+// 3. THE FRAMEWORK FACTORY
+class BeanFactory {
+    public static <T> T createProxy(Object target, Class<T> interfaceType) {
+        return (T) Proxy.newProxyInstance(
+            interfaceType.getClassLoader(),
+            new Class<?>[] { interfaceType },
+            new TransactionHandler(target)
+        );
+    }
+}
+
+// 4. USAGE
+public class AopDemo {
+    public static void main(String[] args) {
+        // Raw Service (Unsafe)
+        BankService raw = new BankServiceImpl();
+        // raw.transfer("A", "B", 500); // No TX logs
+        
+        // Proxied Service (Safe)
+        BankService proxied = BeanFactory.createProxy(raw, BankService.class);
+        
+        // Notice: 'proxied' is generated at runtime!
+        System.out.println("Proxy Class: " + proxied.getClass().getName()); // com.sun.proxy.$Proxy0
+        
+        System.out.println("\n-- Scenario 1: Success --");
+        proxied.transfer("Alice", "Bob", 500);
+        
+        System.out.println("\n-- Scenario 2: Failure --");
+        try {
+            proxied.transfer("Alice", "Bob", 5000);
+        } catch (Exception e) {
+            // Ignored for demo
+        }
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: JDK Proxy vs CGLIB**
+
+**JDK Dynamic Proxy**:
+-   **Mechanism**: Uses `Reflection` to create a class that implements the target's **Interfaces**.
+-   **Pros**: Native to Java, stable.
+-   **Cons**: Cannot proxy classes without interfaces.
+-   **Code**: `public class $Proxy0 implements BankService { ... }`
+
+**CGLIB (Bytecode Weaving)**:
+-   **Mechanism**: Uses `ASM` to generate a **Subclass** of the target.
+-   **Pros**: Functions on concrete classes.
+-   **Cons**: Cannot proxy `final` classes or `final` methods.
+-   **Code**: `public class BankServiceImpl$$EnhancerBySpring extends BankServiceImpl { ... }`
+
+**Spring Boot 2.0+**: Uses CGLIB by default (class-based proxying) unless configured otherwise.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Python: Decorators
+Python has native AOP support via `@decorators`.
+```python
+def transaction(func):
+    def wrapper(*args):
+        print("Begin TX")
+        func(*args)
+        print("Commit TX")
+    return wrapper
+
+@transaction
+def save_user(): ...
+```
+
+#### JavaScript: Proxy API
+ES6 `Proxy` object.
+```javascript
+const handler = {
+    apply: function(target, thisArg, args) {
+        console.log("Start");
+        target.apply(thisArg, args);
+        console.log("End");
+    }
+};
+const proxy = new Proxy(func, handler);
+```
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Timing Aspect**:
+    -   Write a Proxy that measures execution time (`System.nanoTime()`) and logs if > 10ms.
+2.  **Lazy Loading**:
+    -   Create a Proxy for a heavy object (Image). Only load the real image when `display()` is called.
+3.  **Access Control**:
+    -   Throw `SecurityException` if the current user (Context) is not "ADMIN".
+
+#### Edge Case Drills
+1.  **Self-Invocation**:
+    -   *Q*: Method A calls Method B. Both are Transactional. If I call A, does B starts a new TX?
+    -   *A*: **NO**. The Proxy intercepts the call to A, but inside A, `this.B()` calls the *raw* object, bypassing the proxy. This is a famous Spring pitfall.
+2.  **Exceptions**:
+    -   *Q*: How does Reflection wrap exceptions?
+    -   *A*: `InvocationTargetException`. You must unwrap it (`e.getCause()`) to get the real error.
+
+---
+
+### **8. Security Analysis: The Double-Edged Sword**
+
+**Pros**:
+-   **Centralized Security**: Implement `checkPermission()` in ONE place (the Aspect). Less chance of a developer forgetting it in a new endpoint.
+
+**Cons**:
+-   **Complexity Hiding**: AOP obscures control flow. A developer reading `saveUser()` doesn't see the security check.
+-   **Bypass**: If an attacker can get a reference to the **Raw Target** (bypassing the Proxy), security is gone.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Term | Meaning |
+| :--- | :--- |
+| **Aspect** | The Module (Security, Logging). |
+| **Advice** | The Action (Before, After). |
+| **Pointcut** | The Selector (Which methods?). |
+| **Proxy** | The Wrapper object intercepting calls. |
+| **Weaving** | Linking aspect to target (Compile/Runtime). |
+
+**Verdict**: Essential for Enterprise Frameworks (Spring/Guice). Use for infrastructure logic (TX, Security), NOT for business logic.
+
+---
+
+### **10. References**
+1.  *Spring Framework Documentation* - AOP Concepts.
+2.  *Java Reflection in Action*.
+
+---
+
+
+#### Q83: How does the Reflection API work, and why is `setAccessible(true)` considered hazardous?
+**Companies**: Amazon (Internal Frameworks), Google (Gson/Guice), Oracle (Platform Security)
+**Difficulty**: **Hard** (JVM Internals / Security)
+**Category**: JVM Internals, Meta-Programming
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Analyzing Code at Runtime**
+You are building a Dependency Injection framework like Spring.
+The user creates a class `UserService`. You didn't write it. You don't know it exists.
+How do you instantiate it? How do you call its methods?
+
+**The Problem**: Static Typing.
+Code usually hardcodes types: `UserService u = new UserService()`.
+But a Framework needs to handle *Any* class.
+
+**The Solution**: Java Reflection (`java.lang.reflect`).
+It allows a program to inspect and modify its own structure (classes, methods, fields) at runtime.
+It allows instantiating objects given only their String class name.
+
+**Real-World Analogies**:
+1.  **Medical Imaging (MRI)**: A doctor (JVM) can look inside a patient (Object) to see organs (Private Fields) without cutting them open (Access Modifiers).
+2.  **Universal Remote**: Can control any TV (Object) by scanning for signals (Methods), even if it wasn't pre-programmed for that specific model.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> A feature that allows an executing Java program to examine or "introspect" upon itself, and manipulate internal properties of the program. For example, it's possible for a Java class to obtain the names of all its members and display them.
+
+**The Key Roles**:
+1.  **Class<?>**: The entry point. Represents a `.class` file.
+2.  **Field**: Represents a member variable.
+3.  **Method**: Represents a function.
+4.  **Constructor**: Represents an initializer.
+5.  **setAccessible(true)**: The "God Mode" switch to bypass `private`.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Hardcoding (Static)
+```java
+if (name.equals("User")) return new User();
+```
+*   **Critique**: Impossible for a library. You can't list every class in the world.
+
+#### Approach 2: `Class.forName()`
+```java
+Class<?> c = Class.forName("com.app.User");
+Object o = c.newInstance();
+```
+*   **Limitation**: `newInstance()` assumes a no-args constructor. Deprecated in Java 9.
+
+#### Approach 3: Full Reflection (Constructor + Accessibility)
+```java
+Constructor<?> ctor = clazz.getDeclaredConstructor(String.class);
+ctor.setAccessible(true); // Bypass checks
+return ctor.newInstance("Alice");
+```
+*   **Verdict**: The standard way Frameworks work.
+
+---
+
+### **4. Implementation I: "Mini-Spring" (DI Engine)**
+Writing a Dependency Injection container that injects `@Autowired` fields automatically.
+
+```java
+import java.lang.annotation.*;
+import java.lang.reflect.*;
+import java.util.*;
+
+// 1. ANNOTATIONS
+@Retention(RetentionPolicy.RUNTIME)
+@interface Component {}
+
+@Retention(RetentionPolicy.RUNTIME)
+@interface Autowired {}
+
+// 2. THE FRAMEWORK (Mini-Spring)
+class ApplicationContext {
+    private final Map<Class<?>, Object> beanCache = new HashMap<>();
+
+    public ApplicationContext(Class<?>... classes) throws Exception {
+        // Phase 1: Instantiate all @Components
+        for (Class<?> cls : classes) {
+            if (cls.isAnnotationPresent(Component.class)) {
+                Object instance = cls.getDeclaredConstructor().newInstance();
+                beanCache.put(cls, instance);
+            }
+        }
+        
+        // Phase 2: Inject Dependencies (@Autowired)
+        for (Object bean : beanCache.values()) {
+            injectDependencies(bean);
+        }
+    }
+
+    private void injectDependencies(Object bean) throws Exception {
+        Class<?> clazz = bean.getClass();
+        
+        // Scanning private fields
+        for (Field field : clazz.getDeclaredFields()) {
+            if (field.isAnnotationPresent(Autowired.class)) {
+                // Determine what to inject
+                Class<?> dependencyType = field.getType();
+                Object dependency = beanCache.get(dependencyType);
+                
+                if (dependency == null) throw new RuntimeException("No bean found for " + dependencyType);
+                
+                // GOD MODE: Bypass private
+                field.setAccessible(true);
+                field.set(bean, dependency); // bean.field = dependency
+            }
+        }
+    }
+
+    public <T> T getBean(Class<T> type) {
+        return type.cast(beanCache.get(type));
+    }
+}
+
+// 3. USER CODE (Does not know about Framework internals)
+@Component
+class UserRepository {
+    public void save() { System.out.println("User saved to DB."); }
+}
+
+@Component
+class UserService {
+    @Autowired
+    private UserRepository repo; // Private!
+
+    public void process() {
+        System.out.println("Processing User...");
+        repo.save();
+    }
+}
+
+// 4. USAGE
+public class ReflectionDemo {
+    public static void main(String[] args) throws Exception {
+        // Boot our Container
+        ApplicationContext context = new ApplicationContext(UserService.class, UserRepository.class);
+        
+        // Get the Bean
+        UserService service = context.getBean(UserService.class);
+        
+        // Run Logic
+        service.process(); 
+        // Output:
+        // Processing User...
+        // User saved to DB.
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Performance & Overhead**
+
+**Why is Reflection Slow?**
+1.  **Type Checking**: JVM must check argument types at runtime (not compile time).
+2.  **Boxing/Unboxing**: `method.invoke(obj, args)` uses `Object[]`. Primitives (`int`) must be boxed to `Integer`.
+3.  **JIT Optimization**: The JIT compiler (HotSpot) cannot extract/inline reflective calls easily because the target is unknown until runtime.
+
+**Benchmark**:
+-   Direct Method Call: ~0.3 nanoseconds (Inlined).
+-   Reflection Call: ~3.0 nanoseconds (10x slower).
+-   *Note*: In I/O bound apps (Web Servers), 3ns is negligible compared to a 50ms DB query. Reflection is fast enough for wiring, just don't use it in a tight loop.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### JavaScript: `Eval` / `Reflect`
+```javascript
+const obj = { x: 1 };
+Reflect.set(obj, 'x', 2);
+```
+JS is dynamic by default, so "Reflection" is less special.
+
+#### Go: `reflect` package
+Go is statically typed but has robust reflection.
+```go
+t := reflect.TypeOf(instance)
+v := reflect.ValueOf(instance)
+```
+Go's reflection is notoriously verbose and strictly typed (panic on mismatches).
+
+#### C++: No Native Reflection
+C++ (before C++23) has no built-in reflection. Frameworks (Qt, Unreal Engine) use Macros (`UCLASS()`) to build side-car metadata tables to simulate it.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Private Access**:
+    -   Access a `private String secret` from a class instance and print it.
+2.  **Method Runner**:
+    -   Write a method `runAllTests(Object o)` that finds all methods annotated with `@Test` and executes them.
+3.  **JSON Serializer**:
+    -   Write `toJson(Object o)` that iterates all fields and returns `{"field": "value"}` string.
+
+#### Edge Case Drills
+1.  **Exceptions**:
+    -   *Q*: What if `Field.set()` fails because of type mismatch?
+    -   *A*: `IllegalArgumentException`.
+2.  **Inheritance**:
+    -   *Q*: Does `getDeclaredFields()` return parent fields?
+    -   *A*: No! Only fields declared in *that specific class*. You must walk up `clazz.getSuperclass()` to find parent fields.
+
+---
+
+### **8. Security Analysis: Breaking Encapsulation**
+
+**Vulnerability**: Bypassing Security Managers.
+If your code runs in a Sandbox (Applets, some Enterprise containers), `setAccessible(true)` throws `SecurityException`.
+**Attacks**:
+-   **Immutable Break**: You can modify `private final String` (effectively immutable) using reflection, causing hashing issues or security bypasses (changing a cached username).
+-   **Java 17+ Strict Encapsulation**: Project Jigsaw (Modules) now prevents reflection deep into JDK internals (`java.base`) unless `--add-opens` is used.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Method | Purpose |
+| :--- | :--- |
+| **`getClass()`** | Get metadata reference. |
+| **`getDeclaredMethods()`** | Get all methods (including private). |
+| **`getMethods()`** | Get only public methods (including inherited). |
+| **`setAccessible(true)`** | Disable Access Checks (God Mode). |
+| **`Method.invoke()`** | Run the code. |
+
+**Verdict**: The powerhouse of Frameworks. Use it to build libraries, tools, and plugins. Avoid it in business logic due to losing compile-time safety.
+
+---
+
+### **10. References**
+1.  *Java Reflection Guide (Oracle)*.
+2.  *Project Jigsaw (Module System)* - Impact on Reflection.
+
+---
+
+
+#### Q84: How does the Java Memory Model (JMM) work, and why is `volatile` not enough for atomicity?
+**Companies**: LMAX Exchange (Disruptor), Citadel (HFT), Amazon (DynamoDB)
+**Difficulty**: **Hard** (Concurrency / Hardware Architecture)
+**Category**: Concurrency, JVM Internals
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The Speed of Light Problem**
+CPU Cores are fast (3.0 GHz). Main Memory (RAM) is slow (Latency ~100ns).
+To be fast, CPUs cache data in L1/L2 caches locally.
+**Problem**: Core A writes `x = 1`. Core B reads `x`.
+If Core A wrote to its *local cache* but hasn't flushed to RAM, Core B sees the old value.
+
+**The Chaos**:
+1.  **Visibility**: Core B doesn't see Core A's writes.
+2.  **Reordering**: The CPU/Compiler might swap `x = 1; y = 2;` to `y = 2; x = 1;` for optimization.
+
+**The Solution**: Java Memory Model (JMM).
+A specification (JSR-133) defining when writes by one thread become visible to another.
+It establishes specific rules (Happens-Before) to tame the hardware chaos.
+
+**Real-World Analogies**:
+1.  **Office Memo**: You write a memo (Variable) and leave it on your desk (L1 Cache). Your colleague checks the bulletin board (RAM) and sees nothing. You must *publish* it to the board for them to see.
+2.  **Texting Lag**: You say "I'm leaving" then "I'm here". Due to network (Reordering), they might arrive as "I'm here" then "I'm leaving".
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> The JMM defines the "Happens-Before" relationship. If Action A happens-before Action B, then the result of A is guaranteed to be visible to B, and A is ordered before B.
+
+**The Key Primitives**:
+1.  **volatile**: Guarantees visibility (flush to RAM) and prevents reordering (Memory Barriers).
+2.  **synchronized**: Mutual exclusion + Visibility.
+3.  **final**: Initialization safety (object is fully constructed before visible).
+4.  **Atomic**: CAS (Compare-And-Swap) operations.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Plain Variables
+```java
+boolean running = true;
+// Thread 1: loops while(running)
+// Thread 2: running = false;
+```
+*   **Outcome**: Thread 1 might loop forever because it cached `running=true` in a register.
+
+#### Approach 2: `volatile`
+```java
+volatile boolean running = true;
+```
+*   **Verdict**: Fixes Visibility. Thread 1 sees the write immediately.
+*   **Limitation**: Does NOT fix atomicity (`i++` is still broken).
+
+#### Approach 3: synchronization / Locks
+```java
+synchronized(lock) { i++; }
+```
+*   **Verdict**: Correct but slow (Context Switch).
+
+#### Approach 4: CAS / Atomics (The HFT Way)
+`AtomicInteger.incrementAndGet()`.
+*   **Verdict**: Lock-free, hardware accelerated.
+
+---
+
+### **4. Implementation I: High-Performance Ring Buffer (Disruptor Style)**
+Building a lock-free Single-Producer/Single-Consumer queue using JMM primitives.
+
+```java
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * A Lock-Free Ring Buffer optimized for CPU Caches.
+ * Inspired by LMAX Disruptor.
+ */
+class RingBuffer<T> {
+    private final T[] buffer;
+    private final int mask;
+    
+    // PADDING: Prevent "False Sharing" (Cache Line Thrashing)
+    // CPU Cache lines are usually 64 bytes.
+    // If 'head' and 'tail' are close, cores fight over the cache line.
+    long p1, p2, p3, p4, p5, p6, p7; 
+    
+    private final AtomicLong head = new AtomicLong(0); // Consumer Index
+    
+    long p8, p9, p10, p11, p12, p13, p14;
+    
+    private final AtomicLong tail = new AtomicLong(0); // Producer Index
+    
+    long p15, p16, p17, p18, p19, p20, p21;
+
+    @SuppressWarnings("unchecked")
+    public RingBuffer(int capacity) {
+        if (Integer.bitCount(capacity) != 1) throw new IllegalArgumentException("Capacity must be power of 2");
+        this.buffer = (T[]) new Object[capacity];
+        this.mask = capacity - 1;
+    }
+
+    public boolean offer(T value) {
+        long currentTail = tail.get();
+        long currentHead = head.get(); // Volatile Read
+        
+        if (currentTail - currentHead >= buffer.length) {
+            return false; // Full
+        }
+        
+        // WRITE: No volatile write yet. Just normal array.
+        buffer[(int)(currentTail & mask)] = value;
+        
+        // PUBLISH: Volatile Write (LazySet is cheaper but for demo we use set)
+        tail.set(currentTail + 1); 
+        // Effect: The write to 'buffer' CANNOT reorder below this line.
+        // The consumer seeing the new 'tail' MUST see the new 'buffer' content.
+        return true;
+    }
+
+    public T poll() {
+        long currentHead = head.get();
+        long currentTail = tail.get(); // Volatile Read
+        
+        if (currentHead >= currentTail) {
+            return null; // Empty
+        }
+        
+        // READ
+        T value = buffer[(int)(currentHead & mask)];
+        buffer[(int)(currentHead & mask)] = null; // GC Help
+        
+        // COMMIT
+        head.set(currentHead + 1);
+        return value;
+    }
+}
+
+// USAGE
+public class JmmDemo {
+    public static void main(String[] args) throws InterruptedException {
+        RingBuffer<Integer> queue = new RingBuffer<>(1024);
+        
+        Thread producer = new Thread(() -> {
+            for (int i=0; i<1000000; i++) {
+                while (!queue.offer(i)); // Spin wait
+            }
+        });
+        
+        Thread consumer = new Thread(() -> {
+            int received = 0;
+            while (received < 1000000) {
+                Integer val = queue.poll();
+                if (val != null) received++;
+            }
+            System.out.println("Done! Received: " + received);
+        });
+        
+        long start = System.nanoTime();
+        producer.start();
+        consumer.start();
+        
+        producer.join();
+        consumer.join();
+        long end = System.nanoTime();
+        System.out.println("Time: " + (end - start)/1_000_000 + "ms");
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Memory Barriers & Reordering**
+
+**Instruction Reordering**:
+```java
+x = 1;
+y = 1;
+```
+The CPU can run `y = 1` first. It doesn't affect single-threaded logic.
+
+**Memory Barrier (Fence)**:
+A CPU instruction that says "Don't reorder across this line".
+-   **StoreStore**: Ensure previous writes are flushed before next writes.
+-   **LoadLoad**: Ensure previous reads are done before next reads.
+
+**Relation to `volatile`**:
+Writing to a `volatile` variable inserts a **StoreStore** barrier before and a **StoreLoad** barrier after.
+This is why `volatile` is "expensive" (prevents optimizations) but safe.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### C++: `std::atomic`
+C++11 introduced a memory model similar to Java's.
+`std::memory_order_relaxed`, `acquire`, `release`.
+Java is always `acquire/release` (Sequential Consistency) for volatile, which is safer but slightly slower than "relaxed".
+
+#### Go: Channels
+Go abstracts JMM with Channels.
+"Don't communicate by sharing memory; share memory by communicating."
+Internally, Channels use Locks/Atomics.
+
+#### Rust: Ownership
+Rust prevents data races at **Compile Time**.
+If mutable reference `&mut T` exists, no other references can exist. The compiler acts as the memory barrier!
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Double-Checked Locking**:
+    -   Implement Singleton. Explain why `volatile` is mandatory for the instance variable (Partially constructed object risk).
+2.  **False Sharing**:
+    -   Create an array of `AtomicLong`. Have 4 threads increment index 0, 1, 2, 3.
+    -   Add 64 bytes of padding between them. Measure 5x speedup.
+3.  **Visualizing Reordering**:
+    -   Write a loop that sets `x=1, y=1` and checks `x=0, y=1` (Impossible in sequential logic). Prove it happens.
+
+#### Edge Case Drills
+1.  **64-bit non-atomicity**:
+    -   *Q*: Is `long x = -1` atomic?
+    -   *A*: In 32-bit JVMs, NO. It's two 32-bit writes. You might see the high 32 bits of new value and low 32 bits of old value. `volatile long` fixes this.
+2.  **final semantics**:
+    -   *Q*: Why use `final` fields for thread safety?
+    -   *A*: JMM guarantees a `final` field is visible to other threads immediately after constructor finishes, without synchronization.
+
+---
+
+### **8. Security Analysis: Race Conditions**
+
+**Vulnerability**: TOCTOU (Time of Check, Time of Use).
+```java
+if (user.isAdmin()) { // Check
+    // -- Other thread removes Admin rights here --
+    user.deleteDatabase(); // Use
+}
+```
+**Fix**:
+Snapshot the state or hold a Lock for the duration of the transaction.
+Just making `isAdmin` volatile doesn't fix the race between the `if` and the `action`.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Concept | Guarantee | Cost |
+| :--- | :--- | :--- |
+| **Normal Field** | No Atomicity, No Visibility. | Free. |
+| **`volatile`** | Visibility, Ordering. Atomicity for storage (not ops). | Moderate. |
+| **`AtomicInteger`** | V+O+A (for single ops). | Moderate. |
+| **`synchronized`** | V+O+A (Block scope). | High (if contended). |
+
+**Verdict**: The hardest part of Java. Prefer `java.util.concurrent` (ConcurrentHashMap, BlockingQueue) over using `volatile` directly unless building low-latency middleware.
+
+---
+
+### **10. References**
+1.  *Java Concurrency in Practice (Goetz)* (The Bible).
+2.  *The JSR-133 Cookbook for Compiler Writers*.
+
+---
+
+
+#### Q85: How does Garbage Collection (GC) work in Java, and why might "Object Pooling" be a bad idea?
+**Companies**: Netflix (Streaming Servers), Twitter (Finagle), LinkedIn (Kafka)
+**Difficulty**: **Hard** (JVM Internals / Performance)
+**Category**: Performance, JVM Internals
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Automatic Memory Management**
+In C++, you `malloc()` memory and must `free()` it. If you forget, you get Memory Leaks. If you free too early, you get Segfaults.
+Java automates this: "If an object is not reachable, reclaim its memory."
+
+**The Problem**: Stop-The-World (STW).
+To clean the house, the GC usually pauses the application.
+If your server pauses for 2 seconds to clean RAM, your API latency spikes to 2000ms.
+
+**The Solution**: Generational Hypothesis.
+Empirical observation: **"Most objects die young."**
+Therefore, split the heap into:
+1.  **Young Gen**: Where new objects go. GC is fast and frequent ("Minor GC").
+2.  **Old Gen**: Where survivors go. GC is slow and rare ("Major GC").
+
+**Real-World Analogies**:
+1.  **Restaurant Clearing**: Busboys clear tables (Young Gen) every 10 minutes. Deep cleaning the kitchen (Old Gen) happens once a night.
+2.  **Nursery**: Babies (New Objects) need constant attention. Adults (Old Objects) can take care of themselves for a while.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Garbage Collection is the process of identifying and discarding objects that are no longer needed by a program so that their resources can be reclaimed and reused.
+
+**The Key Roles**:
+1.  **Roots**: Global references (Static vars, Stack frames, Active threads).
+2.  **Reachability**: Traversing the graph from Roots. If you can't reach it, it's trash.
+3.  **Mark & Sweep**: Trace (Mark) live objects, then delete (Sweep) the rest.
+4.  **Compaction**: Moving objects together to defrag memory (prevents "Swiss Cheese" memory).
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Reference Counting (Python/Swift)
+Each object counts pointers to it. If 0, delete.
+*   **Problem**: Cyclic References (A->B, B->A). Neither hits 0.
+
+#### Approach 2: Serial GC (Simple)
+Pause *everything*. Single thread cleans.
+*   **Verdict**: Good for CLI tools/client apps. Bad for servers.
+
+#### Approach 3: Parallel GC (Throughput)
+Pause everything. Multiple threads clean.
+*   **Verdict**: High throughput, but long pauses. Good for Batch Jobs.
+
+#### Approach 4: G1GC / ZGC (Latency)
+Slice heap into regions. Clean concurrently while app runs.
+*   **Verdict**: The standard for Web Servers.
+
+---
+
+### **4. Implementation I: The GC Stress Test**
+Simulating "Memory Pressure" and inspecting GC logs.
+
+```java
+import java.util.*;
+import java.lang.ref.*;
+
+// 1. THE LOAD
+class HeavyObject {
+    // 1MB Byte Array
+    private byte[] data = new byte[1024 * 1024]; 
+    private final int id;
+
+    public HeavyObject(int id) { this.id = id; }
+    
+    @Override
+    protected void finalize() {
+        // WARNING: Deprecated mechanism! But useful to see when GC hits.
+        System.out.println("  [GC] Resurrected or Killed ID: " + id);
+    }
+}
+
+// 2. THE SIMULATION
+public class GcDemo {
+    // Static list keeps objects alive (Memory Leak Simulator)
+    private static final List<HeavyObject> LEAKY_BUCKET = new ArrayList<>();
+    
+    public static void main(String[] args) throws InterruptedException {
+        System.out.println("Starting Allocation Loop...");
+        
+        for (int i = 0; i < 10000; i++) {
+            // Allocate 1MB
+            HeavyObject obj = new HeavyObject(i);
+            
+            if (i % 100 == 0) {
+                // Keep references to 1% of objects (Simulate Old Gen promotion)
+                LEAKY_BUCKET.add(obj);
+                System.out.println("Allocated " + i + "MB");
+                Thread.sleep(10); // Allow GC to catch up
+            }
+            
+            // 99% of objects are discarded immediately (Young Gen dies)
+        }
+    }
+}
+```
+
+**Running with JVM Flags**:
+`java -Xmx512m -XX:+UseG1GC -XX:+PrintGCDetails GcDemo`
+
+**Interpretation**:
+-   **Minor GC**: You will see many "Pause Young" logs. `HeavyObject` instances (99%) are reclaimed here.
+-   **Full GC**: Eventually `LEAKY_BUCKET` fills 512MB. The JVM panics ("Pause Full"). Then throws `OutOfMemoryError`.
+
+---
+
+### **5. Deep Dive: To Pool or Not To Pool?**
+
+**Object Pooling**:
+Keeping a `List<MyObject>` and reusing them to avoid `new`.
+Standard in C++ / Game Dev.
+
+**In Java**:
+**DON'T DO IT** (usually).
+1.  **Allocation is cheap**: `new Object()` is just a pointer bump (10 instructions).
+2.  **GC is optimized for short lives**: Pooling keeps objects alive, promoting them to **Old Gen**.
+3.  **Old Gen GC is slow**: You are moving work from the fast "Nursery" to the slow "Retirement Home".
+
+**Exceptions**:
+-   **Database Connections / Threads**: Initialization is expensive (Network handshake). Pool these.
+-   **Massive Arrays (buffers)**: Large writes (> 10MB) bypass Young Gen (Humongous Allocations). Pool these.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Go: Tripod GC
+Go optimizing for *extremely* low latency (< 1ms).
+Uses a Write Barrier and Concurrent Mark/Sweep. Allows pointers into interior of structs (not just objects).
+
+#### Rust: No GC
+Rust calculates lifetime at compile time.
+`drop(x)` is inserted deterministically.
+No random pauses. Predictable performance.
+
+#### Python: RefCount + Cyclic GC
+Python uses Reference Counting primarily.
+A background Cyclic GC runs occasionally to break A<->B loops.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **WeakReference**:
+    -   Create a Cache using `WeakHashMap`. Demonstrate that entries disappear when memory is tight.
+2.  **Shutdown Hook**:
+    -   Use `Runtime.getRuntime().addShutdownHook()` to clean up resources (like temp files) even if user hits `Ctrl+C`.
+3.  **Heap Dump**:
+    -   Run `jmap -dump:live,format=b,file=heap.bin <pid>`. Open in Eclipse HAT or VisualVM.
+
+#### Edge Case Drills
+1.  **System.gc()**:
+    -   *Q*: Does calling this force a GC?
+    -   *A*: No. It's a suggestion. The JVM can ignore it. (`-XX:+DisableExplicitGC`).
+2.  **Metaspace**:
+    -   *Q*: Check `java.lang.OutOfMemoryError: Metaspace`.
+    -   *A*: Too many classes loaded (Reflection/Proxies), not too many objects.
+
+---
+
+### **8. Security Analysis: DoS Attacks**
+
+**Vulnerability**: **Billion Laughs Attack** (XML) or **Zip Bomb**.
+Attacks that allocate massive memory to crash the GC.
+
+**GC Overhead Limit Exceeded**:
+The JVM throws this OOM if it spends >98% time in GC and recovers <2% memory.
+This is a self-protection mechanism against liveness freezes.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Collector | Algorithm | Use Case |
+| :--- | :--- | :--- |
+| **Serial** | Stop-The-World | CLI, Small Apps. |
+| **Parallel** | STW (Multi-threaded) | Batch Processing, Heavy Compute. |
+| **G1GC** | Region-Based (Concurrent) | Default Server (heap < 32GB). |
+| **ZGC** | Colored Pointers (Conc) | Massive Heaps (TB), <1ms pause. |
+
+**Verdict**: Trust the proprietary heuristics of modern GCs. Don't manual `System.gc()`. Don't pool small objects.
+
+---
+
+### **10. References**
+1.  *Java Performance: The Definitive Guide (O'Reilly)*.
+2.  *The Garbage Collection Handbook*.
+
+---
+
+
+#### Q86: How do ClassLoaders work, and how can you build a "Hot-Swap" Plugin System?
+**Companies**: Atlassian (Jira Plugins), IntelliJ (IDE Plugins), Minecraft (Mods)
+**Difficulty**: **Hard** (JVM Internals / Dynamic Loading)
+**Category**: JVM Internals, Modular Systems
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Dynamic Extensibility**
+You are building an IDE (like IntelliJ).
+You want users to add support for "Rust" without recompiling the IDE.
+You want to install the "Rust Plugin" while the IDE is running.
+
+**The Problem**: The Static Classpath.
+Standard Java loads everything on `java -jar app.jar`.
+You can't add classes later. YOU can't unload classes.
+
+**The Solution**: Custom ClassLoaders.
+1.  **Isolation**: Plugin A uses `guava-19`. Plugin B uses `guava-28`. A ClassLoader per plugin keeps them separate (No "Jar Hell").
+2.  **Hot Swapping**: Throw away the old ClassLoader. Create a new one. Reload the plugin.
+
+**Real-World Analogies**:
+1.  **Browser Tabs**: Each tab (Plugin) runs in its own process/sandbox (ClassLoader). If one crashes (Throws Exception), the browser (JVM) stays alive.
+2.  **USB Drivers**: You plug in a mouse (Load Plugin). Use it. Unplug it (Unload). The OS doesn't reboot.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> A ClassLoader is an object that is responsible for loading classes. The class `ClassLoader` is an abstract class. Given the binary name of a class, a class loader should attempt to locate or generate data that constitutes a definition for the class.
+
+**The Delegation Model**:
+1.  **Bootstrap CL**: Loads `java.base` (String, Object) from native code.
+2.  **Platform CL**: Loads `java.sql`, `java.logging`.
+3.  **App CL**: Loads your `-cp` classpath.
+4.  **Custom CL**: Loads your plugins.
+
+**The Rule**:
+Parent **cannot** see Child classes. Child **can** see Parent classes.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Everything on Classpath
+Just dump all jars into `lib/`.
+*   **Result**: `NoSuchMethodError` when Plugin A needs Guava 19 and B needs 28. (Dependency Conflict).
+
+#### Approach 2: URLClassLoader
+`new URLClassLoader(new URL[] { jarPath })`.
+*   **Verdict**: Good for loading, but leaks memory if not closed properly.
+
+#### Approach 3: OSGi (Eclipse)
+Complex standard for modularity.
+*   **Verdict**: Powerful but massive learning curve (Metadata hell).
+
+#### Approach 4: Isolated Custom Loaders (The Modern Way)
+Spring Boot, Tomcat, and Gradle use this. Lightweight isolation.
+
+---
+
+### **4. Implementation I: The Hot-Swap Plugin Engine**
+Building a system that loads `.jar` files from a `plugins/` folder and executes them dynamically.
+
+```java
+import java.io.File;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.util.HashMap;
+import java.util.Map;
+
+// 1. THE CONTRACT (Shared Interface)
+// Must be loaded by the Parent ClassLoader (AppCL)
+interface Plugin {
+    void execute();
+}
+
+// 2. THE ENGINE
+class PluginEngine {
+    private final Map<String, URLClassLoader> loadedPlugins = new HashMap<>();
+
+    public void loadPlugin(String name, String jarPath) throws Exception {
+        File jarFile = new File(jarPath);
+        if (!jarFile.exists()) throw new RuntimeException("Plugin not found");
+
+        // KEY: We create a NEW ClassLoader for EACH plugin
+        // Parent = PluginEngine.class.getClassLoader() (The AppCL)
+        URLClassLoader loader = new URLClassLoader(
+            new URL[] { jarFile.toURI().toURL() },
+            this.getClass().getClassLoader()
+        );
+
+        // Assumption: The jar contains a class 'Main' implementing Plugin
+        Class<?> loadedClass = loader.loadClass("Main");
+        Plugin plugin = (Plugin) loadedClass.getDeclaredConstructor().newInstance();
+
+        loadedPlugins.put(name, loader);
+        
+        System.out.println("--- Loaded Plugin: " + name + " ---");
+        plugin.execute();
+    }
+
+    public void unloadPlugin(String name) throws Exception {
+        URLClassLoader loader = loadedPlugins.remove(name);
+        if (loader != null) {
+            loader.close(); // Release file handles
+            System.out.println("--- Unloaded Plugin: " + name + " ---");
+            // GC will eventually reclaim the classes IF no references remain
+            loader = null;
+            System.gc(); 
+        }
+    }
+}
+
+// 3. USAGE DEMO
+// Assume we have 'plugin-v1.jar' and 'plugin-v2.jar'
+public class ClassLoaderDemo {
+    public static void main(String[] args) throws Exception {
+        PluginEngine engine = new PluginEngine();
+        
+        // Load V1
+        engine.loadPlugin("WeatherPlugin", "/tmp/weather-v1.jar");
+        
+        // Hot Swap!
+        engine.unloadPlugin("WeatherPlugin");
+        engine.loadPlugin("WeatherPlugin", "/tmp/weather-v2.jar");
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Bytecode Manipulation (ASM)**
+
+Sometimes you don't just want to load files. You want to **generate** classes from thin air.
+
+**ASM / Javassist**: Libraries to write Bytecode directly.
+Used by:
+-   **Hibernate**: To generate Lazy Loading Proxies.
+-   **Mockito**: To mock final classes (InlineMockMaker).
+
+**Example (Conceptual)**:
+```java
+ClassWriter cw = new ClassWriter(0);
+cw.visit(V1_8, ACC_PUBLIC, "GeneratedClass", null, "java/lang/Object", null);
+MethodVisitor mv = cw.visitMethod(ACC_PUBLIC, "hello", "()V", null, null);
+mv.visitFieldInsn(GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+mv.visitLdcInsn("Hello Bytecode!");
+mv.visitMethodInsn(INVOKEVIRTUAL, "java/io/PrintStream", "println", "(Ljava/lang/String;)V", false);
+mv.visitInsn(RETURN);
+mv.visitMaxs(2, 1);
+byte[] code = cw.toByteArray();
+```
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Java 9 Modules (Jigsaw)
+Introduced a "Layer" on top of ClassLoaders.
+Enforces strong encapsulation.
+`module-info.java` defines `exports` and `requires`.
+
+#### Javascript (Node.js)
+`require('./file.js')` is cached.
+To hot-swap, you must delete from `require.cache`.
+```javascript
+delete require.cache[require.resolve('./module.js')];
+const fresh = require('./module.js');
+```
+
+#### C# / .NET
+Assemblies.
+`AssemblyLoadContext` provides isolation similar to Java ClassLoaders.
+Support for "Unloadable" contexts (CoreCLR).
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Jar Scanner**:
+    -   Write a program that takes a `.jar` path, opens it using `JarFile`, and prints all `.class` names inside it.
+2.  **EncryptionClassLoader**:
+    -   Write a Custom ClassLoader that decrypts `.class` files (AES) on the fly. This prevents reverse engineering (basic obfuscation).
+3.  **Singleton Isolation**:
+    -   Load a Singleton class in two separate ClassLoaders. Show that `InstanceA != InstanceB`. (Static fields are per-class-per-loader).
+
+#### Edge Case Drills
+1.  **Memory Leaks**:
+    -   *Q*: Why does my Tomcat server OOM ("PermGen / Metaspace") after 50 deploys?
+    -   *A*: A `ThreadLocal` or JDBC Driver held a reference to the old ClassLoader, preventing GC. This is a "Classloader Leak".
+2.  **Dual Parent**:
+    -   *Q*: Can a ClassLoader have two parents?
+    -   *A*: Standard JDK model: No. But OSGi / JBoss Modules implement a graph-based delegation model to solve complex dependency meshes.
+
+---
+
+### **8. Security Analysis: Malicious Code**
+
+**Vulnerability**: **Deserialization Gadgets** via ClassLoaders.
+If you allow users to upload arbitrary JARs, they can supply a class with a `static { }` block that executes `Runtime.exec("rm -rf /")` the moment it's loaded.
+
+**Vulnerability**: **Zip Slip**.
+Malicious JARs with paths like `../../../../etc/passwd`.
+
+**Mitigation**:
+-   Run plugins in a restricted `SecurityManager` (deprecated) or separate OS Process (Microservices).
+-   Verify JAR signatures.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Concept | Description |
+| :--- | :--- |
+| **Delegation** | Child asks Parent first ("Have you merged this class?"). |
+| **Isolation** | Sibling loaders cannot see each other. |
+| **Metaspace** | Where class metadata lives (Native Memory). |
+| **Hot Swap** | Drop reference to Loader -> GC -> Create new Loader. |
+
+**Verdict**: Essential for library authors and platform engineers. Application developers rarely write custom loaders but must understand them for debugging `ClassNotFoundException`.
+
+---
+
+### **10. References**
+1.  *Java Virtual Machine Specification (Chapter 5)*.
+2.  *OSGi in Action*.
+
+---
+
+
+#### Q87: What is Type Erasure, and why does `List<String>.class` not exist in Java?
+**Companies**: Google (Guava Team), Oracle (Language Team), JetBrains (Kotlin)
+**Difficulty**: **Hard** (Language Design / Generics)
+**Category**: JVM Internals, Language Theory
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Backward Compatibility**
+In 2004, Java 5 introduced Generics (`List<String>`).
+Before that, everyone used raw `List` (effectively `List<Object>`).
+**Constraint**: Java 5 code *must* run on Java 1.4 Virtual Machines. You cannot change the JVM instruction set to support generics.
+
+**The Solution**: Type Erasure.
+The compiler checks types (`String` vs `Integer`) during compilation.
+Then, it **erases** all genreic type information.
+At runtime, `List<String>` and `List<Integer>` are BOTH just `List` (raw).
+
+**The Consequence**: Reification (or lack thereof).
+**Reifiable Type**: A type whose information is fully available at runtime (e.g., `String`, `int[]`).
+**Non-Reifiable Type**: A type whose information is lost at runtime (e.g., `List<String>`, `T`).
+
+**Real-World Analogies**:
+1.  **Prescription Drugs**: The doctor checks if you are allergic to "Penicillin" (Compile Time). The pharmacist gives you a bottle labeled "Antibiotic" (Runtime). The bottle doesn't remember who it was prescribed for.
+2.  **Night Club**: The bouncer (Compiler) checks your ID. Once inside, you are just "A Person" (Object). The DJ doesn't know your name.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> Type erasure is a process by which the compiler removes all information regarding generic types after compilation, so that the generated bytecode contains only ordinary classes, interfaces, and methods.
+
+**The Rules of Erasure**:
+1.  `List<T>` becomes `List`.
+2.  `T` becomes `Object` (or the Upper Bound, e.g., `T extends Number` becomes `Number`).
+3.  Bridge Methods are generated to preserve polymorphism.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Arrays (Reified)
+```java
+String[] arr = new String[10];
+// Runtime check: arr[0] = 1; // ArrayStoreException
+```
+*   **Verdict**: Arrays *know* their type at runtime. They are reified.
+
+#### Approach 2: Generics (Erased)
+```java
+List<String> list = new ArrayList<>();
+// Runtime: It's just ArrayList. No runtime check if you force add Integer via raw type.
+```
+*   **Verdict**: Safer at compile time, "dumber" at runtime.
+
+#### Approach 3: Reified Generics (C#)
+C# broke backward compatibility to implement *true* generics in the CLR. `List<int>` and `List<string>` are different classes at runtime.
+*   **Pros**: Performance (no boxing), Reflection works (`typeof(List<int>)`).
+*   **Cons**: Breaking changes.
+
+---
+
+### **4. Implementation I: The Type Token Pattern (Super Type Token)**
+How libraries like Gson/Jackson find out you wanted `List<User>` if the type is erased.
+
+```java
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.util.ArrayList;
+import java.util.List;
+
+// 1. THE PROBLEM
+// Class<List<String>> c = List<String>.class; // COMPILER ERROR
+// You cannot get the class literal of a generic type.
+
+// 2. THE SOLUTION: Capture Type in Anonymous Subclass
+abstract class TypeToken<T> {
+    final Type type;
+
+    protected TypeToken() {
+        // Magic: "this" refers to the Anonymous Subclass
+        // getGenericSuperclass() returns "TypeToken<List<String>>"
+        Type superclass = getClass().getGenericSuperclass();
+        
+        if (superclass instanceof ParameterizedType) {
+            this.type = ((ParameterizedType) superclass).getActualTypeArguments()[0];
+        } else {
+            throw new RuntimeException("Missing type parameter");
+        }
+    }
+    
+    public Type getType() { return type; }
+}
+
+// 3. USAGE
+public class TypeErasureDemo {
+    public static void main(String[] args) {
+        // A. Simple Class (Reified)
+        System.out.println(String.class); // class java.lang.String
+        
+        // B. Generic Type (The Hack)
+        // We create an anonymous subclass of TypeToken
+        TypeToken<List<String>> token = new TypeToken<List<String>>() {};
+        
+        System.out.println("Captured Type: " + token.getType());
+        // Output: java.util.List<java.lang.String>
+        
+        // Why does this work?
+        // Because the anonymous class definition IS reified and stored in the Constant Pool.
+        // Erasure removes "local" types, but Class definitions keep signature metadata.
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Implementation Restrictions**
+
+Because of Erasure, you **CANNOT** do the following:
+
+1.  **`new T()`**:
+    -   *Why*: At runtime, `T` is `Object`. `new Object()` is not what you want.
+    -   *Workaround*: Pass `Class<T>` or `Supplier<T>`.
+
+2.  **`new T[10]`**:
+    -   *Why*: Arrays need to know their component type to throw `ArrayStoreException`.
+    -   *Workaround*: `(T[]) new Object[10]` (Unsafe cast).
+
+3.  **`instanceof T`**:
+    -   *Why*: Runtime doesn't know what `T` is.
+    -   *Workaround*: `classType.isInstance(obj)`.
+
+4.  **Overloading**:
+    -   `void sort(List<String> l)` and `void sort(List<Integer> l)`.
+    -   *Why*: Both become `void sort(List l)`. Duplicate Method Signature error.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### TypeScript: Structural Erasure
+TypeScript is *entirely* erased. It compiles to JavaScript.
+`interface User { name: string }` disappears completely.
+You cannot do `if (obj instanceof User)` generally. You use "Type Guards" (`if 'name' in obj`).
+
+#### C#: Reified Generics
+`List<int>` is compiled to a specialized class.
+It uses native CPU integers (no Integer boxing). Much faster for primitives.
+
+#### Java: Valhalla (Future)
+Project Valhalla aims to bring Specialized Generics (like C#) to Java to allow `ArrayList<int>` without boxing overhead.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Generic DAO**:
+    -   Implement `Dao<T>`. Try to find the table name from `T`.
+    -   *Hint*: You can't, unless you pass `Class<T>` in the constructor or use the `TypeToken` trick on the subclass `UserDao extends Dao<User>`.
+2.  **Array Builder**:
+    -   Write method `T[] toArray(List<T> list, Class<T> clazz)`.
+    -   Use `Array.newInstance(clazz, size)`.
+
+#### Edge Case Drills
+1.  **Heap Pollution**:
+    -   *Q*: What happens here?
+        ```java
+        List<String> strings = new ArrayList<>();
+        List raw = strings; // Raw Type warning
+        raw.add(42); // Allowed at compile time (warn), Allowed at runtime.
+        String s = strings.get(0); // CLASS CAST EXCEPTION!
+        ```
+    -   *A*: The Exception happens at the *Get* (cast), not the *Add*. This is Heap Pollution.
+
+---
+
+### **8. Security Analysis: Type Confusion**
+
+**Vulnerability**: **Heap Pollution exploit**.
+If a library assumes a List contains only Strings because of the Generic signature, but an attacker managed to insert an Integer (via raw types or unchecked casts), the library might crash or behave unexpectedly.
+**Mitigation**: Use `Collections.checkedList(list, String.class)`. This wraps the list and performs a runtime check on *every add*, preventing pollution immediately.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| restriction | Reason | Fix |
+| :--- | :--- | :--- |
+| No `new T()` | `T` is unknown. | Pass `Supplier<T>`. |
+| No `instanceof T` | `T` is unknown. | Pass `Class<T>`. |
+| No `List<int>` | Primitives can't trigger erasure to Object. | Use `List<Integer>` or arrays. |
+
+**Verdict**: Type Erasure is a necessary evil for Java's backward compatibility. Understand it to avoid `ClassCastException` and `Unchecked` warnings.
+
+---
+
+### **10. References**
+1.  *Java Language Specification - Type Erasure*.
+2.  *Project Valhalla*.
+
+---
+
+
+#### Q88: How do you implement a robust Plugin Architecture using the Service Provider Interface (SPI)?
+**Companies**: Uber (Payment Gateways), Netflix (Playback Engines), MySQL (JDBC Drivers)
+**Difficulty**: **Hard** (Architecture / Modularity)
+**Category**: Software Architecture, Java Core
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Open-Closed Principle**
+You are building an E-Commerce system.
+You support "Stripe". Tomorrow, sales wants "PayPal". Next week, "Crypto".
+**Problem**: Modifying the core checkout code every week ("Open for Modification") is dangerous.
+**Solution**: Define a contract (`PaymentProvider`). The core system treats all providers identically. New providers are added as separate JARs.
+
+**The Mechanism**: Discovery.
+How does the Core System know that `PayPal.jar` is on the classpath?
+**Old Way**: Edit a config file (`plugins.xml`).
+**Java Way (SPI)**: The Plugin *announces itself* via `META-INF/services`.
+
+**Real-World Analogies**:
+1.  **USB Ports**: The computer (Core) has a standard port. Mouse, Keyboard, Printer (Plugins) all adhere to the USB spec. The OS discovers them when plugged in.
+2.  **Wall Sockets**: The grid provides 120V (Interface). Toaster, TV, Lamp (Implementations) plug in.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> The Java Service Provider Interface (SPI) is a discovery mechanism that allows a standard API to be defined, while implementations of that API are discovered and loaded at runtime from the classpath.
+
+**The Key Components**:
+1.  **Service Interface**: The contract (e.g., `java.sql.Driver`).
+2.  **Service Provider**: The implementation (e.g., `com.mysql.cj.jdbc.Driver`).
+3.  **ServiceLoader**: The lazy lookup mechanism.
+4.  **META-INF/services**: The registry file inside the plugin JAR.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Hardcoding (Anti-Pattern)
+```java
+if (type.equals("STRIPE")) return new StripeProvider();
+else if (type.equals("PAYPAL")) return new PaypalProvider();
+```
+*   **Result**: Core depends on everything. Recompile needed for every new plugin.
+
+#### Approach 2: Class.forName + Config
+Read class names from a text file and use Reflection.
+*   **Verdict**: This is basically what SPI automates, but standardizes the file location.
+
+#### Approach 3: Java SPI (`ServiceLoader`)
+The standard, built-in mechanism.
+*   **Verdict**: Best for lightweight extensibility. Used by JDBC, SLF4J, XML Parsers.
+
+#### Approach 4: OSGi / Spring
+Full lifecycle management (install/start/stop/update).
+*   **Verdict**: Overkill for simple plugins.
+
+---
+
+### **4. Implementation I: The Payment Gateway System**
+Building a modular checkout system where Payment methods can be dropped in as JARs.
+
+```java
+import java.util.ServiceLoader;
+import java.util.Optional;
+
+// 1. THE API Module (Shared JAR)
+// package com.platform.payment;
+public interface PaymentGateway {
+    String getName();
+    boolean process(double amount);
+}
+
+// 2. THE IMPLEMENTATION Module (stripe-plugin.jar)
+// package com.stripe.impl;
+public class StripeGateway implements PaymentGateway {
+    @Override
+    public String getName() { return "Stripe"; }
+    
+    @Override
+    public boolean process(double amount) {
+        System.out.println("Processing $" + amount + " via Stripe API...");
+        return true;
+    }
+}
+// META-INF/services/com.platform.payment.PaymentGateway
+// Content: com.stripe.impl.StripeGateway
+
+// 3. THE IMPLEMENTATION Module (paypal-plugin.jar)
+// package com.paypal.impl;
+public class PaypalGateway implements PaymentGateway {
+    @Override
+    public String getName() { return "PayPal"; }
+    
+    @Override
+    public boolean process(double amount) {
+        System.out.println("Processing $" + amount + " via PayPal API...");
+        return true;
+    }
+}
+// META-INF/services/com.platform.payment.PaymentGateway
+// Content: com.paypal.impl.PaypalGateway
+
+// 4. THE CORE SYSTEM (Does NOT know about Stripe or PayPal classes)
+public class CheckoutService {
+    public void checkout(String providerName, double amount) {
+        // DISCOVERY
+        ServiceLoader<PaymentGateway> loader = ServiceLoader.load(PaymentGateway.class);
+        
+        Optional<PaymentGateway> provider = loader.stream()
+            .map(ServiceLoader.Provider::get)
+            .filter(p -> p.getName().equalsIgnoreCase(providerName))
+            .findFirst();
+            
+        if (provider.isPresent()) {
+            provider.get().process(amount);
+        } else {
+            throw new RuntimeException("No provider found for: " + providerName);
+        }
+    }
+    
+    public static void main(String[] args) {
+        CheckoutService service = new CheckoutService();
+        service.checkout("Stripe", 99.99);
+        service.checkout("PayPal", 50.00);
+        
+        // Output:
+        // Processing $99.99 via Stripe API...
+        // Processing $50.0 via PayPal API...
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: The JDBC Driver Example**
+
+**History**:
+Before JDBC 4.0, you had to type `Class.forName("com.mysql.jdbc.Driver")`. This manually loaded the class, which had a `static` block registering itself.
+**Now**: JDBC drivers include `META-INF/services/java.sql.Driver`.
+The `DriverManager` automatically uses `ServiceLoader` to find all available drivers on the classpath.
+
+**The Singleton Problem**:
+SPI creates a **new instance** of the provider every time you iterate, unless the provider caches itself.
+Typically, providers are lightweight factories (e.g., `Driver`), enabling the creation of heavyweight objects (e.g., `Connection`).
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Python: Entry Points
+Python packages (`setup.py`) can define `entry_points`.
+The library `pkg_resources` discovers them.
+`entry_points={'my_app.plugins': ['x = my_plugin:PluginClass']}`.
+
+#### JavaScript (Node.js): Peer Dependencies
+Plugins are just npm packages. Discovered by convention (e.g., `eslint-plugin-react`).
+Config file `.eslintrc` lists the plugin names, and `require()` tries to find them in `node_modules`.
+
+#### Go: RPC / Hashicorp Plugin
+Go binaries are statically linked, so dynamic loading (`plugin` package) is rare/buggy.
+Prefer **Sidecar Processes**: The plugin is a separate binary communicating via gRPC.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Logging Façade**:
+    -   Create a `Logger` interface.
+    -   Implement a `ConsoleLogger` and `FileLogger`.
+    -   Use SPI to pick whichever one is on the classpath.
+2.  **Data Formatters**:
+    -   `Formatter` interface (`toJson`, `toXml`). Load all formatters and register them in a Map.
+
+#### Edge Case Drills
+1.  **Ordering**:
+    -   *Q*: How do I control which plugin loads first?
+    -   *A*: SPI does not guarantee order. You must add `getPriority()` method to your interface and sort them manually after loading.
+2.  **Duplicate Implementations**:
+    -   *Q*: What if two JARs provide the same service?
+    -   *A*: `ServiceLoader` loads all of them. It's up to your code to pick the right one (e.g., via `getName()`).
+
+---
+
+### **8. Security Analysis: Untrusted Plugins**
+
+**Vulnerability**: **Malicious Provider**.
+If an attacker drops `evil-plugin.jar` into your classpath, and you blindly iterate and execute every provider, you are pwned.
+
+**Mitigation**:
+1.  **Filtering**: Only load plugins whose names are in an allowlist.
+2.  **Signing**: Verify the JAR signature before loading (requires Custom ClassLoader).
+3.  **Isolation**: Run plugins in a restrictive `AccessControlContext` (though SecurityManager is deprecated).
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Mechanism | Use Case | Pros | Cons |
+| :--- | :--- | :--- | :--- |
+| **SPI** | Internal Modularity (JDBC). | Built-in, Simple. | No lifecycle (start/stop). |
+| **OSGi** | Application Servers (Eclipse). | Versioning, Isolation. | Complexity Hell. |
+| **Spring** | Enterprise Apps. | DI Integration. | Heavy framework dependency. |
+
+**Verdict**: Use SPI for simple, stateless extensions (Codecs, Drivers). Use a Plugin Framework (PF4J) for complex, stateful plugins.
+
+---
+
+### **10. References**
+1.  *Java ServiceLoader Documentation*.
+2.  *Creating Extensible Applications (Oracle Tutorial)*.
+
+---
+
+
+#### Q89: What are Algebraic Data Types (ADTs), and how do Sealed Classes enable them in Java?
+**Companies**: Jane Street (OCaml/Java), Stripe (Payment States), Twitter (Scala)
+**Difficulty**: **Hard** (Functional Programming / Language Features)
+**Category**: Functional Programming, Modern Java (17+)
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Representing OR Relationships**
+OOP is good at "AND" relationships (Product Types).
+`class User { String name; AND int age; }`
+OOP is bad at "OR" relationships (Sum Types).
+`Result = Success OR Failure`.
+
+**The Problem**: Hierarchy Openness.
+If you have an interface `Shape`, anyone can implement `GodzillaShape` tomorrow.
+The compiler cannot know all possible subtypes.
+Thus, you cannot verify if a `switch` statement covers all cases.
+
+**The Solution**: Algebraic Data Types (Sealed Classes).
+You restrict the hierarchy: "A Shape is *either* a Circle, Square, OR Triangle. Nothing else."
+This allows **Pattern Matching** with **Exhaustiveness Checking**.
+
+**Real-World Analogies**:
+1.  **Traffic Light**: It can ONLY be Red, Yellow, or Green. It cannot be "Purple".
+2.  **Payment Status**: Pending, Success, Failed, Refused. No "Maybe" state unless explicitly defined.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> An Algebraic Data Type (ADT) is a composite type formed by combining other types. Two common classes are:
+> 1.  **Product Types**: (Tuples, Records) A combination of A AND B.
+> 2.  **Sum Types**: (Discriminated Unions, Sealed Classes) A choice of A OR B.
+
+**Java 17 Mechanism**:
+-   `sealed interface`: The Root.
+-   `permits`: The allowed children.
+-   `final` / `record`: The leaf nodes.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Enum (Simple Sum Type)
+Good for constants, bad for data.
+`enum Result { SUCCESS, FAILURE }` --> Can't hold the `Exception` inside FAILURE.
+
+#### Approach 2: Class Hierarchy + instanceof
+```java
+interface Result {}
+class Success implements Result { Data data; }
+class Failure implements Result { Exception e; }
+// Usage
+if (r instanceof Success) ...
+else if (r instanceof Failure) ...
+// Compiler doesn't help if you miss a case.
+```
+
+#### Approach 3: Visitor Pattern (The OOP Workaround)
+Complex double-dispatch to force handling all cases. (See Q74).
+*   **Verdict**: Verbose boilerplate.
+
+#### Approach 4: Sealed Classes + Pattern Matching (Modern Java)
+Safe, concise, and compiler-verified.
+
+---
+
+### **4. Implementation I: The Payment State Machine**
+Modeling a strict financial transaction lifecycle.
+
+```java
+// 1. THE ROOT (Sealed Interface)
+// We define the closed set of possible states.
+sealed interface TransactionState permits 
+    Pending, 
+    Authorized, 
+    Captured, 
+    Declined, 
+    Refunded {}
+
+// 2. THE VARIANTS (Records = Product Types)
+// Each state holds DIFFERENT data.
+
+record Pending(String txId, long timestamp) implements TransactionState {}
+
+record Authorized(String txId, String authCode) implements TransactionState {}
+
+record Captured(String txId, String authCode, double amount) implements TransactionState {}
+
+record Declined(String txId, String reason) implements TransactionState {}
+
+record Refunded(String txId, double amount, String refundId) implements TransactionState {}
+
+// 3. THE LOGIC (Pattern Matching for Switch - Java 21)
+public class PaymentService {
+
+    public String handleTransaction(TransactionState state) {
+        // EXHAUSTIVENESS CHECKING:
+        // If I comment out 'Declined', the compiler ERRORs.
+        // No 'default' needed because we cover all permits.
+        
+        return switch (state) {
+            case Pending p -> 
+                "Waiting: " + p.txId();
+                
+            case Authorized a -> 
+                "Hold placed: " + a.authCode();
+                
+            case Captured c -> 
+                "Money moved: $" + c.amount();
+                
+            // Guarded Pattern (when clause)
+            case Declined d when d.reason().contains("Fraud") -> 
+                "ALERT: FRAUD DETECTED " + d.txId();
+                
+            case Declined d -> 
+                "Please retry: " + d.reason();
+                
+            case Refunded r -> 
+                "Returned $" + r.amount();
+        };
+    }
+    
+    public static void main(String[] args) {
+         TransactionState tx = new Declined("tx_123", "Insufficient Funds");
+         System.out.println(new PaymentService().handleTransaction(tx));
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Expression Problem**
+
+**The Standard Dilemma**:
+1.  **OOP**: Easy to add new types (Classes), hard to add new operations (Methods).
+    -   *Add `Hexagon`*: Easy! Just `class Hexagon implements Shape`.
+    -   *Add `perimeter()`*: Hard! Must edit `Circle`, `Square`, `Hexagon`.
+2.  **Functional (ADTs)**: Easy to add operations, hard to add types.
+    -   *Add `perimeter()`*: Easy! Just one switch statement.
+    -   *Add `Hexagon`*: Hard! Must edit Every switch statement that handles Shape.
+
+**Verdict**: Use **Sealed Classes** (FP style) when the set of Types is fixed (e.g., AST Nodes, JSON types, HTTP Statuses) but Operations vary frequently.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Rust: Enums
+Rust Enums are full ADTs.
+```rust
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+match res {
+    Ok(val) => print(val),
+    Err(e) => log(e),
+} // Compiler checks exhaustiveness
+```
+
+#### Kotlin: Sealed Classes
+Java's Sealed Classes were inspired by Kotlin.
+`sealed class Result` -> `data class Success(val data: String) : Result()`.
+Kotlin's `when` expression verifies exhaustiveness.
+
+#### TypeScript: Discriminated Unions
+Not nominal, but structural.
+```typescript
+type Shape = 
+  | { kind: 'circle', radius: number }
+  | { kind: 'square', side: number };
+```
+Typescript tracks the 'kind' field to narrow the type.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **JSON Parser**:
+    -   Define `sealed interface JsonNode permits JsonObject, JsonArray, JsonString, JsonNumber`.
+    -   Write a `prettyPrint(JsonNode)` using switch.
+2.  **Result Type**:
+    -   Implement a generic `Result<T>` sealed interface with `Success<T>` and `Failure`.
+
+#### Edge Case Drills
+1.  **Non-Sealed Subclasses**:
+    -   *Q*: Can a sealed class permit a `non-sealed` class?
+    -   *A*: Yes. This "opens" the hierarchy back up at that specific branch. (Hybrid approach).
+2.  **Permits Clause Omission**:
+    -   *Q*: Can I omit `permits`?
+    -   *A*: Yes, ONLY if all subclasses are defined in the *same file*.
+
+---
+
+### **8. Security Analysis: State Validation**
+
+**Vulnerability**: **Invalid State Transition**.
+In standard OOP, a hacker might mock an object efficiently to bypass checks.
+With Sealed Classes, you can guarantee that a `Authorized` object MUST have come from your construct (if constructors are protected/package-private) and cannot be a malicious subclass injected by a plugin.
+**Benefit**: "Parse, don't validate."
+Instead of checking `if (user.isValid)`, represent it as `process(ValidUser u)`. If you have a `ValidUser`, it Is Valid.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Data Structure | Type | Purpose | Java Construct |
+| :--- | :--- | :--- | :--- |
+| **Product** | AND | Bundling data. | `record` |
+| **Sum** | OR | Modeling choices. | `sealed interface` |
+| **Pattern Matching** | Switch | Extracting data. | `switch (x) { case R r -> ... }` |
+
+**Verdict**: The biggest shift in Java modeling since generics. Stop using Exceptions for flow control; start using ADTs (`Result<T, E>`).
+
+---
+
+### **10. References**
+1.  *JEP 409: Sealed Classes*.
+2.  *JEP 441: Pattern Matching for switch*.
+
+---
+
+
+#### Q90: What is a Monad in Java, and how do Optional/Stream/CompletableFuture implement it?
+**Companies**: Netflix (RxJava), Twitter (Scala style), Amazon (Asynchronous Flows)
+**Difficulty**: **Hard** (Functional Programming Theory)
+**Category**: Functional Programming, Advanced Java
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Composing Effects**
+Programming is composition: `h(g(f(x)))`.
+But what if `f(x)` might fail (return null)?
+Then `g(null)` crashes.
+You need `if (result != null)`.
+Now your code is a staircase of IF statements (Cyclomatic Complexity Hell).
+
+**The Solution**: The Monad Design Pattern.
+Wrap the value in a box (`Optional<T>`).
+Instead of opening the box, you send the function *into* the box (`map`/`flatMap`).
+If the box is empty, the function doesn't run. No crash.
+
+**Real-World Analogies**:
+1.  **The Assembly Line**: The conveyor belt (Monad) carries widgets. A robotic arm (Function) stamps them. If a gap comes down the line (Empty/Null), the arm doesn't stomp on empty air; it just waits.
+2.  **The Railway**: "Railway Oriented Programming". Success is the Green Track. Failure is the Red Track. A Monad handles switching tracks automatically.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> A Monad is a container type `M<T>` with two primary operations:
+> 1.  **Unit** (`of`): Wraps a value (`T -> M<T>`).
+> 2.  **Bind** (`flatMap`): CHains operations (`M<T> -> (T -> M<U>) -> M<U>`).
+>
+> It must obey the 3 Laws: Left Identity, Right Identity, Associativity.
+
+**Java Implementations**:
+-   `Optional<T>`: The "Maybe" Monad (0 or 1 value).
+-   `Stream<T>`: The "List" Monad (0 to N values).
+-   `CompletableFuture<T>`: The "Promise" Monad (Value in future).
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Nested Null Checks (The Anti-Pattern)
+```java
+if (user != null) {
+    Address addr = user.getAddress();
+    if (addr != null) {
+        return addr.getCity(); // The Pyramid of Doom
+    }
+}
+```
+
+#### Approach 2: Optional (Java 8)
+```java
+return Optional.ofNullable(user)
+    .map(User::getAddress)
+    .map(Address::getCity)
+    .orElse("Unknown");
+```
+*   **Verdict**: Declarative, flat, and null-safe.
+
+#### Approach 3: CompletableFuture (Async Monad)
+```java
+CompletableFuture.supplyAsync(this::getUser)
+    .thenCompose(user -> this.fetchProfile(user)) // flatMap
+    .thenAccept(System.out::println);
+```
+*   **Verdict**: Callback Hell avoided.
+
+---
+
+### **4. Implementation I: The Custom "Maybe" Monad**
+Implementing a Monad from scratch to prove we understand the internals.
+
+```java
+import java.util.function.Function;
+
+// 1. THE MONAD DEFINITION
+public class Maybe<T> {
+    private final T value;
+
+    private Maybe(T value) { this.value = value; }
+
+    // UNIT (Return)
+    public static <T> Maybe<T> of(T value) {
+        return new Maybe<>(value); // Should handle null ideally, but keeping simple
+    }
+
+    public static <T> Maybe<T> empty() {
+        return new Maybe<>(null);
+    }
+    
+    // MAP (Functor) processes the value if present
+    public <U> Maybe<U> map(Function<? super T, ? extends U> mapper) {
+        if (value == null) return Maybe.empty();
+        return Maybe.of(mapper.apply(value));
+    }
+
+    // FLATMAP (Bind) - The Monad Power
+    // Prevents Maybe<Maybe<U>> nesting
+    public <U> Maybe<U> flatMap(Function<? super T, Maybe<U>> mapper) {
+        if (value == null) return Maybe.empty();
+        return mapper.apply(value);
+    }
+
+    public T orElse(T other) {
+        return value != null ? value : other;
+    }
+    
+    @Override 
+    public String toString() { 
+        return value == null ? "Empty" : "Just(" + value + ")"; 
+    }
+}
+
+// 2. THE RAILWAY PIPELINE
+class User {
+    String id;
+    public User(String id) { this.id = id; }
+}
+
+class Service {
+    // Returns Maybe because User might not exist
+    public Maybe<User> findUser(String id) {
+        if ("123".equals(id)) return Maybe.of(new User("Syed"));
+        return Maybe.empty();
+    }
+    
+    // Returns Maybe because Validation might fail
+    public Maybe<String> validate(User u) {
+        if (u.id.startsWith("S")) return Maybe.of("Valid: " + u.id);
+        return Maybe.empty();
+    }
+}
+
+// 3. USAGE
+public class MonadDemo {
+    public static void main(String[] args) {
+        Service service = new Service();
+        
+        // The Pipeline
+        // findUser -> flatMap -> validate -> orElse
+        String result = service.findUser("123")
+            .flatMap(u -> service.validate(u))
+            .orElse("Invalid User or Not Found");
+            
+        System.out.println(result);
+        
+        // Failure Case
+        String fail = service.findUser("999")
+            .flatMap(service::validate)
+            .orElse("Not Found");
+            
+        System.out.println(fail);
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: The Monad Laws**
+
+To be a true Monad, `Maybe` must satisfy:
+
+1.  **Left Identity**: `unit(x).flatMap(f) == f(x)`
+    -   Wrapping a value and feeding it to `f` is same as calling `f` directly.
+2.  **Right Identity**: `m.flatMap(unit) == m`
+    -   Feeding the monad into `unit` (wrapper) changes nothing.
+3.  **Associativity**: `m.flatMap(f).flatMap(g) == m.flatMap(x -> f(x).flatMap(g))`
+    -   The order of chaining doesn't matter (nesting doesn't matter).
+
+**Why it matters**: These laws guarantee that refactoring code (extracting variables, merging calls) doesn't change behavior.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Haskell: The Monad Kingdom
+Haskell *forces* Monads for IO.
+`do { x <- getLine; putStrLn x }`.
+The `IO` monad wraps side effects so the core language remains pure.
+
+#### JavaScript: Promises
+`Promise` IS a Monad (mostly).
+`Promise.resolve(5)` (Unit).
+`.then(x => ...)` (Bind/Map hybrid).
+JS flattens promises automatically (e.g., you can't have `Promise<Promise<T>>`), which technically violates Monad laws strictly, but is pragmatic.
+
+#### Rust: Option / Result
+`Option<T>` and `Result<T, E>`.
+uses `and_then()` for flatMap.
+`unwraps()` are discouraged.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Try Monad**:
+    -   Implement `Try<T>`. It holds either a Value `Success` or an Exception `Failure`.
+    -   `Try.of(() -> 1/0)` should return `Failure(ArithmeticException)`.
+2.  **Stream Flattening**:
+    -   Given `List<List<String>>`, use `stream().flatMap()` to get a single `List<String>`.
+
+#### Edge Case Drills
+1.  **Optional as Field**:
+    -   *Q*: Should I declare `private Optional<String> name;` in a class?
+    -   *A*: **NO**. `Optional` is not Serializable. It is designed for *return types* only (to signal absence). Use `@Nullable` for fields.
+2.  **Optional.get()**:
+    -   *Q*: When should I use `.get()`?
+    -   *A*: Never, unless you have checked `.isPresent()`. Use `.orElseThrow()`.
+
+---
+
+### **8. Security Analysis: Null Exploits**
+
+**Vulnerability**: **Null Pointer Exceptions (Availability)**.
+NPEs crash threads. If an attacker can force an NPE in a critical loop (e.g., request handling), they can DoS the server.
+**Mitigation**: Using `Optional` forces the developer to handle the "Empty" case. It makes the "Happy Path" and "Error Path" explicit types.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Operation | Standard name | Java Optional | Java Stream |
+| :--- | :--- | :--- | :--- |
+| **Unit** | `return` / `pure` | `Optional.of(x)` | `Stream.of(x)` |
+| **Map** | `fmap` | `map(f)` | `map(f)` |
+| **Bind** | `bind` / `>>=` | `flatMap(f)` | `flatMap(f)` |
+
+**Verdict**: You are already using Monads (`Stream`, `Optional`). Understanding the theory helps you write cleaner, composable logic (Railway Programming).
+
+---
+
+### **10. References**
+1.  *Java 8 in Action*.
+2.  *Railway Oriented Programming (Scott Wlaschin)*.
+
+---
+
+
+#### Q91: What are Method Handles, and how do they differ from Reflection (`java.lang.reflect`)?
+**Companies**: Oracle (HotSpot Team), Red Hat (Hibernate/Quarkus), Datadog (Agents)
+**Difficulty**: **Very Hard** (JVM Internals / Bytecode)
+**Category**: JVM Internals, High-Performance Java
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Performance & Safety**
+Standard Reflection (`Method.invoke()`) is slow.
+It performs access checks *every time*. It boxes arguments (`int` -> `Integer`).
+**Problem**: Frameworks like Hibernate or Mockito need to access private fields millions of times per second. Reflection is the bottleneck.
+
+**The Solution**: Method Handles (`java.lang.invoke`).
+Think of them as **"Typed Function Pointers"** for the JVM.
+1.  **Access Check**: Done ONCE (at creation time).
+2.  **Optimization**: The JIT compiler can inline them (just like a direct method call).
+
+**Real-World Analogies**:
+1.  **Security Badge**:
+    -   *Reflection*: You show your ID to the guard *every time* you enter the room.
+    -   *Method Handle*: The user gives you a Key Card. You scan it yourself. The guard checked you once when issuing the card.
+2.  **Phone Call**:
+    -   *Reflection*: Operator connects you every time. "Connecting...".
+    -   *Method Handle*: Speed Dial.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> A Method Handle is a typed, directly executable reference to an underlying method, constructor, field, or similar low-level operation, with optional transformations of arguments or return values.
+
+**Key Components**:
+1.  **Lookup**: The factory. Defines *who* is asking (`MethodHandles.lookup()`).
+2.  **MethodType**: The signature (`(String, int) -> void`).
+3.  **MethodHandle**: The executable reference (`mh.invokeExact(...)`).
+4.  **VarHandle** (Java 9): Safe, atomic access to fields (Modern replacement for `Unsafe`).
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Direct Call (Fastest)
+`obj.method(arg)`.
+*   **Limitation**: You must know the method name at compile time.
+
+#### Approach 2: Core Reflection (Slowest)
+`method.invoke(obj, arg)`.
+*   **Pros**: Dynamic.
+*   **Cons**: Slow, Type-Unsafe (returns Object), Exception Wrapping (`InvocationTargetException`).
+
+#### Approach 3: MethodHandles (The Modern Standard)
+`mh.invokeExact(obj, arg)`.
+*   **Pros**: Near-native performance. Type-safe (runtime checks).
+*   **Cons**: Verbose API.
+
+#### Approach 4: LambdaMetafactory (Dynamic)
+Generates an actual lambda implementation at runtime.
+Used by Java 8 to implement `() -> {}`.
+
+---
+
+### **4. Implementation I: The Fast Accessor Framework**
+Building a generic property accessor that beats Reflection.
+
+```java
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
+
+public class FastReflectionDemo {
+
+    // Target Class
+    static class User {
+        private String name = "Default";
+        public void setName(String name) { this.name = name; }
+        public String getName() { return name; }
+        private void secret() { System.out.println("Secret!"); }
+    }
+
+    public static void main(String[] args) throws Throwable {
+        User user = new User();
+
+        // 1. THE LOOKUP
+        // Defines access rights. 
+        // publicLookup() = Public access only.
+        // lookup() = Access to private members of THIS class.
+        MethodHandles.Lookup lookup = MethodHandles.lookup();
+
+        // 2. FINDING METHODS
+        // Signature: void setName(String)
+        MethodType setterType = MethodType.methodType(void.class, String.class);
+        
+        // Find virtual method (Polymorphic)
+        MethodHandle mhSetName = lookup.findVirtual(User.class, "setName", setterType);
+
+        // 3. INVOKING (Polymorphic Signature)
+        // invokeExact: STRICT types. (Must pass Exact classes).
+        // invoke: Loose types (Does boxing/casting).
+        
+        mhSetName.invokeExact(user, "Syed"); // No boxing!
+        System.out.println("Set Name: " + user.getName());
+
+        // 4. ACCESSING PRIVATE MEMBERS (Java 9+)
+        // Requires 'MethodHandles.privateLookupIn'
+        // This is safer than setAccessible(true) because it checks module rules.
+        MethodHandles.Lookup privateLookup = MethodHandles.privateLookupIn(User.class, lookup);
+        MethodHandle mhSecret = privateLookup.findSpecial(
+            User.class, 
+            "secret", 
+            MethodType.methodType(void.class), 
+            User.class
+        );
+        
+        mhSecret.invoke(user);
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: `invokedynamic` (Indy)**
+
+**The Instruction**:
+Before Java 7, the JVM had 4 invoke instructions:
+1.  `invokestatic` (Static methods)
+2.  `invokevirtual` (Instance methods)
+3.  `invokeinterface` (Interface methods)
+4.  `invokespecial` (Constructors, super, private)
+
+Java 7 added `invokedynamic`.
+It delegates the *linking* of the method to user code (**Bootstrap Method**).
+
+**Lambda Implementation**:
+When you write `List<String> l = (s) -> s.length()`, javac generates:
+1.  An `invokedynamic` instruction.
+2.  A Bootstrap Method call to `LambdaMetafactory`.
+3.  The factory generates an instance of a synthetic class implementing `Function`.
+**Why?** It defers the strategy (Anonymous Inner Class vs Synthetic Class) to runtime, allowing future JDKs to optimize without recompiling jars.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Groovy / Kotlin / Scala
+These languages run on the JVM.
+Dynamic languages (Groovy) use `invokedynamic` heavily to implement dynamic typing.
+Static languages (Kotlin) use `invokedynamic` for Lambdas (just like Java).
+
+#### C++: Pointer to Member
+`void (User::*ptr)(String) = &User::setName;`
+`(user.*ptr)("Syed");`
+Native CPU speed. Method Handles bring Java close to this.
+
+#### C#: Delegates
+`Action<string> ptr = user.SetName;`
+Delegates in C# are essentially type-safe function pointers, deeply integrated into the runtime.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **VarHandle**:
+    -   Use `VarHandle` to perform an Atomic Compare-And-Set (CAS) on a `long` array.
+    -   Compare performance vs `AtomicLongArray`. (VarHandle should be faster/lighter).
+2.  **SwitchPoint**:
+    -   Implement a "feature flag" using `SwitchPoint`.
+    -   The JIT assumes the flag is false and completely removes the "if true" code.
+    -   When you flip the switch, the JIT de-optimizes and recompiles.
+
+#### Edge Case Drills
+1.  **Signature Mismatch**:
+    -   *Q*: What happens if `invokeExact` gets an `Integer` instead of `int`?
+    -   *A*: `WrongMethodTypeException`. No auto-unboxing allowed in `invokeExact`.
+2.  **Access Control**:
+    -   *Q*: Can I create a Lookup for a class in another module?
+    -   *A*: Only if that module Opens the package to you.
+
+---
+
+### **8. Security Analysis: The Lookup Object**
+
+**Vulnerability**: **Leaking a "Full Power" Lookup**.
+If you pass `MethodHandles.lookup()` to untrusted code, that code gains **Private Access** to your class.
+**Mitigation**:
+-   Only pass `MethodHandles.publicLookup()`.
+-   Never store the Lookup object in a public static field.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Feature | Reflection | Method Handles |
+| :--- | :--- | :--- |
+| **Speed** | Slow (Checks+Boxing) | Near-Native (JIT Inline) |
+| **Safety** | Runtime Exceptions | Compile-Time (mostly) |
+| **Access** | `setAccessible(true)` | `Lookup` Object |
+| **Use Case** | Config, Simple Tools | Frameworks, Compilers |
+
+**Verdict**: If you are writing a normal app, use Reflection. If you are writing a Database, Framework, or Language, use MethodHandles.
+
+---
+
+### **10. References**
+1.  *JSR 292: invokedynamic*.
+2.  *Java 9 VarHandle API*.
+
+---
+
+
+#### Q92: How do you implement a "Type-Safe Builder" using Phantom Types to enforce build order at compile time?
+**Companies**: Google (Protobuf), Amazon (AWS SDK v2), Stripe (API Requests)
+**Difficulty**: **Hard** (API Design / Generics)
+**Category**: API Design, Advanced Java
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The Builder Parameter Problem**
+Standard Builders (`User.builder().name("x").build()`) are great, BUT:
+1.  **Missing Fields**: What if I forget `.email()`? Runtime Exception.
+2.  **Wrong Order**: What if I call `.build()` before `.id()`? Runtime Exception.
+3.  **Invalid State**: The compiler lets me write invalid code that crashes later.
+
+**The Solution**: The Step Builder Pattern (Phantom Types).
+We treat the compilation process as a **State Machine**.
+You *cannot* call `.build()` until you have called `.email()`.
+The method `.build()` simply *does not exist* on the current intermediate object.
+
+**Real-World Analogies**:
+1.  **ATM Transaction**: You cannot select "Withdraw Cash" (Step 3) before "Insert Card" (Step 1) and "Enter PIN" (Step 2). The screen literally changes.
+2.  **Lego Manual**: You can't put the roof on (Step 10) if you haven't built the walls (Step 5).
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> A Type-Safe Builder uses generic type constraints (Phantom Types) or a sequence of interfaces ("Steps") to enforce a specific method invocation order at compile time, ensuring that the object can only be built when it is in a valid state.
+
+**Key Techniques**:
+1.  **Phantom Types**: Types used only for compile-time checking, never instantiated (`class Built {}`).
+2.  **Step Interfaces**: `Step1` returns `Step2`, which returns `Step3`.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Runtime Validation (Standard Builder)
+```java
+public User build() {
+    if (this.email == null) throw new IllegalStateException("Email required");
+    return new User(this);
+}
+```
+*   **Verdict**: Crashes in production if testing is poor.
+
+#### Approach 2: Constructor Telescoping
+```java
+new User("id", "email", ...); // 10 args
+```
+*   **Verdict**: Unreadable ("Is the 5th arg address or phone?").
+
+#### Approach 3: The Step Builder (Compile-Time Safe)
+```java
+User.builder()
+    .withId("1")    // Returns IdStep
+    .withEmail("a") // Returns EmailStep
+    .build();       // NOW available
+```
+*   **Verdict**: The compiler guides the user. Impossible to misuse.
+
+---
+
+### **4. Implementation I: The SQL Query Builder**
+Enforcing `SELECT -> FROM -> WHERE` order. You can't add `WHERE` before `FROM`.
+
+```java
+// 1. THE PHANTOM TYPES (The States)
+interface SelectStep {
+    FromStep select(String... columns);
+}
+
+interface FromStep {
+    WhereStep from(String table);
+}
+
+interface WhereStep {
+    WhereStep where(String condition); // Optional: stay in WhereStep
+    BuildStep orderBy(String column);
+    String build(); // Terminal operation
+}
+
+interface BuildStep {
+    String build();
+}
+
+// 2. THE BUILDER IMPLEMENTATION
+public class SqlBuilder implements SelectStep, FromStep, WhereStep, BuildStep {
+    private StringBuilder query = new StringBuilder();
+
+    private SqlBuilder() {} // Private Constructor
+
+    // Entry Point
+    public static SelectStep start() {
+        return new SqlBuilder();
+    }
+
+    @Override
+    public FromStep select(String... columns) {
+        query.append("SELECT ").append(String.join(", ", columns));
+        return this;
+    }
+
+    @Override
+    public WhereStep from(String table) {
+        query.append(" FROM ").append(table);
+        return this;
+    }
+
+    @Override
+    public WhereStep where(String condition) {
+        query.append(" WHERE ").append(condition);
+        return this;
+    }
+    
+    @Override
+    public BuildStep orderBy(String column) {
+        query.append(" ORDER BY ").append(column);
+        return this;
+    }
+
+    @Override
+    public String build() {
+        return query.toString() + ";";
+    }
+}
+
+// 3. USAGE DEMO
+public class BuilderDemo {
+    public static void main(String[] args) {
+        // COMPILABLE CODE
+        String sql = SqlBuilder.start()
+            .select("id", "name")
+            .from("users")
+            .where("age > 18")
+            .orderBy("id")
+            .build();
+            
+        System.out.println(sql);
+        
+        // UNCOMPILABLE CODE (Uncomment to see error)
+        // SqlBuilder.start().from("users"); // ERROR: 'from' not found on SelectStep
+        
+        // SqlBuilder.start().select("id").build(); // ERROR: 'build' not found on FromStep
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Phantom Types with Generics**
+Alternative approach using one class with Generic States.
+
+```java
+// Logic: Builder<State>
+class Builder<T> { ... }
+
+interface HasId {}
+interface HasEmail {}
+interface Ready {}
+
+// Method signature enforces transition:
+// public Builder<HasId> withId(String id) { ... }
+// public Builder<HasEmail> withEmail(String e) { ... }
+// public User build() { ... } // Only defined for Builder<Ready>
+```
+*   **Pros**: More flexible state transitions.
+*   **Cons**: Extremely verbose generic signatures (`Builder<HasId, HasEmail, HasAddress...>`).
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Rust: Typestate Pattern
+Rust is famous for this.
+```rust
+struct Builder<State>(State);
+struct NoId;
+struct HasId(u32);
+
+impl Builder<NoId> {
+    fn id(self, id: u32) -> Builder<HasId> { ... }
+}
+impl Builder<HasId> {
+    fn build(self) -> User { ... }
+}
+```
+Rust's **Move Semantics** make this powerful: the `NoId` builder is *consumed* and cannot be reused.
+
+#### TypeScript: Method Chaining
+TS uses conditional types or simple interface chaining.
+```typescript
+interface Step1 { next(): Step2; }
+```
+
+#### Kotlin: Function Receivers
+Kotlin Type-Safe Builders (DSLs) use `Box.apply { ... }`.
+`html { head { ... } body { ... } }`.
+Enforced by `@DslMarker` to prevent illegal nesting.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Email Builder**:
+    -   Enforce: `To` -> `Subject` -> `Body` -> `.send()`.
+    -   `Cc` and `Bcc` checks can happen anytime *after* `To`.
+2.  **HTML DSL**:
+    -   Create a builder that ensures `<html>` contains `<body>`, and `<li>` is only inside `<ul>`.
+
+#### Edge Case Drills
+1.  **Branching**:
+    -   *Q*: How to handle `if (x) .opt1() else .opt2()`?
+    -   *A*: Hard with Step Builders. You often need to break the chain or revert to runtime checks for complex conditional logic.
+2.  **Refactoring**:
+    -   *Q*: What if I add a new required Step 1.5?
+    -   *A*: You must break the chain in the library. All consumer code recompiling will fail (good! finding bugs early).
+
+---
+
+### **8. Security Analysis: Injection Prevention**
+
+**Vulnerability**: **SQL Injection via String Concatenation**.
+The naive builder simply appends strings.
+`builder.where("id=" + input)`.
+**Remediation**:
+The Builder should **Not** accept raw strings for values.
+It should accept `Condition` objects or use `PreparedStatement` parameters internally.
+`where(Eq("id", 123))` -> Generates `id = ?`.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Pattern | Validation Time | Verbosity | Flexibility |
+| :--- | :--- | :--- | :--- |
+| **Standard** | Runtime | Low | High |
+| **Telescoping** | Compile (Arg count) | Low | Zero |
+| **Step Builder** | Compile (State) | High | Low (Linear) |
+
+**Verdict**: Use Step Builders for critical APIs (Payments, SQL, Infrastructure) where a misconfigured object causes catastrophic failure.
+
+---
+
+### **10. References**
+1.  *Effective Java (Item 2: Builder Pattern)*.
+2.  *Rust Design Patterns: Typestate*.
+
+---
+
+
+#### Q93: What are Higher-Kinded Types (HKTs), and how do you simulate them in Java?
+**Companies**: Standard Chartered (Haskell/Mu), Twitter (Scala/Strato), Jane Street
+**Difficulty**: **Very Hard** (Type Theory)
+**Category**: Functional Programming, Type Systems
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": Abstracting Over Containers**
+Generics let you abstract over *types*: `List<T>` works for `Integer`, `String`.
+But what if I want to abstract over the *List itself*?
+I want a function `processAll` that works for `List<String>`, `Set<String>`, `Future<String>`, or `Optional<String>`.
+I want to say: `processAll(Container<String>)`.
+In Java, you can say `Collection<String>`, but that excludes `Optional` or `Future`.
+Also, `Collection` implies data storage. I just want "Something that wraps String".
+
+**The Definition**:
+-   **Type**: `String`, `Integer`. (Kind: `*`)
+-   **Type Constructor**: `List<T>`, `Optional<T>`. (Kind: `* -> *`   ... Takes a Type, returns a Type).
+-   **Higher-Kinded Type**: A type that accepts a Type Constructor! `Functor<List>`. (Kind: `(* -> *) -> *`).
+
+**Real-World Analogies**:
+1.  **Manufacturing Molds**:
+    -   *Type*: Plastic.
+    -   *Generic*: A Mold that takes Plastic to make a Toy. (`Mold<Plastic>`).
+    -   *HKT*: A Machine that takes *Any Mold* and operates on it.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> A Higher-Kinded Type is a type that abstracts over a type constructor. Example: `interface Functor<F<_>>` where `F` could be `List` or `Optional`.
+> Java does **not** natively support HKTs. You cannot write `interface Functor<F<T>>`.
+
+**The Java Workaround**: "Lightweight Higher-Kinded Types" (Simulacrum pattern).
+We define a marker interface `Kind<F, T>` to represent `F<T>`.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Raw Types (The Erasure Hack)
+```java
+// Dangerously Unsafe
+void process(List rawList) { ... }
+```
+*   **Verdict**: Runtime crashes guaranteed.
+
+#### Approach 2: Common Interfaces (Collection)
+```java
+void process(Collection<String> c) { ... }
+```
+*   **Limitation**: Doesn't work for `Optional`, `CompletableFuture`, `Flux`, or any Monad that isn't a Collection.
+
+#### Approach 3: The "Brand" Pattern (Vavr/Cats-Effect style)
+The standard way to checkmate Java's type system.
+
+1.  **The Witness**: Create a class `Mu` to represent the "idea" of the container (e.g., `ListMu`).
+2.  **The Kind**: `interface Kind<F, T>`.
+3.  **The Implementation**: `class MyList<T> implements Kind<ListMu, T>`.
+
+---
+
+### **4. Implementation I: The Generic "Functor"**
+We will enable `map()` for *any* container, whether it's a List or an Option.
+
+```java
+import java.util.function.Function;
+
+// 1. THE FOUNDATION (The "Kind" Interface)
+// Represents F<T>. 
+// F is the "Witness" (e.g., Maybe.class). 
+// T is the inner type.
+interface Kind<F, T> {}
+
+// 2. THE TYPE CLASS (Functor)
+// Defines that F can be mapped.
+// F matches 'W' (Witness) from Kind.
+interface Functor<F> {
+    // map: F<T> -> (T -> R) -> F<R>
+    <T, R> Kind<F, R> map(Kind<F, T> container, Function<T, R> mapper);
+}
+
+// 3. CONCRETE TYPE: "Maybe" (Our version of Optional)
+// The Witness TAG
+class MaybeMu {} 
+
+class Maybe<T> implements Kind<MaybeMu, T> {
+    private final T value;
+    private Maybe(T value) { this.value = value; }
+    
+    public static <T> Maybe<T> of(T value) { return new Maybe<>(value); }
+    public T get() { return value; }
+    
+    // Narrowing utility: Cast Kind<MaybeMu, T> back to Maybe<T>
+    public static <T> Maybe<T> narrow(Kind<MaybeMu, T> kind) {
+        return (Maybe<T>) kind;
+    }
+}
+
+// 4. THE IMPLEMENTATION OF FUNCTOR FOR MAYBE
+class MaybeFunctor implements Functor<MaybeMu> {
+    @Override
+    public <T, R> Kind<MaybeMu, R> map(Kind<MaybeMu, T> container, Function<T, R> mapper) {
+        Maybe<T> m = Maybe.narrow(container);
+        if (m.get() == null) return Maybe.of(null);
+        return Maybe.of(mapper.apply(m.get()));
+    }
+}
+
+// 5. USAGE DEMO
+public class HktDemo {
+    public static void main(String[] args) {
+        Functor<MaybeMu> F = new MaybeFunctor();
+        
+        Kind<MaybeMu, String> raw = Maybe.of("Hello HKT");
+        
+        // GENERIC CODE that doesn't know about Maybe internals
+        Kind<MaybeMu, Integer> mapped = F.map(raw, String::length);
+        
+        // Unwrap at the end
+        System.out.println("Length: " + Maybe.narrow(mapped).get());
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Why Java needs the "Witness"**
+
+In Haskell: `map :: (a -> b) -> f a -> f b`. `f` is a variable representing `List` or `Maybe`.
+In Java: `Types` are resolved to Classes. You cannot have a "Variable Class".
+`class MyClass<F>` -> F must be a concrete type like `String`, not a generic type `List`.
+So we trick the compiler. `Kind<F, T>` flattens the nested structure.
+`F<T>` becomes `Kind<F, T>`.
+-   `List<String>` -> `Kind<ListMu, String>`.
+-   `Optional<Integer>` -> `Kind<OptionalMu, Integer>`.
+
+**Vavr Library**: Vavr uses exactly this pattern (`Kind1`, `Kind2`) to provide Monad transformers.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Scala: Native HKT
+Scala supports this natively with `_`.
+```scala
+trait Functor[F[_]] {
+  def map[A, B](fa: F[A])(f: A => B): F[B]
+}
+```
+The `F[_]` syntax explicitly tells the compiler "F is a type constructor".
+
+#### Haskell: The Gold Standard
+Haskell infers kinds automatically.
+`class Functor f where fmap :: (a -> b) -> f a -> f b`.
+
+#### C++: Template Template Parameters
+C++ Templates are powerful.
+```cpp
+template <template <typename> class Container, typename T>
+void process(Container<T> c) { ... }
+```
+This is true HKT support.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Monad Interface**:
+    -   Extend `Functor<F>` to make `Monad<F>`.
+    -   Add `flatMap`: `Kind<F, R> flatMap(Kind<F, T> container, Function<T, Kind<F, R>> mapper)`.
+2.  **Generic List**:
+    -   Implement `ListMu` and `ListFunctor`.
+
+#### Edge Case Drills
+1.  **Performance overhead**:
+    -   *Q*: Does `Kind<...>` wrapper add memory overhead?
+    -   *A*: No. `Maybe` *implements* `Kind`. It's largely erased at runtime. The only cost is method dispatch if not inlined.
+2.  **Wildcards**:
+    -   *Q*: Can I use `Kind<?, T>`?
+    -   *A*: Yes, but you lose the ability to narrow it back.
+
+---
+
+### **8. Security Analysis: Type Safety Holes**
+
+**Vulnerability**: **Unchecked Casts in `narrow()`**.
+The `narrow` method usually does `(Maybe<T>) kind`.
+If someone writes a malicious class:
+`class FakeMaybe implements Kind<MaybeMu, T>`
+and passes it to your Functor, the cast inside `narrow` might succeed (depending on erasure) or fail with `ClassCastException`.
+**Mitigation**:
+Implementations of `Kind` should be closed (package-private constructors) or Sealed Types to prevent unauthorized implementations.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Concept | Java Syntax | Kind |
+| :--- | :--- | :--- |
+| **Type** | `String` | `*` |
+| **Generics** | `List<T>` | `* -> *` |
+| **HKT (Simulated)** | `Kind<ListMu, T>` | `(* -> *) -> *` |
+
+**Verdict**: You typically won't write this unless you are building a library like Vavr or Cats. But understanding it explains why Java streams/optionals don't share a common "Mappable" interface.
+
+---
+
+### **10. References**
+1.  *Type Theory and Functional Programming*.
+2.  *Lightweight Higher-Kinded Types (Jeremy Yallop, OCaml)*.
+
+---
+
+
+#### Q94: What are Virtual Threads (Project Loom), and how do they differ from Platform Threads?
+**Companies**: Netflix (Zuul Upgrade), Oracle (Helidon), Amazon (Corretto)
+**Difficulty**: **Hard** (Concurrency Models)
+**Category**: Modern Java (21+), Concurrency
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The Little's Law Limitation**
+Traditional Java Threads map 1:1 to OS Kernel Threads.
+Kernel threads are expensive (1MB stack, context switch overhead).
+**Limit**: You can run ~5,000 threads max.
+**Problem**: If you have 10,000 concurrent users waiting for a Database response (I/O blocked), your server crashes with `OutOfMemoryError` or `Thread Exhaustion`.
+Using `CompletableFuture` / RxJava fixes this but introduces "Callback Hell".
+
+**The Solution**: Virtual Threads (M:N Model).
+Threads are cheap objects in the Java Heap (not OS kernel).
+You can create **Millions** of them.
+When a Virtual Thread blocks on I/O, the JVM unmounts it and puts it aside. The Carrier Thread (OS Thread) goes to work on another Virtual Thread.
+
+**Real-World Analogies**:
+1.  **Waiters vs Chefs**:
+    -   *Platform Threads*: Each customer gets a dedicated personal Chef (Expensive!).
+    -   *Virtual Threads*: 5 Chefs handle 1000 orders. Waiters take orders and stack them up. When a Chef finishes one, they pick up the next.
+2.  **Checking out at the Store**:
+    -   *Blocking*: You stand at the counter while the cashier runs to the back (OS thread locked).
+    -   *Non-Blocking (Virtual)*: You step aside. The cashier serves the next person. When the item arrives, you resume.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> A Virtual Thread is a lightweight implementation of `java.lang.Thread` scheduled by the JVM, not the OS. It allows writing synchronous blocking code that scales like asynchronous code.
+> **Structured Concurrency**: An API to bundle related concurrent tasks into a single unit of work (`StructuredTaskScope`), ensuring error propagation and cancellation.
+
+**Key Components**:
+1.  **Virtual Thread**: The lightweight worker.
+2.  **Carrier Thread**: The OS thread (ForkJoinPool) that executes the Virtual Thread.
+3.  **Continuation**: The mechanism to pause/resume stack execution (save stack to heap).
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Thread-Per-Request (Classic)
+```java
+// CRASHES at 10,000 threads
+new Thread(() -> handle()).start();
+```
+
+#### Approach 2: Async/Reactive (Netty/RxJava)
+```java
+// Scalable, but UGLY debugging (Stack traces are broken)
+Flux.from(db.query())
+    .map(data -> process(data))
+    .subscribe();
+```
+
+#### Approach 3: Virtual Threads (Modern Java 21)
+```java
+// Scalable AND Simple.
+// Looks confusingly like Approach 1, but handles 1 Million threads.
+Thread.ofVirtual().start(() -> handle());
+```
+
+---
+
+### **4. Implementation I: The Million-Connection Server**
+Simulating a massive throughput server that blocks on DB calls.
+
+```java
+import java.time.Duration;
+import java.util.concurrent.Executors;
+import java.util.stream.IntStream;
+
+public class LoomDemo {
+
+    public static void main(String[] args) {
+        // Platform Threads would crash here (OOM)
+        // Virtual Threads utilize the heap.
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            
+            IntStream.range(0, 10_000).forEach(i -> {
+                executor.submit(() -> {
+                    // Simulate I/O Blocking (e.g., DB Call)
+                    // The JVM detects this sleep/block.
+                    // It UNMOUNTS this task from the carrier thread.
+                    // The OS thread is FREE to run other tasks.
+                    try {
+                        Thread.sleep(Duration.ofSeconds(1)); 
+                        System.out.print(".");
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+            });
+        } // Executor auto-closes and waits for all tasks
+        
+        System.out.println("\nFinished 10,000 tasks effortlessly.");
+    }
+}
+```
+
+---
+
+### **5. Implementation II: Structured Concurrency**
+Replacing `CompletableFuture.allOf` with a safer, cleaner scope.
+
+```java
+import java.util.concurrent.StructuredTaskScope;
+import java.util.concurrent.ExecutionException;
+import java.util.function.Supplier;
+
+public class StructuredConcurrencyDemo {
+
+    record UserResponse(String user, String orders) {}
+
+    public UserResponse handleRequest(String userId) throws InterruptedException, ExecutionException {
+        // ShutdownOnFailure: If ANY thread fails, cancel the others.
+        try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+            
+            // Fork tasks logic
+            Supplier<String> userTask = scope.fork(() -> fetchUser(userId));
+            Supplier<String> orderTask = scope.fork(() -> fetchOrders(userId));
+
+            // Wait for both to finish (or one to fail)
+            scope.join(); 
+            scope.throwIfFailed(); // Propagate exception
+
+            // Combine results
+            return new UserResponse(userTask.get(), orderTask.get());
+        }
+    }
+
+    private String fetchUser(String id) throws InterruptedException {
+        Thread.sleep(100); 
+        return "User: " + id;
+    }
+
+    private String fetchOrders(String id) throws InterruptedException {
+        Thread.sleep(200);
+        return "Orders for " + id;
+    }
+    
+    public static void main(String[] args) throws Exception {
+        System.out.println(new StructuredConcurrencyDemo().handleRequest("Syed"));
+    }
+}
+```
+
+---
+
+### **6. Deep Dive: Continuations**
+
+**How it works under the hood**:
+When `Thread.sleep()` or `socket.read()` is called:
+1.  The JVM captures the current stack frame (variables, program counter).
+2.  It creates a **Continuation** object on the Heap.
+3.  The Carrier Thread (OS Thread) is released.
+4.  When the OS signals "Sleep Done" or "Data Ready":
+5.  The JVM schedules the Continuation.
+6.  The Continuation restores the stack onto a generic Carrier Thread.
+7.  Execution resumes *exactly* where it left off.
+
+**Performance Note**:
+Virtual Threads are not faster for CPU-bound tasks (calculating PI). They are faster for **I/O-wait** tasks because they don't hold OS resources while waiting.
+
+---
+
+### **7. Multi-Language Perspectives**
+
+#### Go: Goroutines
+Loom is basically Goroutines for Java.
+`go func()` == `Thread.ofVirtual().start()`.
+Go has a segmented stack (starts small, grows). Java uses heap-allocated stack chunks.
+
+#### Kotlin: Coroutines
+Kotlin Coroutines are compile-time state machines (suspend functions).
+Loom is a **Runtime** implementation.
+Advantage Loom: You don't need `suspend` keywords everywhere (Function Coloring Problem).
+
+#### Node.js: Event Loop
+Node is single-threaded async.
+One bad calculation blocks the whole server.
+Loom is multi-threaded async. One bad calculation only blocks one virtual thread (and its carrier), but others proceed.
+
+---
+
+### **8. Practice & Assessment**
+
+#### Core Exercises
+1.  **Echo Server**:
+    -   Write a standard `ServerSocket` loop.
+    -   Use `newVirtualThreadPerTaskExecutor`.
+    -   Benchmark 50k concurrent telnet connections.
+2.  **Timeout Handling**:
+    -   Use `StructuredTaskScope.ShutdownOnFailure`.
+    -   Add a `.fork()` for a Timer.
+    -   If the timer finishes first, throw a TimeoutException to cancel the scope.
+
+#### Edge Case Drills
+1.  **Pinning**:
+    -   *Q*: What prevents unmounting?
+    -   *A*: Running `synchronized` blocks or Native Code (JNI). The Virtual Thread is "Pinned" to the Carrier.
+    -   *Fix*: Use `ReentrantLock` instead of `synchronized` until JDK fixes this.
+2.  **ThreadLocal**:
+    -   *Q*: Can I use ThreadLocal?
+    -   *A*: Yes, but be careful. Creating 1 million copies of a large map will OOM the heap. Use `ScopedValues` (Incubator feature) instead.
+
+---
+
+### **9. Security Analysis: Dangers of Infinite Threads**
+
+**Vulnerability**: **Resource Exhaustion (Backend)**.
+Just because you can spin 1 Million threads doesn't mean your Database can handle 1 Million connections.
+**Mitigation**:
+You MUST still use **Semaphores** or **Rate Limiters** to protect downstream resources.
+Creating the thread is cheap; the work it does might not be.
+
+---
+
+### **10. Cheatsheet & Summary**
+
+| Feature | Platform Thread | Virtual Thread |
+| :--- | :--- | :--- |
+| **Mapping** | 1:1 with OS | M:N (Many to ForkJoinPool) |
+| **Cost** | 1MB RAM | ~200 Bytes - 1KB |
+| **Blocking** | Blocks OS Thread | Unmounts (Free OS Thread) |
+| **Use For** | Heavy CPU Tasks | High Concurrency I/O |
+
+**Verdict**: The most significant change to Java server-side scaling in 25 years. Stop using Reactive/Async frameworks unless you really need them. Write simple blocking code again.
+
+---
+
+### **11. References**
+1.  *JEP 444: Virtual Threads*.
+2.  *Project Loom Mailing List*.
+
+---
+
+
+#### Q95: What is Non-Blocking I/O (NIO), and how does the Reactor Pattern work?
+**Companies**: Netflix (Zuul/Netty), WhatsApp (Erlang/NIO), LinkedIn (Kafka)
+**Difficulty**: **Hard** (Systems Programming)
+**Category**: Networking, High-Performance Systems
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The C10k Problem**
+Classic Thread-Per-Socket servers scale linearly.
+At 10,000 connections, you need 10,000 threads.
+Most of these threads are **Blocked**, doing nothing but waiting for bytes.
+Context switching 10k threads kills the CPU (Thrashing).
+
+**The Solution**: I/O Multiplexing (Selector).
+Instead of 10k threads watching 10k sockets, have **1 Thread** watch 10k sockets.
+The "Selector" is like a Single Guard at a hotel lobby.
+He checks 1000 mailboxes. If mailbox #42 has a letter, he wakes up the worker to process it.
+
+**Real-World Analogies**:
+1.  **The Telephone Operator**:
+    -   *Blocking*: Operator waits on the line for you to finish talking. Can handle 1 call.
+    -   *Non-Blocking*: Operator puts 10 people on hold. When a light blinks (Data Ready), she clicks that line. Can handle 100 calls.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> **NIO (New I/O)**: A Java API (`java.nio`) providing Buffers, Channels, and Selectors for high-performance I/O operations.
+> **Reactor Pattern**: An event handling pattern that demultiplexes service requests delivered concurrently to a service handler from one or more inputs.
+
+**Key Components**:
+1.  **Buffer**: A block of memory (`ByteBuffer`) for reading/writing data.
+2.  **Channel**: A connection to a file/socket (`SocketChannel`).
+3.  **Selector**: A multiplexer that monitors multiple channels for events (Connect, Accept, Read, Write).
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: BIO (Blocking I/O)
+```java
+// Thread blocked here until data arrives
+InputStream.read(); 
+```
+*   **Verdict**: Good for simple CLI tools. Bad for servers.
+
+#### Approach 2: NIO Polling (Busy Wait)
+```java
+while(true) {
+    if (channel.read(buf) > 0) process(); // Burns 100% CPU loops
+}
+```
+*   **Verdict**: Inefficient CPU usage.
+
+#### Approach 3: NIO Selector (Event Driven)
+```java
+selector.select(); // Block until ONE event happens
+Set keys = selector.selectedKeys(); // Get list of ready channels
+```
+*   **Verdict**: The industry standard (Netty, Jetty, Tomcat).
+
+---
+
+### **4. Implementation I: The Single-Threaded Chat Server**
+Handling 1000 clients with ONE thread.
+
+```java
+import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.channels.*;
+import java.util.*;
+
+public class ReactorServer {
+    public static void main(String[] args) throws Exception {
+        // 1. OPEN SELECTOR & SERVER CHANNEL
+        Selector selector = Selector.open();
+        ServerSocketChannel serverSocket = ServerSocketChannel.open();
+        
+        serverSocket.bind(new InetSocketAddress(8080));
+        serverSocket.configureBlocking(false); // MUST be non-blocking
+        
+        // Register for Accept events (New connections)
+        serverSocket.register(selector, SelectionKey.OP_ACCEPT);
+        
+        System.out.println("Reactor Server started on 8080...");
+
+        while (true) {
+            // 2. BLOCK UNTIL EVENTS
+            selector.select(); 
+            
+            // 3. PROCESS EVENTS
+            Iterator<SelectionKey> iter = selector.selectedKeys().iterator();
+            while (iter.hasNext()) {
+                SelectionKey key = iter.next();
+                iter.remove(); // Vital! Remove processed key
+                
+                if (key.isAcceptable()) {
+                    handleAccept(serverSocket, selector);
+                } else if (key.isReadable()) {
+                    handleRead(key);
+                }
+            }
+        }
+    }
+
+    private static void handleAccept(ServerSocketChannel server, Selector selector) throws Exception {
+        SocketChannel client = server.accept();
+        client.configureBlocking(false);
+        // Register new client for READ events
+        client.register(selector, SelectionKey.OP_READ);
+        System.out.println("Accepted: " + client.getRemoteAddress());
+    }
+
+    private static void handleRead(SelectionKey key) throws Exception {
+        SocketChannel client = (SocketChannel) key.channel();
+        ByteBuffer buffer = ByteBuffer.allocate(256);
+        
+        int bytesRead = client.read(buffer);
+        if (bytesRead == -1) {
+            client.close();
+            System.out.println("Client disconnected");
+            return;
+        }
+        
+        String msg = new String(buffer.array()).trim();
+        System.out.println("Received: " + msg);
+        
+        // Echo back
+        buffer.flip();
+        client.write(buffer);
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Direct ByteBuffer vs Heap ByteBuffer**
+
+**Heap Buffer**:
+-   `ByteBuffer.allocate(1024)`.
+-   Lives in Java Heap (GC managed).
+-   **Slow I/O**: The Kernel cannot access Java Heap directly. The JVM must copy data to a native buffer first.
+
+**Direct Buffer**:
+-   `ByteBuffer.allocateDirect(1024)`.
+-   Lives in Native Memory (Off-Heap).
+-   **Zero Copy**: The Kernel writes directly to this address. Faster network I/O.
+-   **Risk**: Expensive allocation and harder to debug (Memory Leaks = OOM native memory).
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Node.js: Libuv
+Node is built entirely on the Reactor pattern (using C++ Libuv).
+It hides the complexity. You just write callbacks.
+
+#### Go: Netpoller
+Go looks synchronous (`conn.Read()`), but effectively uses non-blocking I/O + scheduling under the hood.
+
+#### Rust: Tokio
+Tokio works similarly to Netty/NIO but with `async/await` syntax and zero-cost abstractions.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Write Handler**:
+    -   Modify the chat server to handle `OP_WRITE`.
+    -   Don't just loop calls to `write()`; register interest in WRITE only when the buffer is full.
+2.  **Multiprocessor Reactor**:
+    -   Implement "Main Reactor" (Accepts connections) + "Sub Reactors" (Thread Pool for I/O). This is the Netty model.
+
+#### Edge Case Drills
+1.  **Slow Consumers**:
+    -   *Q*: What if the client reads slowly?
+    -   *A*: The TCP Window fills up. Your `write()` returns 0. You must stop writing and wait for `OP_WRITE`.
+2.  **Keep-Alive**:
+    -   *Q*: How to handle idle dead connections?
+    -   *A*: Store `lastActiveTime` on the Attachment (SelectionKey). Run a background cleaner task.
+
+---
+
+### **8. Security Analysis: The Slowloris Attack**
+
+**Vulnerability**: **DoS via Slow Connections**.
+An attacker opens 10,000 connections and sends 1 byte every 10 minutes.
+In a Thread-Per-Connection model, you run out of threads.
+**Mitigation (NIO)**:
+NIO handles idle connections cheaply (just an object in heap, no thread).
+However, you still consume File Descriptors.
+You must enforce **Read Timeouts** and close idle sockets aggressively.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Concept | Description |
+| :--- | :--- |
+| **Selector** | The Guard (Multiplexer). Checks multiple channels. |
+| **Channel** | The Pipe (Socket wrapper). Can be non-blocking. |
+| **Buffer** | The Box. Data container. Must `flip()` between read/write. |
+| **SelectionKey** | The Ticket. Represents registration (OP_READ, etc). |
+
+**Verdict**: Raw NIO is extremely hard to get right (bugs, edge cases). In production, use **Netty**. But you must know how it works to debug it.
+
+---
+
+### **10. References**
+1.  *Java NIO (O'Reilly Books)*.
+2.  *Scalable IO in Java (Doug Lea)*.
+
+---
+
+
+#### Q96: What is GraalVM Native Image (AOT Compilation), and how does it optimize Java for the Cloud?
+**Companies**: Oracle, Red Hat (Quarkus), VMware (Spring Native), AWS (Lambda)
+**Difficulty**: **Hard** (Compiler Theory / JVM Internals)
+**Category**: Modern Java, Cloud Native, Performance
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The Serverless Cold Start Problem**
+Regular Java (JIT) is great for long-running servers.
+But it has a **Slow Startup** (1-2 seconds) and **High Memory Footprint** (150MB+ just to say Hello).
+In AWS Lambda, you pay for duration. If your app takes 2s to start, you lose money and users.
+**Why is JIT slow at start?**
+1.  It loads thousands of classes from disk.
+2.  It interprets bytecode.
+3.  It profiles the code.
+4.  It compiles hot paths to assembly C2 (Server Compiler).
+
+**The Solution**: AOT (Ahead-of-Time) Compilation.
+Compile Java Bytecode -> Native Machine Code (Elf/Mach-O) *at build time*.
+Result:
+-   **Startup**: 5 milliseconds.
+-   **Memory**: 10MB.
+-   **No JVM**: The executable contains a tiny VM (SubstrateVM) for GC/Threads.
+
+**Real-World Analogies**:
+1.  **Cooking**:
+    -   *JIT (Just-in-Time)*: You order food. The chef (JVM) reads the recipe, chops onions, preheats the oven, and cooks it *while you wait*.
+    -   *AOT (Ahead-of-Time)*: The food is pre-cooked and frozen (Native Image). You just microwave it for 2 seconds.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> **GraalVM Native Image**: A technology to compile Java applications ahead-of-time into standalone binaries.
+> **Closed-World Assumption**: The compiler assumes that *all* reachable code is known at build time. No new classes can be loaded dynamically at runtime (Refection/Proxy limitations).
+
+**Key Components**:
+1.  **Static Analysis**: The builder traverses the call graph from `main()`. Anything not reachable is stripped (Tree Shaking).
+2.  **Heap Snapshot**: Static variables are initialized at build time and baked into the binary's data section.
+3.  **SubstrateVM**: A minimal runtime embedded in the binary to handle GC, Exception Handling, and Threads.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Standard JDK (HotSpot)
+`java -jar app.jar`.
+*   **Startup**: 1.5s. **RAM**: 200MB.
+*   **Optimization**: Peak throughput is very high (Profile-Guided Optimization).
+
+#### Approach 2: AppCDS (Class Data Sharing)
+`java -XX:ArchiveClassesAtExit=app.jsa ...`.
+*   **Startup**: 0.8s.
+*   **Verdict**: Better, but still requires a full JVM.
+
+#### Approach 3: GraalVM Native Image
+`./app`.
+*   **Startup**: 0.005s. **RAM**: 15MB.
+*   **Verdict**: Instant startup, ideal for CLI tools and Serverless. Lower peak throughput (no JIT).
+
+---
+
+### **4. Implementation I: The Startup Benchmark**
+Measuring the difference between JIT and AOT.
+
+```java
+public class CloudFunction {
+    static final long START_TIME = System.nanoTime();
+
+    // Static Initializer runs at BUILD TIME in Native Image
+    static final Map<String, String> CONFIG = loadConfig(); 
+
+    public static void main(String[] args) {
+        long readyTime = System.nanoTime();
+        System.out.println("App Ready in: " + (readyTime - START_TIME) / 1_000_000 + "ms");
+        
+        // Hypothetical Handler
+        handleRequest();
+    }
+
+    static Map<String, String> loadConfig() {
+        // Expensive parsing logic...
+        System.out.println("Parsing Config (Expensive)...");
+        return Map.of("DB", "jdbc:postgresql://...");
+    }
+
+    static void handleRequest() {
+        System.out.println("Handling Serverless Request...");
+    }
+}
+```
+
+**Reflecting the Configuration**:
+To make the above work with Reflection (if `loadConfig` used it), you need `reflect-config.json`.
+
+```json
+[
+  {
+    "name": "com.example.CloudFunction",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true
+  }
+]
+```
+
+---
+
+### **5. Deep Dive: The Closed-World Assumption**
+
+This is the hardest part of AOT.
+Dynamic features of Java **DO NOT WORK** out of the box.
+
+1.  **Class.forName("com.mysql.Driver")**:
+    -   *JIT*: Loads the class from disk.
+    -   *AOT*: Fails. The compiler didn't know "com.mysql.Driver" string would be used, so it didn't include the class in the binary.
+    -   *Fix*: You must register the Class string in configuration files.
+
+2.  **Resources (getResourceAsStream)**:
+    -   *Fix*: `resource-config.json` to tell the compiler which files to include in the binary.
+
+3.  **Dynamic Proxies (Spring)**:
+    -   *Fix*: Frameworks like Quarkus/Micronaut compute this at build time (annotation processing) to avoid runtime proxies.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Go / Rust
+These languages are natively AOT compiled.
+They have always enjoyed fast startup and low memory.
+GraalVM brings Java to this level.
+
+#### C# (NativeAOT)
+Microsoft .NET 7/8 introduced NativeAOT, which is exactly the same concept as GraalVM Native Image.
+Trimming (Tree Shaking) is a first-class citizen in .NET now.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Build a CLI**:
+    -   Write a Java tool that parses JSON.
+    -   Compile with `native-image`.
+    -   Verify it runs instantly compared to `java -jar`.
+2.  **Reflection Trace**:
+    -   Use `native-image-agent` to run your app and *automatically generate* the config JSONs.
+    -   `java -agentlib:native-image-agent=config-output-dir=conf/ -jar app.jar`
+
+#### Edge Case Drills
+1.  **Build-Time Initialization**:
+    -   *Q*: I opened a File Handle in a `static` block. Why does the native image crash?
+    -   *A*: The file descriptor was created on the *Build Machine*. It is invalid on the *Run Machine*.
+    -   *Fix*: Use `--initialize-at-run-time=MyClass`.
+2.  **Peak Performance**:
+    -   *Q*: Is Native Image faster for long-running jobs?
+    -   *A*: Usually **No**. JIT (C2) can make optimistic assumptions (inlining) that AOT cannot effectively do without PGO (Profile Guided Optimization).
+
+---
+
+### **8. Security Analysis: Reduced Attack Surface**
+
+**Advantage**: **No Gadget Chains via Arbitrary Class Loading**.
+In a normal JVM, if you have a dangerous class on the classpath (e.g., `InvokerTransformer`), an attacker can deserialize it.
+In Native Image, **Unused classes are removed**.
+If `InvokerTransformer` isn't reachable from `main()`, it simply isn't in the binary.
+This dramatically mitigates Deserialization RCE attacks.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Feature | JIT (HotSpot) | AOT (GraalVM) |
+| :--- | :--- | :--- |
+| **Bake Time** | Runtime | Build Time |
+| **Startup** | Slow (1s+) | Instant (ms) |
+| **Memory** | High (JVM Overhead) | Low (SubstrateVM) |
+| **Throughput** | High (Profiled) | Lower (Static) |
+| **Dynamic Loading**| Yes | No (Closed World) |
+
+**Verdict**: Use Native Image for **CLI Tools**, **Kubernetes Sidecars**, and **Serverless Functions**. Stick to JIT for monolithic long-running backend servers.
+
+---
+
+### **10. References**
+1.  *GraalVM Reference Manual*.
+2.  *Introduction to SubstrateVM*.
+
+---
+
+
+#### Q97: What is Data Oriented Programming (DOP) in Java, and how do Records and Sealed Types enable it?
+**Companies**: Amazon (DynamoDB Team), Netflix (DGS), Oracle (Java Architect Team)
+**Difficulty**: **Medium** (Paradigm Shift)
+**Category**: Modern Java (17+), Architecture
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The Failure of Complex OOP**
+Traditional OOP often couples **Data** (Fields) with **Behavior** (Methods).
+This leads to "Fat Domain Models" (Spring/Hibernate Entities) where 50% of the code is Getters/Setters/Hashcode/Equals.
+Worse, complex object graphs (Inheritance) make serialization and pattern matching impossible.
+*   *Visitor Pattern?* Too verbose.
+*   *Switch on Type?* Ugly `instanceof` chains.
+
+**The Solution**: Data Oriented Programming (DOP).
+Treat Data as **Immutable**, Transparent carriers.
+Separate Logic from Data.
+Use **Records** (Data) + **Sealed Interfaces** (Taxonomy) + **Pattern Matching** (Logic).
+
+**Real-World Analogies**:
+1.  **Postal Service**:
+    -   *OOP*: The `Letter` object knows how to `deliver()` itself. (Weird).
+    -   *DOP*: The `Letter` is just paper (Data). The `Postman` (System) reads the data and acts.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> **Data Oriented Programming (DOP)**: A paradigm that models data as immutable, transparent values (Records) and separates business logic into functional transforms (Pattern Matching switch), utilizing Sealed Types to ensure type-safety and exhaustiveness.
+> *Principle 1*: Model data as data (Records).
+> *Principle 2*: Data is immutable.
+> *Principle 3*: Validate at the boundary (Constructors).
+> *Principle 4*: Make illegal states unrepresentable (Sealed Types).
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: POJO (Java 1.0 - 14)
+```java
+public class User {
+    private final String name; // Boilerplate getters, equals, hashcode...
+    public User(String name) { this.name = name; }
+}
+```
+*   **Verdict**: Verbosity leads to Lombok dependency. Not transparent foundationally.
+
+#### Approach 2: Lombok `@Value`
+```java
+@Value
+public class User { String name; }
+```
+*   **Verdict**: Better, but still an opaque class to the JVM/Serialization.
+
+#### Approach 3: Java 17+ Records (DOP)
+```java
+public record User(String name) {} 
+```
+*   **Verdict**: Semantic standard. JVM knows it's data. Better Serialization. Destructuring support.
+
+---
+
+### **4. Implementation I: The Financial System (DOP Style)**
+Modeling a payment system where we need to handle different transaction types without Visitor Pattern.
+
+```java
+public class DopFinancialSystem {
+
+    // 1. DATA MODEL (Sealed Taxonomy)
+    // Locked hierarchy: Only these 3 standard types exist.
+    sealed interface Transaction permits Payment, Refund, Dispute {}
+
+    // 2. IMMUTABLE RECORDS (The Data)
+    record Payment(String from, String to, double amount) implements Transaction {
+        // Compact Constructor for Validation
+        public Payment {
+            if (amount <= 0) throw new IllegalArgumentException("Amount must be positive");
+        }
+    }
+
+    record Refund(String originalTxId, double amount) implements Transaction {}
+
+    record Dispute(String txId, String reason) implements Transaction {}
+
+    // 3. BUSINESS LOGIC (Pattern Matching)
+    // The "Processor" is separate from the "Data".
+    public static String process(Transaction tx) {
+        
+        // SWITCH EXPRESSION with PATTERN MATCHING
+        // Compiler Error if you forget a case (Exhaustiveness checking).
+        return switch (tx) {
+            
+            // Destructuring Record Pattern (Java 21)
+            case Payment(var from, var to, var amt) 
+                -> "Processing payment of $" + amt + " from " + from;
+                
+            case Refund(var id, var amt) 
+                -> "Refunding $" + amt + " for Tx: " + id;
+                
+            case Dispute(var id, var reason) 
+                -> "Escalating dispute on " + id + ": " + reason;
+        };
+    }
+
+    public static void main(String[] args) {
+        Transaction tx1 = new Payment("Alice", "Bob", 100.0);
+        System.out.println(process(tx1));
+        
+        Transaction tx2 = new Dispute("TX_123", "Fraud");
+        System.out.println(process(tx2));
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Feature Envy vs DOP**
+
+**OO Purist Critique**:
+"Wait, isn't `process(Transaction)` an example of Feature Envy? Shouldn't `Transaction` have a `process()` method?"
+
+**DOP Rebuttal**:
+1.  **Context**: A `Payment` likely moves through 10 different systems (Risk Engine, Ledger, Analytics, Audit).
+2.  **Bloat**: If we add `processRisk()`, `addToLedger()`, `analyze()` to the User object, it becomes a God Object.
+3.  **Separation**: In DOP, the Data (`Payment`) is shared. The Logic (`RiskEngine`) resides in its own service.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Kotlin: Data Classes & Sealed Classes
+Kotlin pioneered this on the JVM.
+`data class User(val name: String)` and `sealed class Expr`.
+Java Records are functionally identical but strictly immutable (Kotlin allows `var`).
+
+#### Scala: Case Classes
+`case class User(name: String)`.
+Scala's pattern matching is more powerful but slower to compile.
+
+#### Rust: Enums & Structs
+Rust Enums are Algebraic Data Types (Sum Types).
+`enum Transaction { Payment { to: String }, Refund }`.
+Java's `sealed interface` is exactly this Sum Type concept.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **JSON Parser**:
+    -   Define `sealed interface JsonValue`.
+    -   Records: `JsonString`, `JsonNumber`, `JsonObject`.
+    -   Write a `switch` based formatter.
+2.  **Expression Evaluator**:
+    -   `Expr = Constant | Add(Expr, Expr) | Mul(Expr, Expr)`.
+    -   Write `eval(Expr e)` using recursive pattern matching.
+
+#### Edge Case Drills
+1.  **Evolution**:
+    -   *Q*: What if I add a new Record `Chargeback`?
+    -   *A*: The compiler breaks your `switch` statement! This is a **Feature**, not a bug. It forces you to handle the new case everywhere.
+2.  **Serialization**:
+    -   *Q*: Are Records safe for serialization?
+    -   *A*: Yes! Records serialize differently. They use the Canonical Constructor during deserialization, so **validation logic always runs**. (Unlike normal classes which bypass constructors via `Unsafe`).
+
+---
+
+### **8. Security Analysis: Serialization Gadgets**
+
+**The Vulnerability**:
+Classic Java Serialization allocates objects via `Unsafe` and sets fields via reflection.
+It **Bypasses Contractors**.
+If you have security checks in your constructor (`if (isAdmin) ...`), deserialization skips them.
+
+**The Record Fix**:
+Records **MUST** go through the Canonical Constructor during deserialization.
+It is impossible to deserialize a Record with an invalid state if the constructor forbids it.
+**DOP is Safer**.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Concept | OOP Style | DOP Style |
+| :--- | :--- | :--- |
+| **Data** | Mutable Beans / POJOs | Immutable Records |
+| **Logic** | Encapsulated in Object | Separated in Services |
+| **Polymorphism** | VTable / Overriding | `switch` Pattern Matching |
+| **Safety** | Tests required | Compiler Exhaustiveness |
+
+**Verdict**: Use Records for all DTOs, Event Messages, and Domain Objects. Reserve Classes for Stateful Services (Managers, Controllers).
+
+---
+
+### **10. References**
+1.  *Data Oriented Programming (Yehonathan Sharvit)*.
+2.  *JEP 395: Records*.
+3.  *JEP 409: Sealed Classes*.
+
+---
+
+
+#### Q98: What is the Foreign Function & Memory API (Project Panama), and how does it replace JNI/Unsafe?
+**Companies**: High-Frequency Trading Firms (Jane Street, IMC), Database Vendors (Neo4j, Databricks)
+**Difficulty**: **Very Hard** (Systems Programming)
+**Category**: Modern Java (22+), Low-Level
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The Danger of `Unsafe` and JNI**
+For 25 years, if you wanted extreme performance (Off-heap memory) or to use a C library (TensorFlow, OpenSSL):
+1.  **JNI (Java Native Interface)**: Writng C glue code. Complex, tedious, brittle. One typo crashes the JVM.
+2.  **`sun.misc.Unsafe`**: The "Backdoor". Accessing raw memory adresses. It's illegal, unsupported, and scheduled for removal.
+
+**The Solution**: Project Panama (FFM API).
+A standard, safe, and efficient API to:
+1.  Allocate off-heap memory (`Arena`, `MemorySegment`).
+2.  Call C functions directly from Java (`Linker`).
+**No C code required.**
+
+**Real-World Analogies**:
+1.  **The Bridge**:
+    -   *JNI*: You have to build a custom bridge (write C) every time you want to cross the river.
+    -   *Panama*: There is a magical portal. You just describe the destination (MethodSignature), and you are there.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> **Foreign Function & Memory (FFM) API**: A preview API (Standard in Java 22) that enables Java programs to interoperate with code and data outside of the Java runtime.
+> **MemorySegment**: A safe handle to a contiguous region of memory (On-heap or Off-heap).
+> **Arena**: Controls the lifecycle (allocation/deallocation) of memory segments.
+
+**Key Components**:
+1.  **Arena**: `Arena.ofConfined()` (Thread-local) or `Arena.ofShared()`.
+2.  **MemorySegment**: The pointer + size + bounds check.
+3.  **Linker**: The mechanism to look up symbols (e.g., `strlen`) in native reuse libraries.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: JNI (The Old Way)
+**Java**: `native void sayHello();`
+**C**: `JNIEXPORT void JNICALL Java_MyClass_sayHello(JNIEnv *env, jobject obj) { printf("Hello"); }`
+*   **Verdict**: Terrible developer experience. Hard to build/deploy.
+
+#### Approach 2: `sun.misc.Unsafe` (The Hack)
+**Java**: `unsafe.allocateMemory(1024); unsafe.putInt(addr, 42);`
+*   **Verdict**: Fast, but segfaults crash the JVM. No bounds checking.
+
+#### Approach 3: Panama FFM (The Standard)
+**Java**: 
+```java
+try (Arena arena = Arena.ofConfined()) {
+    MemorySegment segment = arena.allocate(1024);
+    segment.set(ValueLayout.JAVA_INT, 0, 42);
+} // Auto-freed here!
+```
+*   **Verdict**: Safe (Bounds checked), Fast (HotSpot optimized), Clean.
+
+---
+
+### **4. Implementation I: Calling standard C `strlen`**
+We will call the C standard library `strlen` function directly from Java without writing a single line of C.
+
+```java
+import java.lang.foreign.*;
+import java.lang.invoke.MethodHandle;
+
+public class PanamaDemo {
+
+    public static void main(String[] args) throws Throwable {
+        
+        // 1. GET THE LINKER (Points to C Standard Lib)
+        Linker linker = Linker.nativeLinker();
+        
+        // 2. LOOKUP THE FUNCTION SYMBOL (strlen)
+        SymbolLookup stdlib = linker.defaultLookup();
+        MemorySegment strlenAddr = stdlib.find("strlen").orElseThrow();
+        
+        // 3. DEFINE THE FUNCTION SIGNATURE
+        // C: size_t strlen(const char *s);
+        // Java: long strlen(MemorySegment s);
+        FunctionDescriptor descriptor = FunctionDescriptor.of(
+            ValueLayout.JAVA_LONG,  // Return type (size_t -> long)
+            ValueLayout.ADDRESS     // Argument type (char* -> Address)
+        );
+        
+        // 4. CREATE METHOD HANDLE
+        MethodHandle strlen = linker.downcallHandle(strlenAddr, descriptor);
+        
+        // 5. USE IT SAFELY
+        // Arena handles memory allocation/deallocation (RAII style)
+        try (Arena arena = Arena.ofConfined()) {
+            
+            // Allocate off-heap string
+            MemorySegment cString = arena.allocateFrom("Hello Panama!");
+            
+            // Invoking the C function
+            long len = (long) strlen.invoke(cString);
+            
+            System.out.println("Length from C: " + len); // Prints 13
+        }
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: `Unsafe` vs `MemorySegment`**
+
+**Why verify bounds?**
+`Unsafe` allows `unsafe.putInt(addr + 1000000, 1)`.
+If that address belongs to the Kernal -> **Blue Screen / Segfault**.
+`MemorySegment` knows its size.
+`segment.set(Layout, offset, val)` checks `offset < size`.
+If out of bounds -> `IndexOutOfBoundsException` (Safe Java Exception).
+
+**Temporal Safety**:
+What if I free the memory, then try to access it? (Use-After-Free vulnerability).
+Panama's `Arena` prevents this.
+If the Arena is closed, the segment becomes **invalid**. Access throws an exception.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### Rust: FFI
+Rust has `extern "C"` blocks.
+It is zero-cost but `unsafe`.
+Java Panama focuses on **Safety first**, then performance.
+
+#### Python: CTypes
+Python can load C DLLs easily (`ctypes.CDLL`).
+Panama brings this ease-of-use to Java but with JIT compilation speeds properly typed handles.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Off-Heap Array**:
+    -   Allocate 1GB of off-heap memory using `Arena`.
+    -   Treat it as a `long[]`.
+    -   Benchmark sequential writes vs `long[]` (On Heap).
+2.  **Call `getpid`**:
+    -   Lookup `getpid` (standard POSIX function).
+    -   Print the JVM's Process ID.
+
+#### Edge Case Drills
+1.  **Structs**:
+    -   *Q*: How do I represent a C struct `Point { int x; int y; }`?
+    -   *A*: Use `GroupLayout`.
+        ```java
+        GroupLayout POINT_LAYOUT = MemoryLayout.structLayout(
+            ValueLayout.JAVA_INT.withName("x"),
+            ValueLayout.JAVA_INT.withName("y")
+        );
+        ```
+2.  **Thread Safety**:
+    -   *Q*: Can I share segments between threads?
+    -   *A*: Only if allocated with `Arena.ofShared()`. Confined arenas are single-threaded for performance (no volatile checks).
+
+---
+
+### **8. Security Analysis: Buffer Overflows Eliminated**
+
+**Vulnerability**: **Heartbleed (OpenSSL)**.
+Heartbleed happened because C `memcpy` didn't check bounds.
+**Panama Mitigation**:
+Every access is bounds-checked by the JVM.
+You *cannot* read 64KB of memory if the segment is only 10 bytes.
+Dramatically reduces the surface area for native memory exploits in Java applications.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Feature | JNI | Unsafe | Panama (FFM) |
+| :--- | :--- | :--- | :--- |
+| **Ease of Use** | Hard (Write C) | Hard (Raw Longs) | Easy (Java API) |
+| **Safety** | None (Segfaults) | None (Segfaults) | **Strong** (Exceptions) |
+| **Performance**| Slow (Transition) | Very Fast | **Fast** (Intrinsics) |
+| **Status** | Standard | Deprecated | Standard (Java 22) |
+
+**Verdict**: If you are writing High-Performance Systems or wrapping native libraries, Panama is the only way forward. Stop using `Unsafe`.
+
+---
+
+### **10. References**
+1.  *JEP 454: Foreign Function & Memory API*.
+2.  *Project Panama Mailing List*.
+
+---
+
+
+#### Q99: What is the Vector API (SIMD), and how does it optimize Calculation Heavy tasks?
+**Companies**: High-Frequency Trading (Two Sigma), AI Infrastructure (TensorFlow/Java), Cryptography
+**Difficulty**: **Hard** (Hardware Architecture)
+**Category**: Modern Java (20+), Performance
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The SISD Bottleneck**
+Traditional CPU execution is **SISD** (Single Instruction, Single Data).
+`c[i] = a[i] + b[i]`
+The CPU loads `a[0]`, loads `b[0]`, adds them, stores `c[0]`. Repeat for 1,000,000 items.
+It's inefficient because modern CPUs have wide registers (AVX-512) that can hold 16 integers at once.
+
+**The Solution**: SIMD (Single Instruction, Multiple Data).
+The CPU loads 16 integers from `a` into one register.
+Loads 16 integers from `b`.
+Adds them all in **ONE CPU CYCLE**.
+Stores 16 integers to `c`.
+**Result**: 16x Theoretical Speedup (Practically 4-8x).
+
+**Real-World Analogies**:
+1.  **The Assembly Line**:
+    -   *SISD*: One worker paints one car at a time.
+    -   *SIMD*: A giant spray machine paints 16 cars simultaneously.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> **Vector API**: An API to express vector computations that reliably compile at runtime to optimal vector hardware instructions (AVX, NEON, SVE) on supported CPU architectures.
+> **Lane**: A single element position within a vector (e.g., a 256-bit vector has 8 lanes of 32-bit integers).
+
+**Key Components**:
+1.  **VectorSpecies**: Defines the shape (e.g., `IntVector.SPECIES_256`).
+2.  **Vector**: The value holder (`IntVector`, `FloatVector`).
+3.  **Mask**: Predicate for conditional operations (simulating `if` capability inside a vector).
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Scalar Loop (The Standard)
+```java
+// Logic: Correct
+// Performance: 1x (Scalar limitations)
+for (int i = 0; i < a.length; i++) {
+    c[i] = a[i] * b[i];
+}
+```
+
+#### Approach 2: Auto-Vectorization (The Hope)
+The JIT (C2 Compiler) *tries* to convert Approach 1 into SIMD.
+*   **Problem**: It's brittle. A simple `if` statement or bounds check might prevent vectorization. You don't know if it happened until you check assembly logs.
+
+#### Approach 3: Vector API (The Guarantee)
+```java
+// Logic: Explicit Vector Instructions
+// Performance: 8x-16x (Guarantee AVX generation)
+var species = IntVector.SPECIES_PREFERRED;
+for (int i = 0; i < len; i += species.length()) {
+    var va = IntVector.fromArray(species, a, i);
+    var vb = IntVector.fromArray(species, b, i);
+    va.mul(vb).intoArray(c, i);
+}
+```
+
+---
+
+### **4. Implementation I: The Dot Product Benchmark**
+Calculating Dot Product of two massive arrays is the "Hello World" of Machine Learning.
+
+```java
+import jdk.incubator.vector.*;
+import java.util.Arrays;
+
+public class SimdDemo {
+    // Determine the optimal vector size for this CPU (e.g., 256-bit or 512-bit)
+    static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
+
+    public static float dotProductScalar(float[] a, float[] b) {
+        float sum = 0f;
+        for (int i = 0; i < a.length; i++) {
+            sum += a[i] * b[i];
+        }
+        return sum;
+    }
+
+    public static float dotProductVector(float[] a, float[] b) {
+        int i = 0;
+        int limit = a.length - (a.length % SPECIES.length());
+        FloatVector sumVec = FloatVector.zero(SPECIES);
+
+        // 1. Vectorized Loop (Main Loop)
+        // Process chunks of 8 or 16 floats at a time
+        for (; i < limit; i += SPECIES.length()) {
+            var va = FloatVector.fromArray(SPECIES, a, i);
+            var vb = FloatVector.fromArray(SPECIES, b, i);
+            // Fused Multiply Add (FMA) if supported
+            sumVec = va.fma(vb, sumVec); 
+        }
+
+        // Reduce vector to single scalar (Sum all lanes)
+        float sum = sumVec.reduceLanes(VectorOperators.ADD);
+
+        // 2. Scalar Cleanup Loop (Tail)
+        // Process remaining elements (if length is not divisible by 16)
+        for (; i < a.length; i++) {
+            sum += a[i] * b[i];
+        }
+        
+        return sum;
+    }
+    
+    public static void main(String[] args) {
+        // Setup massive data
+        float[] a = new float[1_000_000];
+        float[] b = new float[1_000_000];
+        Arrays.fill(a, 1.0f);
+        Arrays.fill(b, 2.0f);
+        
+        System.out.println("SIMD Result: " + dotProductVector(a, b));
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Masking (Conditional SIMD)**
+
+How do you do `if (a[i] > 0)` inside a vector?
+You can't "branch" inside a single CPU cycle for half the lanes.
+**Solution**: Masks.
+
+```java
+// C[i] = A[i] > 0 ? B[i] : 0
+var mask = va.compare(VectorOperators.GT, 0);
+var result = vb.blend(0, mask);
+```
+The CPU computes *everything* but only writes back the lanes where the Mask is true.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### C++: Intrinsics
+C++ developers manually write `_mm256_add_ps` to target AVX2.
+It's non-portable. Code for AVX2 crashes on ARM Neon.
+Java Vector API is **Portable**. The same code runs on Intel (AVX) and Apple Silicon (NEON).
+
+#### Python: NumPy
+`c = a * b` in NumPy uses SIMD (C implementation).
+Java Vector API brings this performance to pure Java without JNI overhead.
+
+#### Rust: Portable SIMD
+Rust has a remarkably similar experimental API `std::simd`.
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Image Filter**:
+    -   Represent an Image as `int[]` (ARGB).
+    -   Use `IntVector` to brighten every pixel (Add constant) in parallel.
+    -   Compare execution time vs Scalar loop.
+2.  **Min/Max Find**:
+    -   Use `reduceLanes(VectorOperators.MAX)` to find the maximum value in a billion-row array.
+
+#### Edge Case Drills
+1.  **Bounds Checking**:
+    -   *Q*: What happens if `fromArray` reads past the end?
+    -   *A*: IndexOutOfBoundsException. This is why we calculate `limit` and have a scalar tail loop.
+2.  **Hardware Support**:
+    -   *Q*: What if the CPU is old (No AVX)?
+    -   *A*: Java falls back to valid but slower instructions. It *never* crashes.
+
+---
+
+### **8. Security Analysis: Side-Channel Attacks**
+
+**Vulnerability**: **Timing Attacks**.
+In Cryptography, if a loop takes longer depending on the input (e.g., `if (secret[i] == 1)`), an attacker can deduce the key.
+**SIMD Defense**:
+Vector operations are **Constant Time**.
+A vector addition takes 'N' cycles regardless of the data values.
+Using SIMD for crypto (AES/ChaCha20) is often more secure against timing side-channels than branching scalar code.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Metric | Scalar Loop | Vector API |
+| :--- | :--- | :--- |
+| **Instructions** | `ADD`, `CMP`, `JMP` (x16) | `VPADDD` (x1) |
+| **Speed** | Baseline | 4x - 16x |
+| **Code Limits** | Any Logic | No Branching (Masks only) |
+| **Use Case** | Business Logic | Math, Crypto, Image Proc |
+
+**Verdict**: Essential for low-latency financial systems and AI inference in Java. Overkill for CRUD apps.
+
+---
+
+### **10. References**
+1.  *JEP 460: Vector API (7th Incubator)*.
+2.  *Intel Intrinsics Guide*.
+
+---
+
+
+#### Q100: What is the Future of Java (Project Valhalla & Leyden), and how will it fix the "Object Header Tax"?
+**Companies**: Oracle, Red Hat, Azul Systems
+**Difficulty**: **Hard** (JVM Architecture)
+**Category**: The Next 10 Years (Java 25+)
+
+---
+
+### **1. Conceptual Overview & Motivation**
+
+**The "Why": The Pointer Chase Problem**
+Java Objects are expensive.
+`class Point { int x, y; }`
+*   32 bits for `x`, 32 bits for `y`. (64 bits of data).
+*   **128 bits** for the Header (Mark Word + Class Pointer).
+*   **64 bits** for the reference pointing to it.
+*   **Total**: ~256 bits to store 64 bits of data. **300% Overhead**.
+*   **Cache Misses**: An array `Point[]` is an array of pointers. You jump around RAM to find the X/Y.
+
+**The Solution**: Project Valhalla (Value Classes).
+Make objects "Flat" like in C/C++/Rust.
+`Point[]` becomes a contiguous block of X/Y/X/Y.
+No Headers. No Pointers. No Identity (no `synchronized`, no `==` reference check).
+
+**The Other Problem**: Startup Time.
+**The Solution**: Project Leyden (Static Images).
+Shift computation from Run Time to Build Time (Condensers).
+Standardize what Native Image started.
+
+---
+
+### **2. Comprehensive Definition**
+
+**Formal Definition**:
+> **Valhalla**: Defines `value class` (identity-free) and `primitive class` (flat-layout). Allows generic specialization (`ArrayList<int>`).
+> **Leyden**: A specification for "Closed World" optimization to strictly define which dynamic features are allowed, enabling fast AOT snapshots.
+
+**Key Components**:
+1.  **Identity-Free**: Objects that cannot be mutated, locked, or compared by reference.
+2.  **Flat Layout**: Storing field data directly in the container (Array/Field) rather than a pointer to it.
+3.  **Condenser**: A tool that runs at build time to compute static initializers.
+
+---
+
+### **3. Progressive Solution Evolution**
+
+#### Approach 1: Primitive Wrapper (Current)
+```java
+ArrayList<Integer> list = new ArrayList<>();
+list.add(10); // Auto-boxing: new Integer(10)
+```
+*   **Memory**: Heap allocation per integer. Pointer overhead.
+
+#### Approach 2: Valhalla (Value Classes)
+```java
+value class Point { int x; int y; }
+
+Point p1 = new Point(1, 2);
+Point p2 = new Point(1, 2);
+p1 == p2; // True! (Compared by state, not address)
+```
+*   **Memory**: `p1` is just the bits. VM optimizes storage.
+
+#### Approach 3: Valhalla (Primitive Classes - The Holy Grail)
+```java
+primitive class Complex { double re; double im; }
+Complex[] array = new Complex[100]; 
+```
+*   **Memory**: Contiguous block of 100 * (64+64) bits. **Zero Overhead**.
+
+---
+
+### **4. Implementation I: The Flat Memory Benchmark**
+Simulating the performance difference between Pointers and Flat Arrays.
+(Note: Since Valhalla is Early Access, we demonstrate the behavior using `int[]` vs `Integer[]` to mimic the layout difference).
+
+```java
+public class ValhallaSimulator {
+
+    static final int SIZE = 10_000_000;
+
+    // SCENARIO 1: Pointer Chasing (Present Day Object[])
+    // Represents Point[] where Point is a Class
+    static Integer[] pointers = new Integer[SIZE];
+
+    // SCENARIO 2: Flat Layout (Future Valhalla)
+    // Represents Point[] where Point is a Primitive Class
+    static int[] flat = new int[SIZE];
+
+    public static void main(String[] args) {
+        // Initialize
+        for (int i = 0; i < SIZE; i++) {
+            pointers[i] = i; // Allocates new Object (Heap)
+            flat[i] = i;     // Stores value directly
+        }
+
+        // Benchmark 1: Sum Pointers
+        long start = System.currentTimeMillis();
+        long sumP = 0;
+        for (Integer i : pointers) sumP += i; // Cache Misses galore
+        System.out.println("Pointer Sum: " + (System.currentTimeMillis() - start) + "ms");
+
+        // Benchmark 2: Sum Flat
+        start = System.currentTimeMillis();
+        long sumF = 0;
+        for (int i : flat) sumF += i; // Sequential memory access (Pre-fetching)
+        System.out.println("Flat Sum: " + (System.currentTimeMillis() - start) + "ms");
+        
+        // RESULT: Flat is usually 5x-10x faster due to CPU Cache Locality
+    }
+}
+```
+
+---
+
+### **5. Deep Dive: Generics Specialization**
+
+Today, `List<T>` erases to `List<Object>`.
+You cannot have `List<int>`.
+With Valhalla, the JVM will support **Specialized Generics**.
+`ArrayList<int>` will be backed by `int[]`, not `Object[]`.
+This unifies the type system.
+*   `int` is a `primitive class`.
+*   `String` is an `identity class`.
+*   Both can be used in Generics efficiently.
+
+---
+
+### **6. Multi-Language Perspectives**
+
+#### C# (Structs)
+C# has had `struct` (Value Types) since day 1.
+Java is 25 years late to this party.
+Valhalla brings Java to parity with C# and Go regarding memory layout control.
+
+#### Go (Structs)
+Go structs are flat by default. Pointers are explicit (`*Struct`).
+Java makes Pointers implicit (Objects) and Flat explicit (Value Classes).
+
+---
+
+### **7. Practice & Assessment**
+
+#### Core Exercises
+1.  **Download Early Access JDK**:
+    -   Go to `jdk.java.net/valhalla`.
+    -   Run the code with `value class` keyword.
+2.  **Memory Analysis**:
+    -   Use `JOL` (Java Object Layout) tool.
+    -   Compare `GraphLayout.parseInstance(new Point(1,2)).totalSize()` for Class vs Value Class.
+
+#### Edge Case Drills
+1.  **Synchronization**:
+    -   *Q*: Can I `synchronized(valueObject)`?
+    -   *A*: **Runtime Exception**. Value objects have no monitor headers.
+2.  **Null**:
+    -   *Q*: Can a `primitive class` be null?
+    -   *A*: No. Just like `int` cannot be null. (Though `value class` can be null).
+
+---
+
+### **8. Security Analysis: Nullability**
+
+**Vulnerability**: **NullPointerException**.
+The "Billion Dollar Mistake".
+**Valhalla Solution**:
+`primitive class` guarantees non-nullability.
+If you have a `Point` (primitive), access to `x` and `y` is *always safe*.
+This eliminates extensive null-checking logic in the data path.
+
+---
+
+### **9. Cheatsheet & Summary**
+
+| Project | Goal | Technology | Status |
+| :--- | :--- | :--- | :--- |
+| **Panama** | Connect to C | FFM API | Standard (22) |
+| **Loom** | Scalable Threads | Virtual Threads | Standard (21) |
+| **Valhalla**| Flat Memory | Value Classes | Preview Soon |
+| **Leyden** | Fast Startup | Static Images | Research |
+| **Amber** | Syntax | Switch/Records | Standard (14-21)|
+
+**Verdict**: The "Golden Age" of Java is happening right now. Java 25 will look fundamentally cleaner and run significantly faster than Java 8.
+
+---
+
+### **10. References**
+1.  *State of Valhalla (Brian Goetz)*.
+2.  *Project Leyden: Condensers*.
+
+---
+
 
 ---
 
