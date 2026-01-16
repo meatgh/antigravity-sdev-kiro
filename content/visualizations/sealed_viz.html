@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sealed Class Exhaustiveness Visualizer</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+            color: #569cd6;
+        }
+
+        .container {
+            display: flex;
+            gap: 50px;
+            width: 100%;
+            max-width: 1000px;
+        }
+
+        .class-hierarchy {
+            width: 300px;
+            border: 2px solid #333;
+            padding: 20px;
+            background: #252526;
+        }
+
+        .switch-statement {
+            width: 400px;
+            border: 2px solid #333;
+            padding: 20px;
+            background: #252526;
+            position: relative;
+        }
+
+        .node {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #555;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .node:hover {
+            background: #333;
+        }
+
+        .sealed-root {
+            border-color: #4ec9b0;
+            color: #4ec9b0;
+            font-weight: bold;
+        }
+
+        .permits {
+            margin-left: 20px;
+            border-left: 2px solid #555;
+            padding-left: 10px;
+        }
+
+        .subclass {
+            border-color: #ce9178;
+            color: #ce9178;
+        }
+
+        .case {
+            padding: 10px;
+            margin: 5px;
+            background: #111;
+            color: #d4d4d4;
+            opacity: 0.5;
+        }
+
+        .case.handled {
+            opacity: 1;
+            border-left: 4px solid #0f0;
+        }
+
+        .case.missing {
+            opacity: 1;
+            border-left: 4px solid #f00;
+            animation: pulse 1s infinite;
+        }
+
+        .status {
+            margin-top: 20px;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .valid {
+            color: #0f0;
+        }
+
+        .invalid {
+            color: #f00;
+        }
+
+        @keyframes pulse {
+            0% {
+                background: #300;
+            }
+
+            50% {
+                background: #500;
+            }
+
+            100% {
+                background: #300;
+            }
+        }
+
+        .controls {
+            margin-top: 20px;
+        }
+
+        button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Exhaustiveness Checking Simulator</h1>
+
+    <div class="container">
+        <!-- Hierarchy -->
+        <div class="class-hierarchy">
+            <div class="node sealed-root">sealed interface Shape</div>
+            <div class="permits">
+                <div class="node subclass">permits Circle</div>
+                <div class="node subclass">permits Square</div>
+                <div class="node subclass" id="triangle" style="display:none">permits Triangle</div>
+            </div>
+        </div>
+
+        <!-- Switch -->
+        <div class="switch-statement">
+            <div style="color:#569cd6">switch</div>(shape) {
+            <div class="case handled">case Circle c -> ...</div>
+            <div class="case handled">case Square s -> ...</div>
+            <div class="case missing" id="case-tri" style="display:none">case Triangle t -> ...</div>
+            }
+        </div>
+    </div>
+
+    <div class="status valid" id="status">Compilation Status: OK</div>
+
+    <div class="controls">
+        <button onclick="addTriangle()">Add Triangle Subclass</button>
+        <button onclick="handleTriangle()">Handle Triangle Case</button>
+    </div>
+
+    <script>
+        let hasTriangle = false;
+        let handledTriangle = false;
+
+        function addTriangle() {
+            if (hasTriangle) return;
+            hasTriangle = true;
+            document.getElementById("triangle").style.display = "block";
+            updateStatus();
+        }
+
+        function handleTriangle() {
+            if (!hasTriangle) return;
+            handledTriangle = true;
+            document.getElementById("case-tri").style.display = "block";
+            document.getElementById("case-tri").classList.remove("missing");
+            document.getElementById("case-tri").classList.add("handled");
+            updateStatus();
+        }
+
+        function updateStatus() {
+            const status = document.getElementById("status");
+            if (hasTriangle && !handledTriangle) {
+                status.innerText = "Compilation Status: ERROR (The switch expression does not cover all possible input values)";
+                status.className = "status invalid";
+
+                // Show implicit missing case visual
+                const triCase = document.getElementById("case-tri");
+                triCase.style.display = "block";
+                triCase.innerHTML = "// MISSING: case Triangle t -> ...";
+                triCase.className = "case missing";
+
+            } else {
+                status.innerText = "Compilation Status: OK";
+                status.className = "status valid";
+            }
+        }
+    </script>
+</body>
+
+</html>

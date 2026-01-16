@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stack Visualization (LIFO & MinStack)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #0f0f1a;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            height: 100vh;
+        }
+        .container {
+            width: 90%;
+            max-width: 800px;
+            background: #1a1a2e;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+            margin-top: 20px;
+        }
+        h2 { border-bottom: 2px solid #e94560; padding-bottom: 10px; color: #e94560; }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            background: #16213e;
+            padding: 15px;
+            border-radius: 8px;
+            justify-content: center;
+        }
+        button {
+            padding: 10px 25px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 1rem;
+            transition: all 0.2s;
+        }
+        .push-btn { background-color: #0f9d58; color: white; }
+        .push-btn:hover { background-color: #0b7a43; transform: scale(1.05); }
+        .pop-btn { background-color: #d32f2f; color: white; }
+        .pop-btn:hover { background-color: #9a1e1e; transform: scale(1.05); }
+        .viz-area {
+            height: 400px;
+            background: #16213e;
+            border-radius: 8px;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: flex-end; /* Stack grows up */
+            padding-bottom: 20px;
+            overflow: hidden;
+        }
+        .stack-base {
+            position: absolute;
+            bottom: 0;
+            width: 200px;
+            height: 10px;
+            background: #e94560;
+            border-radius: 4px;
+        }
+        .stack-item {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            font-size: 1.2rem;
+            border: 2px solid rgba(255,255,255,0.1);
+            position: absolute; /* Positioning handled by D3 */
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            text-shadow: 1px 1px 2px black;
+        }
+        .info-panel {
+            margin-top: 15px;
+            display: flex;
+            justify-content: space-around;
+            font-size: 1.2rem;
+            background: #16213e;
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .min-indicator {
+            color: #ffd700;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>📚 Stack Data Structure (LIFO)</h2>
+        
+        <div class="controls">
+            <button class="push-btn" onclick="pushItem()">PUSH</button>
+            <button class="pop-btn" onclick="popItem()">POP</button>
+            <button onclick="reset()">RESET</button>
+        </div>
+
+        <div class="info-panel">
+            <div>Size: <span id="size-display">0</span></div>
+            <div>Min Value: <span id="min-display" class="min-indicator">N/A</span></div>
+        </div>
+
+        <div class="viz-area" id="viz">
+            <div class="stack-base"></div>
+        </div>
+    </div>
+
+    <script>
+        const viz = d3.select("#viz");
+        const width = 200; // block width
+        const height = 50; // block height
+        const startX = (viz.node().getBoundingClientRect().width / 2) - (width / 2);
+        const bottomY = 380; // Start almost at bottom
+
+        let stackData = [];
+        let minStack = [];
+        let idCounter = 0;
+
+        function updateMinDisplay() {
+            const minDisplay = document.getElementById("min-display");
+            if (minStack.length > 0) {
+                minDisplay.innerText = minStack[minStack.length - 1];
+            } else {
+                minDisplay.innerText = "N/A";
+            }
+            document.getElementById("size-display").innerText = stackData.length;
+        }
+
+        function pushItem() {
+            if (stackData.length >= 7) {
+                alert("Stack Overflow! (Visual Limit Reached)");
+                return;
+            }
+
+            const val = Math.floor(Math.random() * 100) + 1;
+            const item = {
+                id: idCounter++,
+                value: val,
+                y: bottomY - (stackData.length * (height + 5)) - 100 // Start high up
+            };
+
+            // Update Logic
+            stackData.push(item);
+            
+            // MinStack Logic
+            if (minStack.length === 0 || val <= minStack[minStack.length - 1]) {
+                minStack.push(val);
+            } else {
+                // If not min, strictly we don't push to minStack for O(1), 
+                // but conceptually let's just track the min.
+                // Standard logic: push min(val, currentMin)
+                // Simplified for viz: just track true min
+            }
+            // Actually, for pure MinStack O(1), we push to minStack EVERY time or conditionally.
+            // Let's stick to the conditional push one (Two Stack Approach).
+            // Wait, if I push 5, min is 5. Push 10, min is 5. 
+            // The logic used in Q52 text is 'Push onto MinStack ONLY if <= currentMin'.
+            // Let's stick to that.
+
+            update();
+        }
+
+        function popItem() {
+            if (stackData.length === 0) {
+                alert("Stack Underflow!");
+                return;
+            }
+
+            const popped = stackData.pop();
+            
+            // MinStack Update
+            const currentMin = minStack[minStack.length - 1];
+            if (popped.value === currentMin) {
+                minStack.pop();
+            }
+
+            update(true); // isPop = true
+        }
+
+        function reset() {
+            stackData = [];
+            minStack = [];
+            updateFull();
+        }
+
+        function updateFull() {
+             // Hard reset
+             viz.selectAll(".stack-item").remove();
+             updateMinDisplay();
+        }
+
+        function update(isPop = false) {
+            updateMinDisplay();
+
+            const t = d3.transition().duration(500).ease(d3.easeCubicOut);
+
+            // JOIN
+            const boxes = viz.selectAll(".stack-item")
+                .data(stackData, d => d.id);
+
+            // ENTER (Push)
+            // Start from Top, fall down
+            const enter = boxes.enter()
+                .append("div")
+                .attr("class", "stack-item")
+                .style("width", width + "px")
+                .style("height", height + "px")
+                .style("background-color", d => {
+                    // Highlight if it's the current Min
+                    return "#4cc9f0"; 
+                })
+                .style("left", startX + "px")
+                .style("top", "0px") // Enter from ceiling
+                .style("opacity", 0)
+                .text(d => d.value);
+
+            // UPDATE (Move items if needed, mostly static in stack)
+            // But we animate the entry
+            enter.merge(boxes)
+                .transition(t)
+                .style("opacity", 1)
+                .style("top", (d, i) => (bottomY - (i * (height + 5))) + "px")
+                .style("background-color", d => {
+                     // Check if this item is the current min
+                     if (minStack.length > 0 && d.value === minStack[minStack.length - 1]) {
+                         return "#ffd700"; // Gold for Min
+                     }
+                     return "#4cc9f0";
+                })
+                .style("color", d => {
+                    if (minStack.length > 0 && d.value === minStack[minStack.length - 1]) {
+                         return "#000"; 
+                     }
+                     return "#fff";
+                });
+
+            // EXIT (Pop)
+            // Fly off to the right
+            boxes.exit()
+                .transition(t)
+                .style("left", (startX + 400) + "px")
+                .style("opacity", 0)
+                .remove();
+        }
+    </script>
+</body>
+</html>

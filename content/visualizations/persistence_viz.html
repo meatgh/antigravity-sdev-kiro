@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Structural Sharing</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #222;
+            color: #fff;
+            text-align: center;
+        }
+
+        .node {
+            fill: #9C27B0;
+            stroke: #fff;
+            rx: 50;
+            ry: 50;
+        }
+
+        .link {
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+
+        .label {
+            fill: #fff;
+            font-size: 14px;
+            text-anchor: middle;
+            alignment-baseline: middle;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Persistent Data Structure</h1>
+    <p>List 1 (A->B). List 2 (C->A->B). A and B are shared!</p>
+    <svg width="600" height="300" id="viz"></svg>
+    <script>
+        const svg = d3.select("#viz");
+
+        const nodes = [
+            { id: "C (Head 2)", x: 100, y: 100 },
+            { id: "A (Head 1)", x: 250, y: 200 },
+            { id: "B (Tail)", x: 400, y: 200 }
+        ];
+
+        const links = [
+            { source: "C (Head 2)", target: "A (Head 1)" },
+            { source: "A (Head 1)", target: "B (Tail)" }
+        ];
+
+        svg.selectAll("line").data(links).enter().append("line")
+            .attr("x1", d => nodes.find(n => n.id == d.source).x)
+            .attr("y1", d => nodes.find(n => n.id == d.source).y)
+            .attr("x2", d => nodes.find(n => n.id == d.target).x)
+            .attr("y2", d => nodes.find(n => n.id == d.target).y)
+            .attr("class", "link");
+
+        svg.selectAll("circle").data(nodes).enter().append("circle")
+            .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", 40)
+            .attr("class", "node");
+
+        svg.selectAll("text").data(nodes).enter().append("text")
+            .attr("x", d => d.x).attr("y", d => d.y)
+            .text(d => d.id).attr("class", "label");
+    </script>
+</body>
+
+</html>

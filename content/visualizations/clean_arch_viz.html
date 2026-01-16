@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clean Architecture: The Dependency Rule</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1e1e1e;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+        }
+
+        .legend {
+            font-size: 14px;
+            margin-bottom: 20px;
+            color: #aaa;
+            text-align: center;
+            max-width: 600px;
+        }
+
+        #viz {
+            position: relative;
+        }
+
+        .layer-label {
+            pointer-events: none;
+            text-anchor: middle;
+            font-weight: bold;
+            fill: #fff;
+            transform: translateY(4px);
+        }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            max-width: 300px;
+            border: 1px solid #555;
+        }
+
+        /* Layer Colors */
+        .color-entities {
+            fill: #f1c40f;
+        }
+
+        /* Yellow */
+        .color-usecases {
+            fill: #e74c3c;
+        }
+
+        /* Red */
+        .color-adapters {
+            fill: #2ecc71;
+        }
+
+        /* Green */
+        .color-frameworks {
+            fill: #3498db;
+        }
+
+        /* Blue */
+
+        .circle-path {
+            stroke: #fff;
+            stroke-width: 1px;
+            transition: opacity 0.3s;
+            opacity: 0.8;
+            cursor: pointer;
+        }
+
+        .circle-path:hover {
+            opacity: 1;
+            stroke-width: 3px;
+        }
+
+        .arrow {
+            stroke: #fff;
+            stroke-width: 2px;
+            fill: none;
+            marker-end: url(#arrowhead);
+            display: none;
+        }
+
+        #controls {
+            margin-top: 20px;
+        }
+
+        button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #444;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>The Clean Architecture Onion</h1>
+    <div class="legend">
+        The Golden Rule: Source Code Dependencies can only point <strong>INWARDS</strong>.<br>
+        Outer layers (Frameworks) know about Inner layers (Entities). Inner layers know nothing of the outside.
+    </div>
+
+    <div id="viz"></div>
+    <div id="tooltip" class="tooltip"></div>
+
+    <div id="controls">
+        <button onclick="resetZoom()">Reset View</button>
+    </div>
+
+    <script>
+        const width = 600;
+        const height = 600;
+        const radius = Math.min(width, height) / 2;
+
+        // Data for Concentric Circles (Inner to Outer)
+        const layers = [
+            { name: "Entities", r: radius * 0.25, color: "#f1c40f", desc: "Enterprise Business Rules. Pure Java objects. No dependencies.", id: "entities" },
+            { name: "Use Cases", r: radius * 0.50, color: "#e74c3c", desc: "Application Business Rules. Orchestrates data flow. Depends ONLY on Entities.", id: "usecases" },
+            { name: "Interface Adapters", r: radius * 0.75, color: "#2ecc71", desc: "Controllers, Presenters, Gateways. Converts data formats.", id: "adapters" },
+            { name: "Frameworks & Drivers", r: radius * 1.00, color: "#3498db", desc: "Database, Web, UI, Devices. The 'Detail'.", id: "frameworks" }
+        ];
+
+        const svg = d3.select("#viz")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .append("g")
+            .attr("transform", `translate(${width / 2},${height / 2})`);
+
+        // Define Arrowhead
+        svg.append("defs").append("marker")
+            .attr("id", "arrowhead")
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 5)
+            .attr("refY", 0)
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .attr("orient", "auto")
+            .append("path")
+            .attr("d", "M0,-5L10,0L0,5")
+            .attr("fill", "#fff");
+
+        // Draw Circles (Outer first so they stack correctly)
+        // Actually, we use 'arc' to draw rings, but let's just draw filled circles and use painter's algorithm?
+        // No, D3 works best if we draw specific annuli (donuts) or just stack circles.
+        // Stacking circles works if we sort by radius DESC.
+
+        const sortedLayers = [...layers].sort((a, b) => b.r - a.r);
+
+        const circles = svg.selectAll(".layer")
+            .data(sortedLayers)
+            .enter()
+            .append("g")
+            .attr("class", "layer");
+
+        circles.append("circle")
+            .attr("r", d => d.r)
+            .attr("fill", d => d.color)
+            .attr("class", "circle-path")
+            .on("mouseover", function (event, d) {
+                const tooltip = d3.select("#tooltip");
+                tooltip.style("opacity", 1)
+                    .html(`<strong>${d.name}</strong><br>${d.desc}`)
+                    .style("left", (event.pageX + 10) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+
+                // Highlight Valid Dependency Flow (Inward)
+                d3.selectAll(".circle-path").attr("opacity", 0.3);
+                d3.select(this).attr("opacity", 1); // Self
+
+                // Highlight Inner Layers (Valid Dependencies)
+                // Any layer with radius < current is a valid dependency
+                d3.selectAll(".circle-path").filter(l => l.r < d.r).attr("opacity", 1).attr("stroke-width", "3px");
+
+                // Show dependency arrow
+                showDependencyArrow(d);
+            })
+            .on("mouseout", function () {
+                d3.select("#tooltip").style("opacity", 0);
+                d3.selectAll(".circle-path").attr("opacity", 0.8).attr("stroke-width", "1px");
+                d3.select(".arrow-line").remove();
+            });
+
+        // Labels (Top of each ring)
+        circles.append("text")
+            .attr("class", "layer-label")
+            .attr("y", d => -d.r + 20) // Position inside the top edge
+            .text(d => d.name)
+            .attr("fill", "#000") // Black text for contrast
+            .style("font-size", "12px")
+            .style("text-transform", "uppercase")
+            .style("text-shadow", "0px 0px 2px rgba(255,255,255,0.8)");
+
+        function showDependencyArrow(sourceLayer) {
+            d3.select(".arrow-line").remove();
+
+            if (sourceLayer.id === "entities") return; // Entities depend on nothing
+
+            // Arrow points from Source Radius -> Inward
+            const arrowLength = 40;
+            const startY = -sourceLayer.r + 40;
+            const endY = startY + arrowLength; // Pointing down (inward visual is tricky on concentric, let's just animate flow)
+
+            // Actually, let's just draw an arrow pointing towards center
+            svg.append("line")
+                .attr("class", "arrow-line")
+                .attr("x1", 0)
+                .attr("y1", -sourceLayer.r + 10)
+                .attr("x2", 0)
+                .attr("y2", -sourceLayer.r + 60)
+                .attr("stroke", "white")
+                .attr("stroke-width", 4)
+                .attr("marker-end", "url(#arrowhead)");
+        }
+
+        function resetZoom() {
+            // Placeholder for zoom logic if we added zoom behavior
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Type Erasure Compiler Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 30px;
+            color: #569cd6;
+        }
+
+        .container {
+            display: flex;
+            gap: 50px;
+            justify-content: center;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .panel {
+            width: 500px;
+            border: 2px solid #333;
+            background: #252526;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .panel h3 {
+            text-align: center;
+            color: #dcdcaa;
+            margin-top: 0;
+        }
+
+        .code-block {
+            background: #1e1e1e;
+            padding: 15px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            min-height: 300px;
+            white-space: pre;
+            position: relative;
+        }
+
+        .keyword {
+            color: #569cd6;
+        }
+
+        .type {
+            color: #4ec9b0;
+        }
+
+        .var {
+            color: #9cdcfe;
+        }
+
+        .string {
+            color: #ce9178;
+        }
+
+        .cast {
+            color: #c586c0;
+            font-weight: bold;
+            background: rgba(197, 134, 192, 0.2);
+            padding: 0 4px;
+            border-radius: 4px;
+        }
+
+        .arrow {
+            font-size: 40px;
+            color: #fff;
+            align-self: center;
+        }
+
+        .controls {
+            margin-top: 30px;
+            text-align: center;
+        }
+
+        button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #444;
+            border-color: #888;
+        }
+
+        .highlight {
+            animation: flash 1s;
+        }
+
+        @keyframes flash {
+            0% {
+                background: #333;
+            }
+
+            50% {
+                background: #555;
+            }
+
+            100% {
+                background: #1e1e1e;
+            }
+        }
+
+        .description {
+            margin-top: 20px;
+            max-width: 800px;
+            color: #888;
+            text-align: center;
+            font-style: italic;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Type Erasure Simulator</h1>
+
+    <div class="container">
+        <!-- Java Source -->
+        <div class="panel">
+            <h3>Java Source Code (.java)</h3>
+            <div class="code-block" id="source">
+                <span class="keyword">public class</span> <span class="type">Box</span>&lt;<span
+                    class="type">T</span>&gt; {
+                <span class="keyword">private</span> <span class="type">T</span> <span class="var">value</span>;
+
+                <span class="keyword">public void</span> set(<span class="type">T</span> <span class="var">value</span>)
+                {
+                <span class="keyword">this</span>.<span class="var">value</span> = <span class="var">value</span>;
+                }
+
+                <span class="keyword">public</span> <span class="type">T</span> get() {
+                <span class="keyword">return</span> <span class="var">value</span>;
+                }
+                }
+
+                <span class="comment">// Usage</span>
+                <span class="type">Box</span>&lt;<span class="type">String</span>&gt; <span class="var">box</span> =
+                <span class="keyword">new</span> <span class="type">Box</span>&lt;&gt;();
+                <span class="var">box</span>.set(<span class="string">"Hello"</span>);
+                <span class="type">String</span> <span class="var">s</span> = <span class="var">box</span>.get();
+            </div>
+        </div>
+
+        <div class="arrow">➔</div>
+
+        <!-- Bytecode / Decompiled -->
+        <div class="panel">
+            <h3>Available At Runtime (.class)</h3>
+            <div class="code-block" id="compiled">
+                <span style="color: #666">// Waiting for compilation...</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button onclick="compile()">Run javac (Compile)</button>
+        <button onclick="reset()">Reset</button>
+    </div>
+
+    <div class="description" id="desc">
+        Click "Run javac" to see how the compiler rewrites Generics into raw types and casts.
+    </div>
+
+    <script>
+        function reset() {
+            document.getElementById("compiled").innerHTML = '<span style="color: #666">// Waiting for compilation...</span>';
+            document.getElementById("desc").innerText = 'Click "Run javac" to see how the compiler rewrites Generics into raw types and casts.';
+        }
+
+        function compile() {
+            document.getElementById("desc").innerText = 'The Compiler REMOVES "T" and replaces it with "Object". It inserts CheckCast instructions at call sites.';
+
+            const compiledHTML = `
+<span class="keyword">public class</span> <span class="type">Box</span> { <span class="comment">// &lt;T&gt; Removed</span>
+    <span class="keyword">private</span> <span class="type">Object</span> <span class="var">value</span>; <span class="comment">// T -> Object</span>
+
+    <span class="keyword">public void</span> set(<span class="type">Object</span> <span class="var">value</span>) {
+        <span class="keyword">this</span>.<span class="var">value</span> = <span class="var">value</span>;
+    }
+
+    <span class="keyword">public</span> <span class="type">Object</span> get() {
+        <span class="keyword">return</span> <span class="var">value</span>;
+    }
+}
+
+<span class="comment">// Usage Decompiled</span>
+<span class="type">Box</span> <span class="var">box</span> = <span class="keyword">new</span> <span class="type">Box</span>();
+<span class="var">box</span>.set(<span class="string">"Hello"</span>); <span class="comment">// Valid: String is Object</span>
+<span class="type">String</span> <span class="var">s</span> = <span class="cast">(String)</span> <span class="var">box</span>.get(); <span class="comment">// CAST INSERTED!</span>
+`;
+            const el = document.getElementById("compiled");
+            el.innerHTML = compiledHTML;
+            el.classList.add("highlight");
+            setTimeout(() => el.classList.remove("highlight"), 1000);
+        }
+    </script>
+</body>
+
+</html>

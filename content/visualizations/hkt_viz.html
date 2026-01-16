@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Functor Category Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Times New Roman', serif;
+            background: #e0e0e0;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .category {
+            fill: #fff;
+            stroke: #333;
+            rx: 15;
+        }
+
+        .obj circle {
+            fill: #000;
+        }
+
+        .obj text {
+            font-size: 14px;
+            font-style: italic;
+        }
+
+        .arrow {
+            stroke: #000;
+            stroke-width: 1.5px;
+            marker-end: url(#arrow);
+        }
+
+        .map-arrow {
+            stroke: #d32f2f;
+            stroke-width: 2px;
+            stroke-dasharray: 5, 5;
+            marker-end: url(#arrow-red);
+        }
+
+        .functor-label {
+            font-size: 20px;
+            font-weight: bold;
+            fill: #d32f2f;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Category Theory: Functor F</h1>
+    <p>Mapping Category C to Category D</p>
+    <svg width="800" height="500" id="viz">
+        <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"
+                markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L9,3 z" fill="#000" />
+            </marker>
+            <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"
+                markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L9,3 z" fill="#d32f2f" />
+            </marker>
+        </defs>
+    </svg>
+    <script>
+        const svg = d3.select("#viz");
+
+        // Draw Categories
+        svg.append("rect").attr("x", 50).attr("y", 100).attr("width", 300).attr("height", 300).attr("class", "category");
+        svg.append("text").attr("x", 200).attr("y", 90).text("Category C (Types)");
+
+        svg.append("rect").attr("x", 450).attr("y", 100).attr("width", 300).attr("height", 300).attr("class", "category");
+        svg.append("text").attr("x", 600).attr("y", 90).text("Category D (List<Type>)");
+
+        // Objects in C
+        svg.append("circle").attr("cx", 150).attr("cy", 200).attr("r", 5);
+        svg.append("text").attr("x", 150).attr("y", 190).text("Int").attr("text-anchor", "middle");
+
+        svg.append("circle").attr("cx", 250).attr("cy", 300).attr("r", 5);
+        svg.append("text").attr("x", 250).attr("y", 310).text("String").attr("text-anchor", "middle");
+
+        // Morphism f in C
+        svg.append("line").attr("x1", 150).attr("y1", 200).attr("x2", 245).attr("y2", 295).attr("class", "arrow");
+        svg.append("text").attr("x", 200).attr("y", 240).text("f").style("font-weight", "bold");
+
+        // Objects in D (Mapped)
+        svg.append("circle").attr("cx", 550).attr("cy", 200).attr("r", 5);
+        svg.append("text").attr("x", 550).attr("y", 190).text("List<Int>").attr("text-anchor", "middle");
+
+        svg.append("circle").attr("cx", 650).attr("cy", 300).attr("r", 5);
+        svg.append("text").attr("x", 650).attr("y", 310).text("List<String>").attr("text-anchor", "middle");
+
+        // Morphism F(f) in D (map(f))
+        svg.append("line").attr("x1", 550).attr("y1", 200).attr("x2", 645).attr("y2", 295).attr("class", "arrow");
+        svg.append("text").attr("x", 600).attr("y", 240).text("map(f)").style("font-weight", "bold");
+
+        // Functor Mapping Arrows
+        svg.append("line").attr("x1", 155).attr("y1", 200).attr("x2", 545).attr("y2", 200).attr("class", "map-arrow");
+        svg.append("line").attr("x1", 255).attr("y1", 300).attr("x2", 645).attr("y2", 300).attr("class", "map-arrow");
+
+        svg.append("text").attr("x", 400).attr("y", 180).text("F").attr("class", "functor-label");
+
+    </script>
+</body>
+
+</html>

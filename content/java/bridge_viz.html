@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bridge Pattern Visualization</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0d1117; color: #c9d1d9; display: flex; flex-direction: column; align-items: center; }
+        h1 { color: #58a6ff; }
+        .controls { margin: 20px; background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; }
+        button { background: #238636; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 0 10px; }
+        button:hover { background: #2ea043; }
+        button.active { ring: 2px solid white; }
+        #canvas { background: #010409; border: 1px solid #30363d; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        .node circle { stroke: #f0f6fc; stroke-width: 2px; }
+        .node text { font-size: 12px; fill: #f0f6fc; pointer-events: none; text-anchor: middle; dy: 4; }
+        .link { stroke: #8b949e; stroke-opacity: 0.6; stroke-width: 2px; }
+        .legend { margin-top: 10px; font-size: 14px; color: #8b949e; }
+    </style>
+</head>
+<body>
+
+    <h1>🌉 Bridge Pattern: Solving the Cartesian Explosion</h1>
+
+    <div class="controls">
+        <label>Mode: </label>
+        <button id="btnNaive" onclick="setMode('naive')">❌ Naive (Inheritance)</button>
+        <button id="btnBridge" onclick="setMode('bridge')">✅ Bridge (Composition)</button>
+    </div>
+
+    <svg id="canvas" width="800" height="500"></svg>
+    
+    <div class="legend" id="legendText">
+        Inheritance leads to M x N classes. Bridge leads to M + N classes.
+    </div>
+
+    <script>
+        const width = 800;
+        const height = 500;
+        const svg = d3.select("#canvas");
+        
+        let simulation;
+        let currentMode = 'naive';
+
+        const shapes = ['Circle', 'Square', 'Triangle'];
+        const colors = ['Red', 'Blue', 'Green'];
+
+        function setMode(mode) {
+            currentMode = mode;
+            update();
+        }
+
+        function getData() {
+            let nodes = [];
+            let links = [];
+
+            if (currentMode === 'naive') {
+                // Root
+                nodes.push({ id: "Shape", group: 0, x: width/2, y: 50 });
+
+                // M x N Classes (Cartesian Product)
+                let id = 1;
+                shapes.forEach(shape => {
+                    colors.forEach(color => {
+                        let name = `${color}${shape}`;
+                        nodes.push({ id: name, group: 1, color: color.toLowerCase() });
+                        links.push({ source: "Shape", target: name });
+                    });
+                });
+                
+                document.getElementById('legendText').innerText = `Naive Inheritance: ${shapes.length * colors.length} Concrete Classes (M x N). Adding 1 Shape means adding ${colors.length} new classes!`;
+
+            } else {
+                // Bridge Pattern
+                
+                // Abstraction Hierarchy
+                nodes.push({ id: "Shape (Abstraction)", group: 0, fx: 200, fy: 100 });
+                shapes.forEach((shape, i) => {
+                    nodes.push({ id: shape, group: 1, x: 100 + i*100, y: 250 });
+                    links.push({ source: "Shape (Abstraction)", target: shape });
+                });
+
+                // Implementation Hierarchy
+                nodes.push({ id: "Color (Implementor)", group: 2, fx: 600, fy: 100 });
+                colors.forEach((color, i) => {
+                    nodes.push({ id: `${color}Provider`, group: 3, color: color.toLowerCase() });
+                    links.push({ source: "Color (Implementor)", target: `${color}Provider` });
+                });
+
+                // The Bridge Link
+                links.push({ source: "Shape (Abstraction)", target: "Color (Implementor)", bridge: true });
+
+                document.getElementById('legendText').innerText = `Bridge Pattern: ${shapes.length + colors.length} Concrete Classes (M + N). Scalable & Decoupled.`;
+            }
+
+            return { nodes, links };
+        }
+
+        function update() {
+            const data = getData();
+            svg.selectAll("*").remove();
+
+            // Bridge Line Definition
+            svg.append("defs").append("marker")
+                .attr("id", "arrow")
+                .attr("viewBox", "0 -5 10 10")
+                .attr("refX", 25)
+                .attr("refY", 0)
+                .attr("markerWidth", 6)
+                .attr("markerHeight", 6)
+                .attr("orient", "auto")
+                .append("path")
+                .attr("d", "M0,-5L10,0L0,5")
+                .attr("fill", "#8b949e");
+
+            simulation = d3.forceSimulation(data.nodes)
+                .force("link", d3.forceLink(data.links).id(d => d.id).distance(100))
+                .force("charge", d3.forceManyBody().strength(-300))
+                .force("center", d3.forceCenter(width / 2, height / 2 + 50));
+
+            if (currentMode === 'bridge') {
+                 simulation.force("center", null); // Manual positioning for Bridge
+            }
+
+            const link = svg.append("g")
+                .selectAll("line")
+                .data(data.links)
+                .enter().append("line")
+                .attr("class", "link")
+                .attr("stroke-dasharray", d => d.bridge ? "5,5" : "0")
+                .attr("stroke", d => d.bridge ? "#f78166" : "#8b949e")
+                .attr("stroke-width", d => d.bridge ? 4 : 2)
+                .attr("marker-end", d => d.bridge ? "url(#arrow)" : "");
+
+            const node = svg.append("g")
+                .selectAll(".node")
+                .data(data.nodes)
+                .enter().append("g")
+                .attr("class", "node");
+
+            node.append("circle")
+                .attr("r", 25)
+                .attr("fill", d => d.color ? d.color : "#1f6feb");
+
+            node.append("text")
+                .attr("dy", 35)
+                .text(d => d.id)
+                .style("fill", "#c9d1d9");
+
+            simulation.on("tick", () => {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+
+                node.attr("transform", d => `translate(${d.x},${d.y})`);
+            });
+        }
+
+        update(); // Init
+    </script>
+</body>
+</html>

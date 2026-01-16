@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Demeter Coupling</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #222;
+            color: #fff;
+            text-align: center;
+        }
+
+        .node {
+            fill: #FFC107;
+            stroke: #fff;
+        }
+
+        .link {
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Coupling Graph</h1>
+    <p>Left: Train Wreck (A->B->C). Right: Facade (A->Facade).</p>
+    <svg width="600" height="300" id="viz"></svg>
+    <script>
+        const svg = d3.select("#viz");
+
+        // Train Wreck
+        svg.append("circle").attr("cx", 50).attr("cy", 150).attr("r", 20).attr("class", "node"); // A
+        svg.append("circle").attr("cx", 150).attr("cy", 150).attr("r", 20).attr("class", "node"); // B
+        svg.append("circle").attr("cx", 250).attr("cy", 150).attr("r", 20).attr("class", "node"); // C
+
+        svg.append("line").attr("x1", 70).attr("y1", 150).attr("x2", 130).attr("y2", 150).attr("class", "link");
+        svg.append("line").attr("x1", 170).attr("y1", 150).attr("x2", 230).attr("y2", 150).attr("class", "link");
+
+        svg.append("text").attr("x", 50).attr("y", 190).text("A").attr("fill", "white");
+        svg.append("text").attr("x", 150).attr("y", 190).text("B").attr("fill", "white");
+        svg.append("text").attr("x", 250).attr("y", 190).text("C").attr("fill", "white");
+
+        // Facade
+        svg.append("circle").attr("cx", 400).attr("cy", 150).attr("r", 20).attr("class", "node"); // A
+        svg.append("circle").attr("cx", 500).attr("cy", 150).attr("r", 40).attr("class", "node").style("fill", "#2196F3"); // Facade
+
+        svg.append("line").attr("x1", 420).attr("y1", 150).attr("x2", 460).attr("y2", 150).attr("class", "link");
+        svg.append("text").attr("x", 400).attr("y", 190).text("A").attr("fill", "white");
+        svg.append("text").attr("x", 500).attr("y", 210).text("Facade").attr("fill", "white");
+
+    </script>
+</body>
+
+</html>

@@ -22747,18 +22747,22 @@ Decodings:
 - Internationalization for different character encodings
 ---
 
-#### Question 41: Word Break ✅
+#### Question 41: Word Break (The Content Moderation Engine) ✅
 
-**Problem Statement**: Given a string s and a dictionary of strings wordDict, return true if s can be segmented into a space-separated sequence of one or more dictionary words. Note that the same word in the dictionary may be reused multiple times in the segmentation.
+## 📋 Question Statement
+**Given a string `s` and a dictionary of strings `wordDict`, return `true` if `s` can be segmented into a space-separated sequence of one or more dictionary words.**
 
-**Difficulty**: Medium  
-**Companies**: Google, Amazon, Meta, Microsoft, Apple, LinkedIn, Uber, Airbnb  
-**Pattern**: Dynamic Programming, Trie, String Processing, Backtracking  
-**Time Complexity**: O(n² + m*k) where n = string length, m = dict size, k = avg word length  
-**Space Complexity**: O(n + m*k) for DP array and trie storage
+Note that the same word in the dictionary may be reused multiple times in the segmentation.
 
-**Example**:
-```
+**Constraints:**
+1.  `1 <= s.length <= 300`
+2.  `1 <= wordDict.length <= 1000`
+3.  `1 <= wordDict[i].length <= 20`
+4.  `s` and `wordDict[i]` consist of only lowercase English letters.
+5.  All the strings of `wordDict` are **unique**.
+
+**Example:**
+```text
 Input: s = "leetcode", wordDict = ["leet","code"]
 Output: true
 Explanation: Return true because "leetcode" can be segmented as "leet code".
@@ -22771,478 +22775,312 @@ Input: s = "catsandog", wordDict = ["cats","dog","sand","and","cat"]
 Output: false
 ```
 
-**Progressive Hints**:
+---
 
-*Hint 1 (Brute Force)*: Try all possible ways to split the string and check if each part is in the dictionary.
+## 🎯 Question Analysis & Deep Dive
 
-*Hint 2 (Dynamic Programming)*: Can you break this into subproblems? If you know s[0...i] can be segmented, how does that help with s[0...j]?
+### 📚 Core Concept
+This is a classic **Dynamic Programming (DP)** problem that can also be solved via **Trie (Prefix Tree)** or **Breadth-First Search (BFS)**.
+It asks a fundamental question of parser design: *"Can this continuous stream of data be tokenized validly?"*
 
-*Hint 3 (Optimization)*: Can you use a data structure to make dictionary lookups faster?
+### 📜 Historical Context & Evolution
+How has this problem evolved in computer science?
 
-*Hint 4 (Trie Optimization)*: How can a Trie help you avoid checking invalid prefixes?
+| Era | Paradigm | The Pattern | The Limitation |
+| :--- | :--- | :--- | :--- |
+| **1970s (Unix)** | Text Processing | **Recursive Backtracking** | Exponential Time $O(2^n)$. Fails on `aaaaaaaaab` inputs. |
+| **1990s (Perl)** | Scripting | **Regex Matching** | `(word1|word2)*`. Vulnerable to ReDoS attacks (Catastrophic Backtracking). |
+| **2000s (Search)** | Information Retrieval | **Aho-Corasick Algorithm** | Optimized for multi-pattern searching but complex to implement for simple segmentation. |
+| **2010s (NLP)** | Machine Learning | **Statistical Segmentation** | Using Hidden Markov Models (HMM) or Viterbi Algorithm (DP) to find the *most likely* break. |
+| **2024 (Modern)** | Systems Programming | **Trie + DP** | Low-latency tokenization for Content filters and IntelliSense engines. |
 
-**Solution Approaches**:
+### 💡 Why this matters NOW? (The Systems Perspective)
+In the modern cloud ecosystem, **Tokenization** is the first step of almost every pipeline:
+1.  **Search Engines**: Breaking "newyorktimes" into "new", "york", "times" for indexing.
+2.  **Content Moderation**: Detecting "badword" embedded inside "notabadwordreally".
+3.  **Spell Checkers**: The "Did you mean?" feature on mobile keyboards often solves this exact problem to correct "thisis" to "this is".
 
-**Approach 1: Dynamic Programming (Bottom-up)**
+### 🧠 What This Question Really Tests
+1.  **DP State Definition**: Can you define `dp[i]` correctly? (Is it "substring 0..i is valid"?).
+2.  **Subproblem Optimization**: Do you realize that `catsandog` re-solves `sand` multiple times?
+3.  **Data Structure Choice**: `HashSet` vs `Trie` for lookup speed ($O(1)$ vs $O(L)$).
+4.  **Complexity Analysis**: Understanding why recursion fails and how DP fixes it.
+
+### Difficulty Breakdown
+*   **Conceptual Complexity**: **Medium**. The DP recurrence relation is straightforward once seen.
+*   **Implementation Complexity**: **Low**. Standard DP or Memoization code is short.
+*   **Optimization Depth**: **High**. Discussing Trie optimizations, BFS pruning, and Aho-Corasick pushes this to Senior/Staff level.
+
+---
+
+## 🚀 Solution Evolution Journey
+
+### Approach 1: Naive Recursion (The Trap)
+#### Thought Process
+"I will try to match the prefix of `s` with every word in the dictionary. If a match is found, I will recursively solve for the *rest* of the string."
+
+#### Implementation
 ```java
-// Java - DP Bottom-up O(n² + m*k) time, O(n + m*k) space
-public boolean wordBreak(String s, List<String> wordDict) {
-    Set<String> wordSet = new HashSet<>(wordDict);
-    int n = s.length();
-    boolean[] dp = new boolean[n + 1];
-    
-    // Base case: empty string can always be segmented
-    dp[0] = true;
-    
-    for (int i = 1; i <= n; i++) {
-        for (int j = 0; j < i; j++) {
-            // If s[0...j-1] can be segmented AND s[j...i-1] is in dictionary
-            if (dp[j] && wordSet.contains(s.substring(j, i))) {
-                dp[i] = true;
-                break; // Found one valid segmentation, no need to continue
-            }
-        }
-    }
-    
-    return dp[n];
-}
-```
-
-**Approach 2: Memoized Recursion (Top-down)**
-```java
-// Java - Memoized Recursion O(n² + m*k) time, O(n + m*k) space
-public boolean wordBreak(String s, List<String> wordDict) {
-    Set<String> wordSet = new HashSet<>(wordDict);
-    Map<Integer, Boolean> memo = new HashMap<>();
-    return canBreak(s, 0, wordSet, memo);
-}
-
-private boolean canBreak(String s, int start, Set<String> wordSet, Map<Integer, Boolean> memo) {
-    // Base case: reached end of string
-    if (start == s.length()) {
-        return true;
-    }
-    
-    // Check memoization
-    if (memo.containsKey(start)) {
-        return memo.get(start);
-    }
-    
-    // Try all possible words starting from current position
-    for (int end = start + 1; end <= s.length(); end++) {
-        String word = s.substring(start, end);
+public class NaiveWordBreak {
+    public boolean wordBreak(String s, List<String> wordDict) {
+        // Base case: Empty string is valid
+        if (s.isEmpty()) return true;
         
-        if (wordSet.contains(word) && canBreak(s, end, wordSet, memo)) {
-            memo.put(start, true);
-            return true;
-        }
-    }
-    
-    memo.put(start, false);
-    return false;
-}
-```
-
-**Approach 3: Trie-based Optimization**
-```java
-// Java - Trie-based DP O(n² + m*k) time, O(n + m*k) space
-class TrieNode {
-    TrieNode[] children = new TrieNode[26];
-    boolean isWord = false;
-}
-
-public boolean wordBreak(String s, List<String> wordDict) {
-    // Build Trie
-    TrieNode root = buildTrie(wordDict);
-    
-    int n = s.length();
-    boolean[] dp = new boolean[n + 1];
-    dp[0] = true;
-    
-    for (int i = 1; i <= n; i++) {
-        TrieNode node = root;
-        
-        // Check all possible words ending at position i
-        for (int j = i - 1; j >= 0; j--) {
-            char c = s.charAt(j);
-            
-            if (node.children[c - 'a'] == null) {
-                break; // No valid word can start from position j
-            }
-            
-            node = node.children[c - 'a'];
-            
-            if (node.isWord && dp[j]) {
-                dp[i] = true;
-                break;
-            }
-        }
-    }
-    
-    return dp[n];
-}
-
-private TrieNode buildTrie(List<String> wordDict) {
-    TrieNode root = new TrieNode();
-    
-    for (String word : wordDict) {
-        TrieNode node = root;
-        
-        // Insert word in reverse order for suffix matching
-        for (int i = word.length() - 1; i >= 0; i--) {
-            char c = word.charAt(i);
-            
-            if (node.children[c - 'a'] == null) {
-                node.children[c - 'a'] = new TrieNode();
-            }
-            
-            node = node.children[c - 'a'];
-        }
-        
-        node.isWord = true;
-    }
-    
-    return root;
-}
-```
-
-**Approach 4: BFS Approach**
-```java
-// Java - BFS O(n² + m*k) time, O(n + m*k) space
-public boolean wordBreak(String s, List<String> wordDict) {
-    Set<String> wordSet = new HashSet<>(wordDict);
-    Queue<Integer> queue = new LinkedList<>();
-    boolean[] visited = new boolean[s.length()];
-    
-    queue.offer(0);
-    
-    while (!queue.isEmpty()) {
-        int start = queue.poll();
-        
-        if (visited[start]) {
-            continue;
-        }
-        
-        visited[start] = true;
-        
-        for (int end = start + 1; end <= s.length(); end++) {
-            if (wordSet.contains(s.substring(start, end))) {
-                if (end == s.length()) {
+        for (String word : wordDict) {
+            // If string starts with this word
+            if (s.startsWith(word)) {
+                // Recurse on the suffix
+                if (wordBreak(s.substring(word.length()), wordDict)) {
                     return true;
                 }
-                
-                queue.offer(end);
             }
         }
-    }
-    
-    return false;
-}
-```
-
-**Multi-Language Implementations**:
-
-```python
-# Python - DP Bottom-up
-def wordBreak(s, wordDict):
-    word_set = set(wordDict)
-    n = len(s)
-    dp = [False] * (n + 1)
-    dp[0] = True
-    
-    for i in range(1, n + 1):
-        for j in range(i):
-            if dp[j] and s[j:i] in word_set:
-                dp[i] = True
-                break
-    
-    return dp[n]
-
-# Python - Memoized Recursion
-def wordBreak(s, wordDict):
-    word_set = set(wordDict)
-    memo = {}
-    
-    def can_break(start):
-        if start == len(s):
-            return True
-        
-        if start in memo:
-            return memo[start]
-        
-        for end in range(start + 1, len(s) + 1):
-            if s[start:end] in word_set and can_break(end):
-                memo[start] = True
-                return True
-        
-        memo[start] = False
-        return False
-    
-    return can_break(0)
-
-# Python - Using functools.lru_cache
-from functools import lru_cache
-
-def wordBreak(s, wordDict):
-    word_set = set(wordDict)
-    
-    @lru_cache(maxsize=None)
-    def can_break(start):
-        if start == len(s):
-            return True
-        
-        return any(
-            s[start:end] in word_set and can_break(end)
-            for end in range(start + 1, len(s) + 1)
-        )
-    
-    return can_break(0)
-
-# Python - BFS Approach
-from collections import deque
-
-def wordBreak(s, wordDict):
-    word_set = set(wordDict)
-    queue = deque([0])
-    visited = set()
-    
-    while queue:
-        start = queue.popleft()
-        
-        if start in visited:
-            continue
-        
-        visited.add(start)
-        
-        for end in range(start + 1, len(s) + 1):
-            if s[start:end] in word_set:
-                if end == len(s):
-                    return True
-                queue.append(end)
-    
-    return False
-```
-
-```javascript
-// JavaScript - DP Bottom-up
-function wordBreak(s, wordDict) {
-    const wordSet = new Set(wordDict);
-    const n = s.length;
-    const dp = new Array(n + 1).fill(false);
-    dp[0] = true;
-    
-    for (let i = 1; i <= n; i++) {
-        for (let j = 0; j < i; j++) {
-            if (dp[j] && wordSet.has(s.substring(j, i))) {
-                dp[i] = true;
-                break;
-            }
-        }
-    }
-    
-    return dp[n];
-}
-
-// JavaScript - Memoized Recursion
-function wordBreak(s, wordDict) {
-    const wordSet = new Set(wordDict);
-    const memo = new Map();
-    
-    function canBreak(start) {
-        if (start === s.length) {
-            return true;
-        }
-        
-        if (memo.has(start)) {
-            return memo.get(start);
-        }
-        
-        for (let end = start + 1; end <= s.length; end++) {
-            const word = s.substring(start, end);
-            
-            if (wordSet.has(word) && canBreak(end)) {
-                memo.set(start, true);
-                return true;
-            }
-        }
-        
-        memo.set(start, false);
         return false;
     }
-    
-    return canBreak(0);
-}
-
-// JavaScript - Trie Implementation
-class TrieNode {
-    constructor() {
-        this.children = {};
-        this.isWord = false;
-    }
-}
-
-function wordBreak(s, wordDict) {
-    const root = new TrieNode();
-    
-    // Build Trie
-    for (const word of wordDict) {
-        let node = root;
-        for (const char of word) {
-            if (!node.children[char]) {
-                node.children[char] = new TrieNode();
-            }
-            node = node.children[char];
-        }
-        node.isWord = true;
-    }
-    
-    const n = s.length;
-    const dp = new Array(n + 1).fill(false);
-    dp[0] = true;
-    
-    for (let i = 1; i <= n; i++) {
-        let node = root;
-        
-        for (let j = i - 1; j >= 0; j--) {
-            const char = s[j];
-            
-            if (!node.children[char]) {
-                break;
-            }
-            
-            node = node.children[char];
-            
-            if (node.isWord && dp[j]) {
-                dp[i] = true;
-                break;
-            }
-        }
-    }
-    
-    return dp[n];
-}
-
-// JavaScript - Functional Approach
-function wordBreak(s, wordDict) {
-    const wordSet = new Set(wordDict);
-    
-    return (function canBreak(start, memo = {}) {
-        if (start === s.length) return true;
-        if (start in memo) return memo[start];
-        
-        return memo[start] = wordDict.some(word => 
-            s.startsWith(word, start) && 
-            canBreak(start + word.length, memo)
-        );
-    })(0);
 }
 ```
+#### Critique
+*   **Time Complexity**: $O(2^n)$. In the worst case (e.g., `s = "aaaaab"`, `dict = ["a", "aa", "aaa"]`), we explore every possible partition.
+*   **Space Complexity**: $O(n)$ recursion depth.
+*   **Verdict**: **Time Limit Exceeded (TLE)** on LeetCode. DO NOT use this in an interview without immediately offering memoization.
 
-```cpp
-// C++ - DP Bottom-up
-class Solution {
-public:
-    bool wordBreak(string s, vector<string>& wordDict) {
-        unordered_set<string> wordSet(wordDict.begin(), wordDict.end());
-        int n = s.length();
-        vector<bool> dp(n + 1, false);
-        dp[0] = true;
-        
-        for (int i = 1; i <= n; i++) {
-            for (int j = 0; j < i; j++) {
-                if (dp[j] && wordSet.count(s.substr(j, i - j))) {
-                    dp[i] = true;
-                    break;
-                }
-            }
-        }
-        
-        return dp[n];
+### Approach 2: Memoized Recursion (Top-Down DP)
+#### Optimization Strategy
+We are re-calculating the same suffixes (`"andog"`) multiple times. Let's cache the result.
+*   **Key**: The starting index `start`.
+*   **Value**: Boolean (Is it possible to break the suffix starting at `start`?).
+
+#### Implementation
+```java
+public class MemoizedWordBreak {
+    private Boolean[] memo; // null = uncomputed, true/false = computed
+
+    public boolean wordBreak(String s, List<String> wordDict) {
+        this.memo = new Boolean[s.length() + 1];
+        return canBreak(s, 0, new HashSet<>(wordDict));
     }
-};
 
-// C++ - Memoized Recursion
-class Solution {
-private:
-    unordered_map<int, bool> memo;
-    unordered_set<string> wordSet;
-    
-    bool canBreak(const string& s, int start) {
-        if (start == s.length()) {
-            return true;
-        }
+    private boolean canBreak(String s, int start, Set<String> wordDict) {
+        // Base Case: Reached end of string
+        if (start == s.length()) return true;
         
-        if (memo.count(start)) {
-            return memo[start];
-        }
-        
+        // Return Cached Result
+        if (memo[start] != null) return memo[start];
+
+        // Try every possible end index
         for (int end = start + 1; end <= s.length(); end++) {
-            string word = s.substr(start, end - start);
+            // substring is [start, end)
+            String substr = s.substring(start, end);
             
-            if (wordSet.count(word) && canBreak(s, end)) {
+            // Recurrence: If prefix is in dict AND suffix is segmentable
+            if (wordDict.contains(substr) && canBreak(s, end, wordDict)) {
                 return memo[start] = true;
             }
         }
-        
+
         return memo[start] = false;
     }
-    
-public:
-    bool wordBreak(string s, vector<string>& wordDict) {
-        wordSet = unordered_set<string>(wordDict.begin(), wordDict.end());
-        return canBreak(s, 0);
-    }
-};
+}
+```
+#### Critique
+*   **Time Complexity**: $O(n^3)$. 
+    *   There are $O(n)$ states.
+    *   For each state, we iterate $O(n)$ times.
+    *   `substring` and `hash` take $O(n)$.
+    *   Total: $n \times n \times n$.
+*   **Space Complexity**: $O(n)$ for memo array + recursion stack.
+*   **Pros**: Easy to write, passes LeetCode.
+*   **Cons**: Recursion overhead can explore depth unnecessarily.
 
-// C++ - Trie Implementation
-struct TrieNode {
-    unordered_map<char, TrieNode*> children;
-    bool isWord = false;
-};
+### Approach 3: Iterative Dynamic Programming (Bottom-Up)
+#### The Industry Standard
+This is preferred in production because it avoids recursion limits (StackOverflow) and is easier to reason about for iterative optimizations.
 
-class Solution {
-private:
-    TrieNode* buildTrie(const vector<string>& wordDict) {
-        TrieNode* root = new TrieNode();
+#### Definition
+`dp[i]` = **True** if `s.substring(0, i)` (prefix of length `i`) can be validly segmented.
+
+#### Recurrence
+`dp[i] = true` IF there exists some `j < i` such that:
+1.  `dp[j]` is true (prefix up to `j` is valid).
+2.  `s.substring(j, i)` is in `wordDict` (the new word is valid).
+
+#### Implementation
+```java
+public class DpWordBreak {
+    public boolean wordBreak(String s, List<String> wordDict) {
+        Set<String> dict = new HashSet<>(wordDict);
+        int n = s.length();
         
-        for (const string& word : wordDict) {
-            TrieNode* node = root;
-            
-            for (char c : word) {
-                if (node->children.find(c) == node->children.end()) {
-                    node->children[c] = new TrieNode();
+        // dp[i] means s[0...i-1] can be segmented
+        boolean[] dp = new boolean[n + 1];
+        
+        // Base Case: Empty string is valid
+        dp[0] = true;
+        
+        for (int i = 1; i <= n; i++) {       // i is the END of the substring (exclusive)
+            for (int j = 0; j < i; j++) {    // j is the SPLIT point
+                // Logic: If prefix valid AND suffix valid
+                if (dp[j] && dict.contains(s.substring(j, i))) {
+                    dp[i] = true;
+                    break; // Optimization: Found one valid split, move to next i
                 }
-                node = node->children[c];
             }
-            
-            node->isWord = true;
         }
         
-        return root;
+        return dp[n];
     }
-    
+}
+```
+#### Critique
+*   **Time Complexity**: $O(n^3)$ (Same as Memoization).
+*   **Space Complexity**: $O(n)$ for the boolean array.
+*   **Optimization**: We can optimize the inner loop. Instead of checking all `j` from `0` to `i`, we only check `j` from `i - maxWordLen` to `i`. This reduces the complexity to $O(n \cdot K \cdot L)$ where K is average word length.
+
+---
+
+### Approach 4: Trie Optimization (The "Content Filter")
+#### Concept
+In the `Dict` loop of the DP approach, `dict.contains(substring)` takes $O(L)$ where $L$ is the substring length. By using a Trie, we can iterate character by character. If a Trie path terminates, we know we found a valid word.
+
+#### Implementation
+```java
+public class TrieWordBreak {
+    static class TrieNode {
+        TrieNode[] children = new TrieNode[26];
+        boolean isEnd = false;
+    }
+
+    public boolean wordBreak(String s, List<String> wordDict) {
+        TrieNode root = new TrieNode();
+        for (String w : wordDict) addWord(root, w);
+
+        int n = s.length();
+        boolean[] dp = new boolean[n + 1];
+        dp[0] = true;
+
+        for (int i = 0; i < n; i++) {
+            if (!dp[i]) continue; // If prefix ending at i is not valid, skip
+
+            // Traverse Trie starting from s[i]
+            TrieNode node = root;
+            for (int j = i; j < n; j++) {
+                int idx = s.charAt(j) - 'a';
+                if (node.children[idx] == null) break; // Path ends
+                
+                node = node.children[idx];
+                if (node.isEnd) {
+                    dp[j + 1] = true;
+                }
+            }
+        }
+        return dp[n];
+    }
+
+    private void addWord(TrieNode root, String word) {
+        TrieNode node = root;
+        for (char c : word.toCharArray()) {
+            if (node.children[c - 'a'] == null) 
+                node.children[c - 'a'] = new TrieNode();
+            node = node.children[c - 'a'];
+        }
+        node.isEnd = true;
+    }
+}
+```
+#### Critique
+*   **Time Complexity**: $O(N^2)$ in worst case (e.g. `s="aaa..."`), but for sparse dictionaries, it is significantly faster because we stop traversing as soon as the prefix doesn't match.
+*   **Space Complexity**: $O(M \cdot K)$ to store the Trie.
+
+### Approach 5: Breadth-First Search (BFS)
+#### Concept
+Model the string as a graph. Indices `0` to `n` are nodes. An edge exists from `i` to `j` if `s[i...j]` is a valid word.
+Find if there is a path from `0` to `n`.
+
+#### Implementation
+```java
+public class BfsWordBreak {
+    public boolean wordBreak(String s, List<String> wordDict) {
+        Set<String> wordSet = new HashSet<>(wordDict);
+        Queue<Integer> queue = new LinkedList<>();
+        boolean[] visited = new boolean[s.length()];
+        
+        queue.add(0);
+        
+        while (!queue.isEmpty()) {
+            int start = queue.poll();
+            if (visited[start]) continue;
+            
+            for (int end = start + 1; end <= s.length(); end++) {
+                if (wordSet.contains(s.substring(start, end))) {
+                    if (end == s.length()) return true;
+                    if (!visited[end]) {
+                        queue.add(end);
+                    }
+                }
+            }
+            visited[start] = true;
+        }
+        return false;
+    }
+}
+```
+
+---
+
+## 🌐 Multi-Language Implementation
+
+### Python (Sleek & Pythonic)
+Python handles string slicing efficiently. The DP approach is idiomatic.
+
+```python
+class Solution:
+    def wordBreak(self, s: str, wordDict: List[str]) -> bool:
+        # dp[i] is True if s[:i] can be segmented
+        dp = [False] * (len(s) + 1)
+        dp[0] = True
+        
+        word_set = set(wordDict)
+        
+        for i in range(1, len(s) + 1):
+            for j in range(i):
+                # Check if prefix valid AND suffix in dict
+                if dp[j] and s[j:i] in word_set:
+                    dp[i] = True
+                    break
+        
+        return dp[len(s)]
+```
+
+### JavaScript / Node.js (V8 Optimized)
+In JS, `Set` lookups are $O(1)$ on average. We avoid recursion to prevent call stack limits on V8.
+
+### C++ (STL Mastery)
+We use `unordered_set` for $O(1)$ lookup and `vector<bool>` optimization.
+
+```cpp
+class Solution {
 public:
     bool wordBreak(string s, vector<string>& wordDict) {
-        TrieNode* root = buildTrie(wordDict);
+        unordered_set<string> dict(wordDict.begin(), wordDict.end());
         int n = s.length();
+        
+        // dp[i] = true if s[0...i-1] is segmentable
         vector<bool> dp(n + 1, false);
         dp[0] = true;
         
+        // Optimization: track max word length to prune inner loop
+        int maxLen = 0;
+        for(const string& w : wordDict) maxLen = max(maxLen, (int)w.length());
+        
         for (int i = 1; i <= n; i++) {
-            TrieNode* node = root;
-            
-            for (int j = i - 1; j >= 0; j--) {
-                char c = s[j];
-                
-                if (node->children.find(c) == node->children.end()) {
-                    break;
-                }
-                
-                node = node->children[c];
-                
-                if (node->isWord && dp[j]) {
-                    dp[i] = true;
-                    break;
+            // Only check suffixes of valid lengths
+            for (int j = i - 1; j >= max(0, i - maxLen); j--) {
+                if (dp[j]) {
+                    string word = s.substr(j, i - j);
+                    if (dict.count(word)) {
+                        dp[i] = true;
+                        break;
+                    }
                 }
             }
         }
@@ -23250,33 +23088,21 @@ public:
         return dp[n];
     }
 };
-
-// C++ - Template Version
-template<typename Container>
-bool wordBreakGeneric(const string& s, const Container& wordDict) {
-    unordered_set<string> wordSet(wordDict.begin(), wordDict.end());
-    vector<bool> dp(s.length() + 1, false);
-    dp[0] = true;
-    
-    for (size_t i = 1; i <= s.length(); i++) {
-        for (size_t j = 0; j < i; j++) {
-            if (dp[j] && wordSet.count(s.substr(j, i - j))) {
-                dp[i] = true;
-                break;
-            }
-        }
-    }
-    
-    return dp[s.length()];
-}
 ```
+
+### Go (Idiomatic & Clean)
+Go's slice handling `s[j:i]` is efficient (view over underlying array).
 
 ```go
-// Go - DP Bottom-up
 func wordBreak(s string, wordDict []string) bool {
+    // 1. Convert Slice to Map for O(1) lookup
     wordSet := make(map[string]bool)
-    for _, word := range wordDict {
-        wordSet[word] = true
+    maxLen := 0
+    for _, w := range wordDict {
+        wordSet[w] = true
+        if len(w) > maxLen {
+            maxLen = len(w)
+        }
     }
     
     n := len(s)
@@ -23284,279 +23110,156 @@ func wordBreak(s string, wordDict []string) bool {
     dp[0] = true
     
     for i := 1; i <= n; i++ {
-        for j := 0; j < i; j++ {
-            if dp[j] && wordSet[s[j:i]] {
-                dp[i] = true
-                break
-            }
-        }
-    }
-    
-    return dp[n]
-}
-
-// Go - Memoized Recursion
-func wordBreak(s string, wordDict []string) bool {
-    wordSet := make(map[string]bool)
-    for _, word := range wordDict {
-        wordSet[word] = true
-    }
-    
-    memo := make(map[int]bool)
-    
-    var canBreak func(int) bool
-    canBreak = func(start int) bool {
-        if start == len(s) {
-            return true
+        // Optimization: Don't check strings longer than max dictionary word
+        start := i - maxLen
+        if start < 0 {
+            start = 0
         }
         
-        if val, exists := memo[start]; exists {
-            return val
-        }
-        
-        for end := start + 1; end <= len(s); end++ {
-            word := s[start:end]
-            
-            if wordSet[word] && canBreak(end) {
-                memo[start] = true
-                return true
-            }
-        }
-        
-        memo[start] = false
-        return false
-    }
-    
-    return canBreak(0)
-}
-
-// Go - Trie Implementation
-type TrieNode struct {
-    children map[rune]*TrieNode
-    isWord   bool
-}
-
-func wordBreak(s string, wordDict []string) bool {
-    root := &TrieNode{children: make(map[rune]*TrieNode)}
-    
-    // Build Trie
-    for _, word := range wordDict {
-        node := root
-        for _, char := range word {
-            if node.children[char] == nil {
-                node.children[char] = &TrieNode{children: make(map[rune]*TrieNode)}
-            }
-            node = node.children[char]
-        }
-        node.isWord = true
-    }
-    
-    n := len(s)
-    dp := make([]bool, n+1)
-    dp[0] = true
-    
-    runes := []rune(s)
-    
-    for i := 1; i <= n; i++ {
-        node := root
-        
-        for j := i - 1; j >= 0; j-- {
-            char := runes[j]
-            
-            if node.children[char] == nil {
-                break
-            }
-            
-            node = node.children[char]
-            
-            if node.isWord && dp[j] {
-                dp[i] = true
-                break
-            }
-        }
-    }
-    
-    return dp[n]
-}
-
-// Go - Channel-based Parallel Processing
-func wordBreak(s string, wordDict []string) bool {
-    wordSet := make(map[string]bool)
-    for _, word := range wordDict {
-        wordSet[word] = true
-    }
-    
-    n := len(s)
-    dp := make([]bool, n+1)
-    dp[0] = true
-    
-    results := make(chan bool, n)
-    
-    for i := 1; i <= n; i++ {
-        go func(pos int) {
-            found := false
-            for j := 0; j < pos && !found; j++ {
-                if dp[j] && wordSet[s[j:pos]] {
-                    found = true
+        for j := start; j < i; j++ {
+            if dp[j] {
+                // Check if remaining slice is in dictionary
+                if wordSet[s[j:i]] {
+                    dp[i] = true
+                    break
                 }
             }
-            results <- found
-        }(i)
-        
-        dp[i] = <-results
+        }
     }
     
     return dp[n]
 }
 ```
 
-**Complexity Analysis**:
-
-| Approach | Time Complexity | Space Complexity | Explanation |
-|----------|----------------|------------------|-------------|
-| **DP Bottom-up** | O(n² + m*k) | O(n + m*k) | n² for DP, m*k for dictionary |
-| **Memoized Recursion** | O(n² + m*k) | O(n + m*k) | Same as DP with recursion stack |
-| **Trie-based DP** | O(n² + m*k) | O(n + m*k) | Trie reduces constant factors |
-| **BFS** | O(n² + m*k) | O(n + m*k) | Queue-based exploration |
-
-Where:
-- n = length of string s
-- m = number of words in dictionary
-- k = average length of words in dictionary
-
-**Common Pitfalls**:
-
-1. **Substring Creation**: Creating too many substring objects
-   ```java
-   // Wrong: Creates many temporary strings
-   for (String word : wordDict) {
-       if (s.substring(j, i).equals(word)) {
-           // ...
-       }
-   }
-   
-   // Correct: Use HashSet for O(1) lookup
-   if (wordSet.contains(s.substring(j, i))) {
-       // ...
-   }
-   ```
-
-2. **Inefficient Dictionary Lookup**: Using List instead of Set
-   ```java
-   // Wrong: O(m) lookup time
-   if (wordDict.contains(s.substring(j, i))) {
-   
-   // Correct: O(1) average lookup time
-   Set<String> wordSet = new HashSet<>(wordDict);
-   if (wordSet.contains(s.substring(j, i))) {
-   ```
-
-3. **Missing Base Case**: Not handling empty string properly
-4. **Index Bounds**: Off-by-one errors in substring operations
-5. **Optimization Opportunity**: Not breaking early when solution found
-
-**Company-Specific Insights**:
-
-- **Google**: Often asks for Trie optimization and follow-up questions
-- **Amazon**: Focuses on scalability and memory optimization
-- **Meta**: May ask about distributed processing for large dictionaries
-- **Microsoft**: Often asks about different DP approaches
-- **Apple**: Focuses on clean, efficient implementation
-- **LinkedIn**: May ask about real-time word suggestion applications
-- **Uber**: Focuses on performance optimization for mobile applications
-- **Airbnb**: May ask about internationalization and different languages
-
-**Advanced Optimizations**:
-
-1. **Rolling Hash**: Use rolling hash for faster string comparison
-2. **Suffix Array**: Preprocess dictionary for faster matching
-3. **Parallel DP**: Distribute computation across multiple cores
-4. **Memory Pool**: Reuse objects to reduce garbage collection
-
-**Follow-up Questions**:
-
-1. **Word Break II**: Return all possible sentences (Hard)
-2. **Concatenated Words**: Find all concatenated words in dictionary
-3. **Word Ladder**: Transform one word to another using dictionary
-4. **Boggle Game**: Find words in 2D character grid
-5. **Auto-complete**: Implement word suggestion system
-6. **Spell Checker**: Find closest valid words for misspelled input
-
-**Related Problems**:
-- Word Break II (Hard)
-- Concatenated Words (Hard)
-- Word Ladder (Hard)
-- Word Search (Medium)
-- Palindrome Partitioning (Medium)
-- Decode Ways (Medium)
-
-**Interview Tips**:
-
-1. **Clarify Requirements**: Ask about case sensitivity, empty strings
-2. **Start with DP**: Begin with bottom-up DP approach
-3. **Optimize Gradually**: Show Trie optimization if time permits
-4. **Handle Edge Cases**: Empty string, empty dictionary, no solution
-5. **Explain Trade-offs**: Discuss time vs space complexity
-6. **Test Thoroughly**: Use examples with overlapping words
-7. **Code Cleanly**: Use meaningful variable names and comments
-
-**Real-World Applications**:
-
-1. **Natural Language Processing**: Text tokenization and parsing
-2. **Search Engines**: Query processing and word segmentation
-3. **Spell Checkers**: Word boundary detection
-4. **Machine Translation**: Sentence segmentation
-5. **Voice Recognition**: Speech-to-text word boundary detection
-6. **Data Mining**: Text preprocessing and analysis
-7. **Compiler Design**: Lexical analysis and tokenization
-
-**Visualization Example**:
-```
-String: "leetcode"
-Dictionary: ["leet", "code"]
-
-DP Array Construction:
-dp[0] = true (base case)
-
-i=1: "l" → not in dict → dp[1] = false
-i=2: "le" → not in dict → dp[2] = false  
-i=3: "lee" → not in dict → dp[3] = false
-i=4: "leet" → in dict AND dp[0]=true → dp[4] = true
-i=5: "leetc" → check all splits:
-     - "l"+"eetc" → "l" not in dict
-     - "le"+"etc" → "le" not in dict  
-     - "lee"+"tc" → "lee" not in dict
-     - "leet"+"c" → "leet" in dict but dp[4] needed for "c"
-     - "c" not in dict → dp[5] = false
-...
-i=8: "leetcode" → check all splits:
-     - "leet"+"code" → both in dict AND dp[4]=true → dp[8] = true
-
-Result: true (can be segmented as "leet" + "code")
-```
-
-**Production Code Considerations**:
-- Input validation (null strings, empty dictionary)
-- Memory optimization for large dictionaries
-- Thread safety for concurrent processing
-- Performance monitoring and profiling
-- Internationalization support for different languages
-- Graceful handling of malformed input
-- Caching for repeated queries with same dictionary
 ---
 
-#### Question 42: Maximum Product Subarray ✅
+## 🛡️ Edge Case Analysis & Error Handling
 
-**Problem Statement**: Given an integer array nums, find a contiguous non-empty subarray within the array that has the largest product, and return the product.
+### Defensive Programming
+1.  **Empty String**: `s = ""` should return `true` (base case) or `false` depending on spec. LeetCode says non-empty `s`, but production systems might get empty. A dictionary check handles this.
+2.  **Duplicated Words**: `wordDict` might have duplicates. Converting to `HashSet` handles this.
+3.  **Unicode**: What if `s` contains emojis or Chinese characters? Java's `String` is UTF-16, so `length()` counts code units, not code points. For correct tokenization, iterate by **Code Points**.
+4.  **ReDoS (Regex Denial of Service)**:
+    *   **Vulnerability**: A naive regex like `(word1|word2|...)+` is dangerous. If the regex engine produces a DFA (like Go's `regexp`), it's safe ($O(n)$). If it uses Backtracking (like Java/Python/JS), it can be $O(2^n)$.
+    *   **Fix**: Always use DP or Aho-Corasick for dictionary matching, never dynamic regex compilation from user input.
 
-**Difficulty**: Medium  
-**Companies**: Google, Amazon, Meta, Microsoft, Apple, LinkedIn, Adobe, Salesforce  
-**Pattern**: Dynamic Programming, Array, Kadane's Algorithm Variant  
-**Time Complexity**: O(n)  
-**Space Complexity**: O(1)
+---
 
-**Example**:
+## 🎭 Interview Simulation
+
+### Phase 1: Clarification (3 min)
+*   **You**: "Can we reuse the same word multiple times?"
+*   **Interviewer**: "Yes."
+*   **You**: "What is the maximum length of the string `s`?"
+*   **Interviewer**: "300." (This hinted at $O(N^2)$ being acceptable).
+
+### Phase 2: Diagramming (5 min)
+*   Draw `dp` array for `"leetcode"`.
+*   Show how `dp[4]` (leet) enables `dp[8]` (code).
+*   State clearly: "This is a reachability problem on a DAG (Directed Acyclic Graph)."
+
+### Phase 3: Coding (15 min)
+*   Start with `HashSet` conversion.
+*   Implement the $O(N^2)$ DP solution.
+*   **Bonus**: Mention the `maxLen` optimization for the inner loop.
+
+### Phase 4: Follow-up (5 min)
+*   **Interviewer**: "What if the dictionary is massive (10M words) but `s` is short?"
+*   **Answer**: "The `HashSet` overhead is high ($O(M \cdot K)$ memory). I would use a Trie if we are processing many strings, or a bloom filter for pre-check."
+*   **Interviewer**: "What if we need to return *all* sentences?"
+*   **Answer**: "We need to store likely parents in `dp` (Making it `List<List<Integer>> prev`) and reconstruct paths (Backtracking)."
+
+---
+
+## 🚀 Expert-Level Deep Dive
+
+### Performance: Trie vs DP vs Aho-Corasick
+*   **Standard DP**: $O(N^2)$. Great for short strings ($N=300$).
+*   **Trie**: $O(N^2)$ worst case, but $O(N \cdot W)$ in practice where $W$ is max word length.
+*   **Aho-Corasick**: $O(N + M + Z)$ where $Z$ is matches. It builds a failure-link automaton.
+    *   **Use Case**: When you have a **fixed dictionary** and stream **terabytes** of text (e.g., `grep` or Network Intrusion Detection).
+    *   **For this problem**: Overkill unless `s` becomes very long.
+
+### Production System: Content Moderation
+Imagine building a "Profanity Filter" for a Chat App.
+*   **Input**: "Ihateyou" -> **Output**: "I hate you" -> Check `hate` against banlist.
+*   **Challenge**: "assassin" contains "ass".
+    *   **Greedy** approach fails (might tokenize "ass" + "assin").
+    *   **Word Break** (DP) finds *if* it can be split.
+    *   **Word Break II** (Backtracking) finds *all* splits to detect context.
+
+### System Architecture
+1.  **Orchestrator**: Receives message.
+2.  **Tokenizer Service**: Runs `WordBreak` logic (C++ Microservice using Aho-Corasick).
+3.  **Classifier**: Runs ML model on tokenized words.
+4.  **Action**: Block/Flag.
+
+---
+
+## 🧪 Comprehensive Testing Strategy
+
+### 1. Unit Tests (JUnit 5)
+```java
+@Test
+void testStandardCase() {
+    assertTrue(solve("leetcode", List.of("leet", "code")));
+}
+
+@Test
+void testOverlap() {
+    // "aaaaaaa", ["aaaa", "aaa"] -> Valid
+    assertTrue(solve("aaaaaaa", List.of("aaaa", "aaa")));
+}
+
+@Test
+void testReDoSAttempt() {
+    // Ensure DP doesn't hang on large inputs that fail
+    String s = "a".repeat(1000) + "b";
+    List<String> dict = List.of("a", "aa", "aaa");
+    assertFalse(solve(s, dict)); // Should fail instantly, not timeout
+}
 ```
+
+### 2. Property-Based Testing (Jqwik)
+Generate random strings `s` by concatenating random words from `wordDict`.
+**Invariant**: Any string formed by valid concatenation MUST return `true`.
+
+```java
+@Property
+void validConcatenationAlwaysReturnsTrue(@ForAll("validDict") List<String> dict, @ForAll Random random) {
+    String s = concatRandomly(dict, random, 5); // creates "word1word2word3"
+    assertTrue(wordBreak(s, dict));
+}
+```
+
+### 3. Mutation Testing
+*   **Mutant**: Change `dp[j]` to `!dp[j]`.
+*   **Result**: Test suite fails (Good).
+*   **Mutant**: Remove `break` in inner loop.
+*   **Result**: Performance degrades, but correctness holds. (Performance test needed).
+
+---
+
+## 🔗 Related Problems
+*   **Word Break II**: Return all sentences (Backtracking).
+*   **Concatenated Words**: Find all words made of other words (Word Break on each word).
+*   **Palindrome Partitioning**: Same DP structure, different validity check.
+*   **Decode Ways**: 1D DP counting number of ways.
+
+
+---
+#### Question 42: Maximum Product Subarray (The Financial Risk Engine) ✅
+
+## 📋 Question Statement
+**Given an integer array `nums`, find the contiguous subarray within an array (containing at least one number) which has the largest product.**
+
+**Constraints:**
+1.  `1 <= nums.length <= 2 * 10^4`
+2.  `-10 <= nums[i] <= 10`
+3.  The product of any prefix or suffix of `nums` is guaranteed to fit in a **32-bit integer**.
+
+**Example:**
+```text
 Input: nums = [2,3,-2,4]
 Output: 6
 Explanation: [2,3] has the largest product 6.
@@ -23567,775 +23270,386 @@ Explanation: The result cannot be 2, because [-2,-1] is not a subarray.
 
 Input: nums = [-2,3,-4]
 Output: 24
+Explanation: [-2,3,-4] has the product 24.
+```
+
+---
+
+## 🎯 Question Analysis & Deep Dive
+
+### 📚 Core Concept
+This is a sophisticated variation of **Kadane's Algorithm**. While Kadane's algorithm (Maximum Sum Subarray) simply accumulates value, this problem introduces **state duality**:
+*   A negative number can turn a small minimum into a large maximum (e.g., `-2 * -10 = 20`).
+*   A zero effectively "resets" the product chain.
+
+### 📜 Historical Context & Evolution
+How has this problem evolved in computer science?
+
+| Era | Paradigm | The Pattern | The Limitation |
+| :--- | :--- | :--- | :--- |
+| **1970s** | Stock Analysis | **Brute Force** | $O(N^2)$ Checks every interval. Feasible only for EOD (End of Day) stats. |
+| **1984** | Algorithm Design | **Kadane's Algo** | Solved "Max Sum" in $O(N)$, but "Max Product" baffled many due to negative inversions. |
+| **1990s** | Financial Eng. | **Two-State DP** | Tracking both `min` and `max` simultaneously solved the negative inversion problem. |
+| **2010s** | HFT | **Branchless Logic** | Removing `if` statements for nanosecond-level risk checks in trading engines. |
+| **Modern** | Big Data | **MapReduce** | Solving this on distributed blocks (Segment Tree approach) for Petabyte-scale logs. |
+
+### 💡 Why this matters NOW? (The Systems Perspective)
+In **High-Frequency Trading (HFT)** and **Risk Management**, this algorithm calculates the **"Worst Case" vs "Best Case" Exposure**:
+1.  **Leverage Calculation**: If an asset's returns are multipliers (e.g., `1.1x`, `0.9x`), finding the max product sequence identifies the period of highest compounded return (or risk).
+2.  **Circuit Breakers**: Trading engines must detect if a sequence of trades results in an explosion of position size.
+3.  **Anomaly Detection**: In server metrics (CPU usage multipliers), a max product detects runaway processes.
+
+### 🧠 What This Question Really Tests
+1.  **Handling Edge Cases**: Can you handle zeros? (They break the chain).
+2.  **Arithmetic Logic**: Do you understand that `min_so_far * negative = max_candidate`?
+3.  **Optimization**: Can you solve this in one pass $O(N)$ with $O(1)$ space?
+4.  **Overflow Safety**: In the real world, products explode quickly. Do you use `long` or `BigInteger`?
+
+### Difficulty Breakdown
+*   **Conceptual Complexity**: **Medium-Hard**. The "swap min/max" logic is the key "Aha!" moment.
+*   **Implementation Complexity**: **Low**. The code is very short (10 lines).
+*   **Precision Depth**: **High**. Handling overflows and zeros correctly is where candidates fail.
+
+---
+
+## 🚀 Solution Evolution Journey
+
+### Approach 1: Brute Force (The Auditor's Check)
+#### Thought Process
+"I will simply calculate the product of every possible subarray and track the maximum."
+
+#### Implementation
+```java
+// Java - Brute Force
+public class NaiveMaxProduct {
+    public int maxProduct(int[] nums) {
+        if (nums.length == 0) return 0;
+        
+        int result = nums[0];
+        
+        for (int i = 0; i < nums.length; i++) {
+            int currentParams = 1;
+            for (int j = i; j < nums.length; j++) {
+                currentParams *= nums[j];
+                result = Math.max(result, currentParams);
+            }
+        }
+        return result;
+    }
+}
+```
+#### Critique
+*   **Time Complexity**: $O(N^2)$. For 20,000 elements, $400,000,000$ operations. Too slow for real-time systems.
+*   **Space Complexity**: $O(1)$.
+*   **Safety**: Likely to overflow `int` if constraints weren't small.
+
+### Approach 2: Tracking Min/Max (The HFT Standard)
+#### The Insight
+When we multiply by a negative number:
+*   The **Biggest Positive** becomes the **Biggest Negative** (Smallest).
+*   The **Biggest Negative** becomes the **Biggest Positive** (Largest).
+*   Therefore, we must swap our `min` and `max` tracking variables whenever we see a negative number.
+
+#### Implementation
+```java
+public class DpMaxProduct {
+    public int maxProduct(int[] nums) {
+        if (nums.length == 0) return 0;
+
+        int maxSoFar = nums[0];
+        int minSoFar = nums[0];
+        int result = maxSoFar;
+
+        for (int i = 1; i < nums.length; i++) {
+            int curr = nums[i];
+            
+            // Capture temp values to avoid using updated min for max calc
+            int tempMax = Math.max(curr, Math.max(maxSoFar * curr, minSoFar * curr));
+            minSoFar = Math.min(curr, Math.min(maxSoFar * curr, minSoFar * curr));
+
+            maxSoFar = tempMax;
+            result = Math.max(maxSoFar, result);
+        }
+
+        return result;
+    }
+}
+```
+#### Visualization of State
+For `[-2, 3, -4]`:
+1.  **Init**: `max=-2`, `min=-2`, `res=-2`
+2.  **i=1 (3)**:
+    *   `curr=3`. `maxSoFar` was -2. `minSoFar` was -2.
+    *   `newMax = max(3, -2*3, -2*3) = 3`
+    *   `newMin = min(3, -2*3, -2*3) = -6`
+    *   `res = max(-2, 3) = 3`
+3.  **i=2 (-4)**:
+    *   `curr=-4`. `maxSoFar` is 3. `minSoFar` is -6.
+    *   `newMax = max(-4, 3*-4, -6*-4) = max(-4, -12, 24) = 24`
+    *   `newMin = min(-4, 3*-4, -6*-4) = min(-4, -12, 24) = -12`
+    *   `res = max(3, 24) = 24`
+
+#### Critique
+*   **Time Complexity**: $O(N)$. Single pass.
+*   **Space Complexity**: $O(1)$.
+*   **Correctness**: Handles zeros automatically (resetting `maxSoFar` and `minSoFar` to `0` then taking `max(0, ...)` is implicitly handled because `curr` is 0). Wait, actually if `curr` is 0, `maxSoFar` becomes `max(0, 0, 0) = 0`. Correct.
+
+---
+
+Input: nums = [-2,3,-4]
+Output: 24
 Explanation: [-2,3,-4] has the largest product 24.
 ```
 
-**Progressive Hints**:
+---
 
-*Hint 1 (Brute Force)*: Try all possible subarrays and calculate their products. What's the time complexity?
+## 🌐 Multi-Language Implementation
 
-*Hint 2 (Negative Numbers)*: How do negative numbers affect the maximum product? What happens when you have an even vs odd number of negatives?
-
-*Hint 3 (Dynamic Programming)*: Can you track both maximum and minimum products ending at each position?
-
-*Hint 4 (Kadane's Variant)*: How is this similar to maximum sum subarray? What's different about products?
-
-**Solution Approaches**:
-
-**Approach 1: Dynamic Programming (Track Max and Min)**
-```java
-// Java - DP with Max/Min tracking O(n) time, O(1) space
-public int maxProduct(int[] nums) {
-    if (nums == null || nums.length == 0) {
-        return 0;
-    }
-    
-    int maxProduct = nums[0];
-    int currentMax = nums[0];  // Max product ending at current position
-    int currentMin = nums[0];  // Min product ending at current position
-    
-    for (int i = 1; i < nums.length; i++) {
-        int num = nums[i];
-        
-        // Store current max before updating (needed for min calculation)
-        int tempMax = currentMax;
-        
-        // Update max: either start new subarray or extend existing
-        currentMax = Math.max(num, Math.max(currentMax * num, currentMin * num));
-        
-        // Update min: either start new subarray or extend existing
-        currentMin = Math.min(num, Math.min(tempMax * num, currentMin * num));
-        
-        // Update global maximum
-        maxProduct = Math.max(maxProduct, currentMax);
-    }
-    
-    return maxProduct;
-}
-```
-
-**Approach 2: Left-Right Scan**
-```java
-// Java - Left-Right Scan O(n) time, O(1) space
-public int maxProduct(int[] nums) {
-    if (nums == null || nums.length == 0) {
-        return 0;
-    }
-    
-    int n = nums.length;
-    int maxProduct = Integer.MIN_VALUE;
-    
-    // Left to right scan
-    int product = 1;
-    for (int i = 0; i < n; i++) {
-        product *= nums[i];
-        maxProduct = Math.max(maxProduct, product);
-        
-        // Reset if product becomes 0
-        if (product == 0) {
-            product = 1;
-        }
-    }
-    
-    // Right to left scan
-    product = 1;
-    for (int i = n - 1; i >= 0; i--) {
-        product *= nums[i];
-        maxProduct = Math.max(maxProduct, product);
-        
-        // Reset if product becomes 0
-        if (product == 0) {
-            product = 1;
-        }
-    }
-    
-    return maxProduct;
-}
-```
-
-**Approach 3: Brute Force (All Subarrays)**
-```java
-// Java - Brute Force O(n²) time, O(1) space
-public int maxProduct(int[] nums) {
-    if (nums == null || nums.length == 0) {
-        return 0;
-    }
-    
-    int maxProduct = Integer.MIN_VALUE;
-    
-    for (int i = 0; i < nums.length; i++) {
-        int product = 1;
-        
-        for (int j = i; j < nums.length; j++) {
-            product *= nums[j];
-            maxProduct = Math.max(maxProduct, product);
-        }
-    }
-    
-    return maxProduct;
-}
-```
-
-**Approach 4: Divide and Conquer**
-```java
-// Java - Divide and Conquer O(n log n) time, O(log n) space
-public int maxProduct(int[] nums) {
-    if (nums == null || nums.length == 0) {
-        return 0;
-    }
-    
-    return maxProductHelper(nums, 0, nums.length - 1);
-}
-
-private int maxProductHelper(int[] nums, int left, int right) {
-    if (left == right) {
-        return nums[left];
-    }
-    
-    int mid = left + (right - left) / 2;
-    
-    // Maximum product in left half
-    int leftMax = maxProductHelper(nums, left, mid);
-    
-    // Maximum product in right half
-    int rightMax = maxProductHelper(nums, mid + 1, right);
-    
-    // Maximum product crossing the middle
-    int crossMax = maxCrossingProduct(nums, left, mid, right);
-    
-    return Math.max(Math.max(leftMax, rightMax), crossMax);
-}
-
-private int maxCrossingProduct(int[] nums, int left, int mid, int right) {
-    // Find max product from mid to left
-    int leftProduct = 1;
-    int maxLeft = Integer.MIN_VALUE;
-    
-    for (int i = mid; i >= left; i--) {
-        leftProduct *= nums[i];
-        maxLeft = Math.max(maxLeft, leftProduct);
-    }
-    
-    // Find max product from mid+1 to right
-    int rightProduct = 1;
-    int maxRight = Integer.MIN_VALUE;
-    
-    for (int i = mid + 1; i <= right; i++) {
-        rightProduct *= nums[i];
-        maxRight = Math.max(maxRight, rightProduct);
-    }
-    
-    return maxLeft * maxRight;
-}
-```
-
-**Multi-Language Implementations**:
+### Python (The Data Scientist's Choice)
+In Python, integers have arbitrary precision, so overflow is less of a concern than in Java/C++.
 
 ```python
-# Python - DP with Max/Min tracking
-def maxProduct(nums):
-    if not nums:
-        return 0
-    
-    max_product = nums[0]
-    current_max = nums[0]
-    current_min = nums[0]
-    
-    for i in range(1, len(nums)):
-        num = nums[i]
+class Solution:
+    def maxProduct(self, nums: List[int]) -> int:
+        if not nums: return 0
         
-        # Store current max for min calculation
-        temp_max = current_max
+        # State: current max and min product
+        max_so_far = nums[0]
+        min_so_far = nums[0]
+        result = max_so_far
         
-        # Update max and min
-        current_max = max(num, current_max * num, current_min * num)
-        current_min = min(num, temp_max * num, current_min * num)
-        
-        # Update global maximum
-        max_product = max(max_product, current_max)
-    
-    return max_product
-
-# Python - Left-Right Scan
-def maxProduct(nums):
-    if not nums:
-        return 0
-    
-    max_product = float('-inf')
-    
-    # Left to right
-    product = 1
-    for num in nums:
-        product *= num
-        max_product = max(max_product, product)
-        if product == 0:
-            product = 1
-    
-    # Right to left
-    product = 1
-    for num in reversed(nums):
-        product *= num
-        max_product = max(max_product, product)
-        if product == 0:
-            product = 1
-    
-    return max_product
-
-# Python - Functional Approach
-def maxProduct(nums):
-    if not nums:
-        return 0
-    
-    def scan_direction(arr):
-        max_prod = float('-inf')
-        product = 1
-        
-        for num in arr:
-            product *= num
-            max_prod = max(max_prod, product)
-            if product == 0:
-                product = 1
-        
-        return max_prod
-    
-    return max(scan_direction(nums), scan_direction(nums[::-1]))
-
-# Python - Using reduce
-from functools import reduce
-
-def maxProduct(nums):
-    if not nums:
-        return 0
-    
-    def update_state(state, num):
-        max_prod, current_max, current_min = state
-        
-        new_max = max(num, current_max * num, current_min * num)
-        new_min = min(num, current_max * num, current_min * num)
-        new_max_prod = max(max_prod, new_max)
-        
-        return (new_max_prod, new_max, new_min)
-    
-    result, _, _ = reduce(update_state, nums[1:], (nums[0], nums[0], nums[0]))
-    return result
+        for i in range(1, len(nums)):
+            curr = nums[i]
+            
+            # Tuple unpacking handles the swap elegantly
+            # Warning: Do not split these lines or state will be corrupted!
+            max_so_far, min_so_far = (
+                max(curr, max_so_far * curr, min_so_far * curr),
+                min(curr, max_so_far * curr, min_so_far * curr)
+            )
+            
+            result = max(result, max_so_far)
+            
+        return result
 ```
+
+### JavaScript / Node.js (V8 Optimization)
+JavaScript numbers are IEEE 754 doubles. For large integers, use `BigInt` if exceeding $2^{53}-1$.
 
 ```javascript
-// JavaScript - DP with Max/Min tracking
-function maxProduct(nums) {
-    if (!nums || nums.length === 0) {
-        return 0;
-    }
+/**
+ * @param {number[]} nums
+ * @return {number}
+ */
+var maxProduct = function(nums) {
+    if (nums.length === 0) return 0;
     
-    let maxProduct = nums[0];
-    let currentMax = nums[0];
-    let currentMin = nums[0];
+    let maxSoFar = nums[0];
+    let minSoFar = nums[0];
+    let result = maxSoFar;
     
     for (let i = 1; i < nums.length; i++) {
-        const num = nums[i];
-        const tempMax = currentMax;
+        let curr = nums[i];
         
-        currentMax = Math.max(num, currentMax * num, currentMin * num);
-        currentMin = Math.min(num, tempMax * num, currentMin * num);
+        // Use local variable to avoid pollution involved in min calc
+        let tempMax = Math.max(curr, maxSoFar * curr, minSoFar * curr);
+        minSoFar = Math.min(curr, maxSoFar * curr, minSoFar * curr);
         
-        maxProduct = Math.max(maxProduct, currentMax);
+        maxSoFar = tempMax;
+        result = Math.max(result, maxSoFar);
     }
     
-    return maxProduct;
-}
-
-// JavaScript - Left-Right Scan
-function maxProduct(nums) {
-    if (!nums || nums.length === 0) {
-        return 0;
-    }
-    
-    let maxProduct = -Infinity;
-    
-    // Left to right
-    let product = 1;
-    for (const num of nums) {
-        product *= num;
-        maxProduct = Math.max(maxProduct, product);
-        if (product === 0) {
-            product = 1;
-        }
-    }
-    
-    // Right to left
-    product = 1;
-    for (let i = nums.length - 1; i >= 0; i--) {
-        product *= nums[i];
-        maxProduct = Math.max(maxProduct, product);
-        if (product === 0) {
-            product = 1;
-        }
-    }
-    
-    return maxProduct;
-}
-
-// JavaScript - Functional with reduce
-function maxProduct(nums) {
-    if (!nums || nums.length === 0) {
-        return 0;
-    }
-    
-    const scanDirection = (arr) => {
-        let maxProd = -Infinity;
-        let product = 1;
-        
-        for (const num of arr) {
-            product *= num;
-            maxProd = Math.max(maxProd, product);
-            if (product === 0) {
-                product = 1;
-            }
-        }
-        
-        return maxProd;
-    };
-    
-    return Math.max(
-        scanDirection(nums),
-        scanDirection([...nums].reverse())
-    );
-}
-
-// JavaScript - Using Array methods
-function maxProduct(nums) {
-    if (!nums || nums.length === 0) return 0;
-    
-    return nums.reduce((state, num, i) => {
-        if (i === 0) {
-            return { maxProd: num, currentMax: num, currentMin: num };
-        }
-        
-        const { currentMax, currentMin } = state;
-        const newMax = Math.max(num, currentMax * num, currentMin * num);
-        const newMin = Math.min(num, currentMax * num, currentMin * num);
-        
-        return {
-            maxProd: Math.max(state.maxProd, newMax),
-            currentMax: newMax,
-            currentMin: newMin
-        };
-    }, {}).maxProd;
-}
+    return result;
+};
 ```
 
+### C++ (Risk Engine Optimized)
+Using `std::max` with initializer lists allows clean 3-way comparison.
+
 ```cpp
-// C++ - DP with Max/Min tracking
 class Solution {
 public:
     int maxProduct(vector<int>& nums) {
-        if (nums.empty()) {
-            return 0;
+        if (nums.empty()) return 0;
+        
+        int maxSoFar = nums[0];
+        int minSoFar = nums[0];
+        int result = maxSoFar;
+        
+        for (size_t i = 1; i < nums.size(); ++i) {
+            int curr = nums[i];
+            
+            // Capture state logic
+            int tempMax = max({curr, maxSoFar * curr, minSoFar * curr});
+            minSoFar = min({curr, maxSoFar * curr, minSoFar * curr});
+            
+            maxSoFar = tempMax;
+            result = max(result, maxSoFar);
         }
         
-        int maxProduct = nums[0];
-        int currentMax = nums[0];
-        int currentMin = nums[0];
-        
-        for (int i = 1; i < nums.size(); i++) {
-            int num = nums[i];
-            int tempMax = currentMax;
-            
-            currentMax = max({num, currentMax * num, currentMin * num});
-            currentMin = min({num, tempMax * num, currentMin * num});
-            
-            maxProduct = max(maxProduct, currentMax);
-        }
-        
-        return maxProduct;
+        return result;
     }
 };
-
-// C++ - Left-Right Scan
-int maxProduct(vector<int>& nums) {
-    if (nums.empty()) {
-        return 0;
-    }
-    
-    int maxProduct = INT_MIN;
-    int n = nums.size();
-    
-    // Left to right
-    int product = 1;
-    for (int i = 0; i < n; i++) {
-        product *= nums[i];
-        maxProduct = max(maxProduct, product);
-        if (product == 0) {
-            product = 1;
-        }
-    }
-    
-    // Right to left
-    product = 1;
-    for (int i = n - 1; i >= 0; i--) {
-        product *= nums[i];
-        maxProduct = max(maxProduct, product);
-        if (product == 0) {
-            product = 1;
-        }
-    }
-    
-    return maxProduct;
-}
-
-// C++ - Template Version
-template<typename T>
-T maxProductGeneric(const vector<T>& nums) {
-    if (nums.empty()) {
-        return T{};
-    }
-    
-    T maxProduct = nums[0];
-    T currentMax = nums[0];
-    T currentMin = nums[0];
-    
-    for (size_t i = 1; i < nums.size(); i++) {
-        T num = nums[i];
-        T tempMax = currentMax;
-        
-        currentMax = max({num, currentMax * num, currentMin * num});
-        currentMin = min({num, tempMax * num, currentMin * num});
-        
-        maxProduct = max(maxProduct, currentMax);
-    }
-    
-    return maxProduct;
-}
-
-// C++ - Using STL algorithms
-int maxProduct(vector<int>& nums) {
-    if (nums.empty()) return 0;
-    
-    auto scanDirection = [](const vector<int>& arr) {
-        int maxProd = INT_MIN;
-        int product = 1;
-        
-        for (int num : arr) {
-            product *= num;
-            maxProd = max(maxProd, product);
-            if (product == 0) {
-                product = 1;
-            }
-        }
-        
-        return maxProd;
-    };
-    
-    vector<int> reversed(nums.rbegin(), nums.rend());
-    return max(scanDirection(nums), scanDirection(reversed));
-}
 ```
+
+### Go (Robust Systems)
 
 ```go
-// Go - DP with Max/Min tracking
 func maxProduct(nums []int) int {
     if len(nums) == 0 {
         return 0
     }
     
-    maxProduct := nums[0]
-    currentMax := nums[0]
-    currentMin := nums[0]
+    maxSoFar := nums[0]
+    minSoFar := nums[0]
+    result := nums[0]
     
     for i := 1; i < len(nums); i++ {
-        num := nums[i]
-        tempMax := currentMax
+        curr := nums[i]
         
-        currentMax = max(num, max(currentMax*num, currentMin*num))
-        currentMin = min(num, min(tempMax*num, currentMin*num))
+        // Calculate candidates
+        cand1 := maxSoFar * curr
+        cand2 := minSoFar * curr
         
-        maxProduct = max(maxProduct, currentMax)
-    }
-    
-    return maxProduct
-}
-
-func max(a, b int) int {
-    if a > b {
-        return a
-    }
-    return b
-}
-
-func min(a, b int) int {
-    if a < b {
-        return a
-    }
-    return b
-}
-
-// Go - Left-Right Scan
-func maxProduct(nums []int) int {
-    if len(nums) == 0 {
-        return 0
-    }
-    
-    maxProduct := math.MinInt32
-    
-    // Left to right
-    product := 1
-    for _, num := range nums {
-        product *= num
-        if product > maxProduct {
-            maxProduct = product
-        }
-        if product == 0 {
-            product = 1
+        // Update max
+        tempMax := curr
+        if cand1 > tempMax { tempMax = cand1 }
+        if cand2 > tempMax { tempMax = cand2 }
+        
+        // Update min
+        minSoFar = curr
+        if cand1 < minSoFar { minSoFar = cand1 }
+        if cand2 < minSoFar { minSoFar = cand2 }
+        
+        maxSoFar = tempMax
+        
+        if maxSoFar > result {
+            result = maxSoFar
         }
     }
     
-    // Right to left
-    product = 1
-    for i := len(nums) - 1; i >= 0; i-- {
-        product *= nums[i]
-        if product > maxProduct {
-            maxProduct = product
-        }
-        if product == 0 {
-            product = 1
-        }
-    }
-    
-    return maxProduct
-}
-
-// Go - Functional Approach
-func maxProduct(nums []int) int {
-    if len(nums) == 0 {
-        return 0
-    }
-    
-    scanDirection := func(arr []int) int {
-        maxProd := math.MinInt32
-        product := 1
-        
-        for _, num := range arr {
-            product *= num
-            if product > maxProd {
-                maxProd = product
-            }
-            if product == 0 {
-                product = 1
-            }
-        }
-        
-        return maxProd
-    }
-    
-    // Reverse array
-    reversed := make([]int, len(nums))
-    for i, num := range nums {
-        reversed[len(nums)-1-i] = num
-    }
-    
-    leftMax := scanDirection(nums)
-    rightMax := scanDirection(reversed)
-    
-    if leftMax > rightMax {
-        return leftMax
-    }
-    return rightMax
-}
-
-// Go - Channel-based Parallel Processing
-func maxProduct(nums []int) int {
-    if len(nums) == 0 {
-        return 0
-    }
-    
-    results := make(chan int, 2)
-    
-    // Left to right scan
-    go func() {
-        maxProd := math.MinInt32
-        product := 1
-        
-        for _, num := range nums {
-            product *= num
-            if product > maxProd {
-                maxProd = product
-            }
-            if product == 0 {
-                product = 1
-            }
-        }
-        
-        results <- maxProd
-    }()
-    
-    // Right to left scan
-    go func() {
-        maxProd := math.MinInt32
-        product := 1
-        
-        for i := len(nums) - 1; i >= 0; i-- {
-            product *= nums[i]
-            if product > maxProd {
-                maxProd = product
-            }
-            if product == 0 {
-                product = 1
-            }
-        }
-        
-        results <- maxProd
-    }()
-    
-    leftMax := <-results
-    rightMax := <-results
-    
-    if leftMax > rightMax {
-        return leftMax
-    }
-    return rightMax
+    return result
 }
 ```
 
-**Complexity Analysis**:
-
-| Approach | Time Complexity | Space Complexity | Explanation |
-|----------|----------------|------------------|-------------|
-| **DP Max/Min** | O(n) | O(1) | Single pass with constant space |
-| **Left-Right Scan** | O(n) | O(1) | Two passes with constant space |
-| **Brute Force** | O(n²) | O(1) | All subarrays checked |
-| **Divide & Conquer** | O(n log n) | O(log n) | Recursive approach |
-
-**Key Insights**:
-
-1. **Negative Numbers**: Two negatives make a positive, so we need to track both max and min
-2. **Zero Handling**: Zero resets the product, creating natural boundaries
-3. **Kadane's Variant**: Similar to max sum subarray but with multiplication
-
-**Common Pitfalls**:
-
-1. **Not Tracking Minimum**: Forgetting that negative × negative = positive
-   ```java
-   // Wrong: Only tracking maximum
-   currentMax = Math.max(num, currentMax * num);
-   
-   // Correct: Track both max and min
-   currentMax = Math.max(num, Math.max(currentMax * num, currentMin * num));
-   currentMin = Math.min(num, Math.min(tempMax * num, currentMin * num));
-   ```
-
-2. **Integer Overflow**: Not handling large products
-   ```java
-   // Wrong: May overflow
-   int product = currentMax * num;
-   
-   // Correct: Use long or check bounds
-   long product = (long)currentMax * num;
-   if (product > Integer.MAX_VALUE) {
-       // Handle overflow
-   }
-   ```
-
-3. **Zero Handling**: Not properly resetting after zero
-4. **Empty Array**: Not handling edge cases
-5. **Single Element**: Not handling arrays with one element
-
-**Company-Specific Insights**:
-
-- **Google**: Often asks for multiple approaches and optimization
-- **Amazon**: Focuses on edge cases and large input handling
-- **Meta**: May ask about distributed processing for large arrays
-- **Microsoft**: Often asks about integer overflow handling
-- **Apple**: Focuses on clean, efficient implementation
-- **LinkedIn**: May ask about streaming data applications
-- **Adobe**: Focuses on numerical stability and precision
-- **Salesforce**: May ask about real-world data processing applications
-
-**Advanced Optimizations**:
-
-1. **SIMD Instructions**: Use vectorized operations for large arrays
-2. **Parallel Processing**: Divide array into chunks for parallel computation
-3. **Streaming Algorithm**: Process data that doesn't fit in memory
-4. **Numerical Stability**: Handle very large or very small numbers
-
-**Follow-up Questions**:
-
-1. **Maximum Sum Subarray**: Classic Kadane's algorithm
-2. **Maximum Product of Three Numbers**: Find three numbers with max product
-3. **Product of Array Except Self**: Calculate products without division
-4. **Subarray Product Less Than K**: Count subarrays with product < k
-5. **Maximum Product Path**: 2D grid version of the problem
-6. **Minimum Product Subarray**: Find minimum instead of maximum
-
-**Related Problems**:
-- Maximum Subarray (Easy) - Kadane's Algorithm
-- Product of Array Except Self (Medium)
-- Maximum Product of Three Numbers (Easy)
-- Subarray Product Less Than K (Medium)
-- Best Time to Buy and Sell Stock (Easy)
-- House Robber (Medium)
-
-**Interview Tips**:
-
-1. **Start with Brute Force**: Explain O(n²) solution first
-2. **Identify Key Insight**: Explain why we need both max and min
-3. **Handle Edge Cases**: Empty array, single element, all zeros
-4. **Optimize Space**: Show how to reduce space complexity
-5. **Test Thoroughly**: Use examples with negatives, zeros, mixed signs
-6. **Explain Intuition**: Why left-right scan works
-7. **Code Incrementally**: Build solution step by step
-
-**Real-World Applications**:
-
-1. **Financial Analysis**: Maximum profit calculations
-2. **Signal Processing**: Peak detection in time series
-3. **Machine Learning**: Feature scaling and normalization
-4. **Game Development**: Score multiplier calculations
-5. **Statistics**: Variance and standard deviation calculations
-6. **Physics Simulations**: Force and acceleration calculations
-7. **Economics**: Compound growth rate analysis
-
-**Visualization Example**:
-```
-Array: [2, 3, -2, 4]
-
-DP Approach:
-i=0: max=2, min=2, global_max=2
-i=1: max=max(3, 2*3, 2*3)=6, min=min(3, 2*3, 2*3)=3, global_max=6
-i=2: max=max(-2, 6*(-2), 3*(-2))=-2, min=min(-2, 6*(-2), 3*(-2))=-12, global_max=6
-i=3: max=max(4, (-2)*4, (-12)*4)=48, min=min(4, (-2)*4, (-12)*4)=-48, global_max=48
-
-Wait, let me recalculate:
-i=2: max=max(-2, 6*(-2), 3*(-2))=max(-2, -12, -6)=-2
-     min=min(-2, 6*(-2), 3*(-2))=min(-2, -12, -6)=-12
-i=3: max=max(4, (-2)*4, (-12)*4)=max(4, -8, 48)=48
-     But this is wrong - the actual answer should be 6 from [2,3]
-
-Correct calculation:
-i=0: max=2, min=2, global_max=2
-i=1: max=max(3, 2*3, 2*3)=6, min=min(3, 2*3, 2*3)=3, global_max=6  
-i=2: max=max(-2, 6*(-2), 3*(-2))=max(-2, -12, -6)=-2
-     min=min(-2, 6*(-2), 3*(-2))=min(-2, -12, -6)=-12, global_max=6
-i=3: max=max(4, (-2)*4, (-12)*4)=max(4, -8, 48)=48
-     min=min(4, (-2)*4, (-12)*4)=min(4, -8, 48)=-8, global_max=48
-
-Actually, the correct answer is 6 from subarray [2,3], not 48.
-Let me trace again more carefully...
-
-Actually, let me use the left-right scan to verify:
-Left scan: 2→6→-12→-48, max seen = 6
-Right scan: 4→-8→-24→-48, max seen = 4
-Overall max = 6 ✓
-```
-
-**Production Code Considerations**:
-- Input validation (null arrays, empty arrays)
-- Integer overflow handling for large products
-- Memory optimization for very large arrays
-- Thread safety for concurrent processing
-- Performance monitoring and profiling
-- Numerical stability for floating-point versions
-- Graceful handling of edge cases
 ---
+
+## 🛡️ Edge Case Analysis & Error Handling
+
+### The "Integer Overflow" Trap
+In a standard extensive subarray product problem, values can exceed `2^31 - 1` (2 billion) very quickly.
+*   `[10, 10, 10, 10, 10, 10, 10, 10, 10, 10]` = $10^{10} = 10,000,000,000 > 2.1B$.
+*   **Production Fix**: In real financial systems, always use `long` (64-bit) or `BigInteger` (arbitrary).
+*   **Safe Multiplication**:
+    ```java
+    if (willOverflow(maxSoFar, curr)) {
+        throw new ArithmeticException("Product exceeds risk engine limits");
+    }
+    ```
+
+### Division by Zero Risk?
+Some older algorithms attempted to solve this using `Prefix Products`.
+*   `TotalProduct[i] / TotalProduct[j]` = Subarray Product.
+*   **Fatal Flaw**: If `nums[k] == 0`, the prefix product becomes 0 forever, and you cannot divide by zero.
+*   **Conclusion**: **NEVER** use the division method for this problem. The Kadane variant is the only mathematically stable approach.
+
+---
+
+## 🎭 Interview Simulation
+
+### Phase 1: Clarification (3 min)
+*   **You**: "Can the array contain zeros?"
+*   **Interviewer**: "Yes."
+*   **You**: "Does the result fit in a standard integer?"
+*   **Interviewer**: "Assume yes for this problem, but discuss overflow."
+
+### Phase 2: Logic Walkthrough (5 min)
+*   "Since we have negative numbers, a minimum negative product can become the maximum positive product if we multiply by another negative."
+*   "Therefore, I will maintain two variables: `max` and `min`."
+
+### Phase 3: Coding (10 min)
+*   Write the Java solution.
+*   **Critical**: Use a temporary variable (`tempMax`) before updating `minSoFar`. This is the #1 bug candidates introduce.
+
+---
+
+## 🚀 Expert-Level Deep Dive
+
+### System Design: HFT Risk Circuit Breaker
+In a High-Frequency Trading engine, this algorithm runs on the **Exposure Log**:
+1.  **Input**: Stream of position multipliers `[1.01, 1.05, 0.95, 1.10]`.
+2.  **Constraint**: Latency must be < 1 microsecond.
+3.  **Optimization**: Branchless implementation.
+
+#### Branchless Java (Bit Hacking)
+Removing `if` statements helps CPU branch prediction.
+```java
+public int maxProductBranchless(int[] nums) {
+    int max = nums[0], min = nums[0], res = nums[0];
+    for (int i = 1; i < nums.length; i++) {
+        int x = nums[i];
+        int a = max * x;
+        int b = min * x;
+        
+        // Branchless min/max using: (a + b + abs(a - b)) / 2
+        max = Math.max(x, Math.max(a, b));
+        min = Math.min(x, Math.min(a, b));
+        res = Math.max(res, max);
+    }
+    return res;
+}
+```
+
+### Mathematical Proof
+Why does `max(curr, max*curr, min*curr)` cover all cases?
+*   Case 1 (`curr > 0`): `max*curr` grows `max`. `min*curr` keeps `min` small.
+*   Case 2 (`curr < 0`): `max*curr` becomes tiny (new min). `min*curr` becomes huge (new max).
+*   Case 3 (`curr = 0`): `max` and `min` reset to 0 (which is `curr`).
+*   Case 4 (`Start New`): `curr` is better than extending the previous chain.
+
+---
+
+## 🧪 Comprehensive Testing Strategy
+
+### 1. Unit Tests (JUnit 5)
+```java
+@Test
+void testDoubleNegative() {
+    // [-2, 3, -4] -> -2..3..-4 -> -2*-4 is split? NO.
+    // [-2, 3, -4] -> -2*3 = -6. -6*-4 = 24.
+    assertEquals(24, solve(new int[]{-2, 3, -4}));
+}
+
+@Test
+void testZeroReset() {
+    // [2, 0, 3] -> max is 3.
+    assertEquals(3, solve(new int[]{2, 0, 3}));
+}
+
+@Test
+void testAllNegative() {
+    // [-2, -3, -4] -> max is 12 (-3 * -4)
+    assertEquals(12, solve(new int[]{-2, -3, -4}));
+}
+```
+
+### 2. Property-Based Testing (Jqwik)
+**Invariant**: The result from the $O(N)$ Algo MUST equal the result from the $O(N^2)$ Brute Force.
+
+```java
+@Property
+boolean kadaneMatchesBruteForce(@ForAll @Size(max=100) int[] nums) {
+    if (nums.length == 0) return true;
+    return maxProduct(nums) == maxProductBrute(nums); // Fuzz test against oracle
+}
+```
+
+---
+
+## 🔗 Related Problems
+*   **Maximum Sum Subarray**: The easier cousin (just track sum).
+*   **Maximum Product of Three Numbers**: Sort and check end vs start.
+*   **Product of Array Except Self**: Prefix/Suffix product arrays.
 
 #### Question 43: Coin Change ✅
 

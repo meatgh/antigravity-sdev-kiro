@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Builder Viz</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #222;
+            color: #fff;
+            text-align: center;
+        }
+
+        .layer {
+            rx: 5;
+            ry: 5;
+            stroke: #fff;
+        }
+
+        .label {
+            fill: #fff;
+            font-size: 14px;
+            text-anchor: middle;
+            alignment-baseline: middle;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Building the Stack</h1>
+    <svg width="600" height="300" id="viz"></svg>
+    <script>
+        const svg = d3.select("#viz");
+        const layers = ["Bun", "Patty", "Cheese", "Lettuce", "Bun"];
+        
+        svg.selectAll("g").data(layers).enter().append("g")
+            .attr("transform", (d,i) => `translate(250, ${250 - i*40})`)
+            .each(function(d, i) {
+                d3.select(this).append("rect")
+                    .attr("width", 100).attr("height", 30).attr("x", 0).attr("y", 0).attr("class", "layer")
+                    .style("fill", i%2===0 ? "#FFC107" : "#795548");
+                d3.select(this).append("text").text(d).attr("class", "label").attr("x", 50).attr("y", 15);
+            });
+    </script>
+</body>
+
+</html>

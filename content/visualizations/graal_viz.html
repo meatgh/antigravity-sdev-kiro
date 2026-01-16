@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>GraalVM Build Process</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Consolas', monospace;
+            background: #2b2b2b;
+            color: #eee;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .box {
+            stroke: #fff;
+            stroke-width: 2px;
+            fill: #444;
+        }
+
+        .box-text {
+            fill: #fff;
+            font-size: 16px;
+            text-anchor: middle;
+        }
+
+        .arrow {
+            stroke: #FF9800;
+            stroke-width: 3px;
+            marker-end: url(#arrow);
+        }
+
+        .heap {
+            fill: #4CAF50;
+            opacity: 0.8;
+        }
+
+        .dead {
+            fill: #f44336;
+            opacity: 0.8;
+        }
+
+        .btn {
+            margin: 20px;
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #FF9800;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Native Image Build Pipeline</h1>
+    <button class="btn" onclick="build()">Start Aggressive Tree Shaking</button>
+    <div id="status">Status: Static Analysis Pending...</div>
+    <svg width="800" height="400" id="viz">
+        <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"
+                markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L9,3 z" fill="#FF9800" />
+            </marker>
+        </defs>
+    </svg>
+    <script>
+        const svg = d3.select("#viz");
+
+        // Classes
+        const classes = d3.range(20).map(i => ({ id: i, x: 50 + (i % 5) * 60, y: 100 + Math.floor(i / 5) * 60, keep: i < 8 }));
+
+        const nodes = svg.selectAll(".node")
+            .data(classes).enter().append("g").attr("class", "node");
+
+        nodes.append("rect")
+            .attr("x", d => d.x).attr("y", d => d.y).attr("width", 50).attr("height", 50)
+            .attr("class", "box")
+            .attr("id", d => "cls-" + d.id);
+
+        nodes.append("text")
+            .attr("x", d => d.x + 25).attr("y", d => d.y + 30).text(d => "C" + d.id).attr("class", "box-text");
+
+        function build() {
+            document.getElementById("status").innerText = "Status: Points-to Analysis Running...";
+
+            // Highlight Reachable (Green)
+            d3.selectAll(".box").transition().duration(1000)
+                .style("fill", d => d.keep ? "#4CAF50" : "#444");
+
+            setTimeout(() => {
+                document.getElementById("status").innerText = "Status: Tree Shaking (Removing Unused)...";
+                d3.selectAll(".box").filter(d => !d.keep)
+                    .transition().duration(1000)
+                    .style("fill", "#f44336")
+                    .transition().duration(500).attr("transform", "scale(0)"); // Gone
+            }, 1500);
+
+            setTimeout(() => {
+                document.getElementById("status").innerText = "Status: Linking SubstrateVM + Image Heap...";
+                svg.append("rect").attr("x", 400).attr("y", 100).attr("width", 200).attr("height", 200)
+                    .attr("class", "heap").attr("opacity", 0)
+                    .transition().duration(1000).attr("opacity", 0.5);
+                svg.append("text").attr("x", 500).attr("y", 200).text("NATIVE BINARY").attr("text-anchor", "middle").style("font-size", "24px").style("fill", "white");
+            }, 3000);
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>MethodHandle Linker Visualizer</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Consolas', monospace;
+            background: #222;
+            color: #eee;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .node circle {
+            fill: #444;
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+
+        .node text {
+            font-size: 14px;
+            fill: #fff;
+            text-anchor: middle;
+            dy: 0.35em;
+        }
+
+        .link {
+            fill: none;
+            stroke: #666;
+            stroke-width: 2px;
+            marker-end: url(#arrow);
+        }
+
+        .active {
+            stroke: #0f0;
+            stroke-width: 4px;
+        }
+
+        .jit {
+            fill: #ff9800 !important;
+        }
+
+        .btn {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+
+        .btn:hover {
+            background: #1976D2;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>JIT Inlining: Reflection vs MethodHandle</h1>
+    <div>
+        <button class="btn" onclick="startSim('reflection')">Simulate Reflection</button>
+        <button class="btn" style="background: #4CAF50;" onclick="startSim('mh')">Simulate MethodHandle</button>
+    </div>
+    <div id="status" style="margin-top:20px; color: #aaa;">Status: Idle</div>
+    <svg width="800" height="400" id="viz"></svg>
+
+    <script>
+        const svg = d3.select("#viz");
+        const width = 800, height = 400;
+
+        function clear() { svg.selectAll("*").remove(); }
+
+        function drawNode(x, y, label, id, color) {
+            const g = svg.append("g").attr("class", "node").attr("id", id);
+            g.append("circle").attr("cx", x).attr("cy", y).attr("r", 40).style("fill", color || "#444");
+            g.append("text").attr("x", x).attr("y", y + 5).text(label);
+            return g;
+        }
+
+        function drawLink(x1, y1, x2, y2) {
+            svg.append("line")
+                .attr("x1", x1).attr("y1", y1)
+                .attr("x2", x2).attr("y2", y2)
+                .attr("class", "link");
+        }
+
+        async function startSim(mode) {
+            clear();
+            document.getElementById("status").innerText = "Mode: " + mode.toUpperCase();
+
+            // Draw Caller
+            drawNode(100, 200, "Caller", "caller", "#2196F3");
+            // Draw Target
+            drawNode(700, 200, "Target", "target", "#E91E63");
+
+            if (mode === 'reflection') {
+                // Reflection has a Middle Man (JVM C++ Access Check)
+                await new Promise(r => setTimeout(r, 500));
+                drawNode(400, 200, "JVM Access", "jvm", "#ff9800");
+                drawLink(140, 200, 360, 200);
+                drawLink(440, 200, 660, 200);
+
+                document.getElementById("status").innerText = "Reflection: Checking Access Permissions (Every Call)...";
+                await new Promise(r => setTimeout(r, 1000));
+                document.getElementById("status").innerText = "Reflection: Boxing Arguments...";
+                await new Promise(r => setTimeout(r, 1000));
+                document.getElementById("status").innerText = "Reflection: Invoking Target (Slow).";
+
+            } else {
+                // MethodHandle gets linked directly
+                await new Promise(r => setTimeout(r, 500));
+                const mh = drawNode(400, 200, "MH", "mh", "#4CAF50");
+                drawLink(140, 200, 360, 200);
+                drawLink(440, 200, 660, 200);
+
+                document.getElementById("status").innerText = "MethodHandle: Link Established.";
+                await new Promise(r => setTimeout(r, 1000));
+
+                // JIT Inlining
+                document.getElementById("status").innerText = "JIT: Inlining MethodHandle...";
+                mh.transition().duration(1000).attr("opacity", 0); // Disappear
+                svg.selectAll(".link").remove();
+
+                await new Promise(r => setTimeout(r, 1000));
+                // Direct Line
+                svg.append("line")
+                    .attr("x1", 140).attr("y1", 200)
+                    .attr("x2", 660).attr("y2", 200)
+                    .attr("class", "link")
+                    .style("stroke", "#4CAF50").style("stroke-width", "5px")
+                    .style("stroke-dasharray", "10,10")
+                    .transition().duration(500).style("stroke-dasharray", "0,0");
+
+                document.getElementById("status").innerText = "JIT: Direct Call! (Near Native Speed)";
+            }
+        }
+    </script>
+</body>
+
+</html>

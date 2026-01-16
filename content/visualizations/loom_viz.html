@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Project Loom Scheduler</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', system-ui;
+            background: #263238;
+            color: #fff;
+            text-align: center;
+        }
+
+        .carrier {
+            fill: #455A64;
+            stroke: #90A4AE;
+            stroke-width: 2px;
+        }
+
+        .virtual {
+            fill: #81C784;
+            stroke: #2E7D32;
+            stroke-width: 2px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .virtual:hover {
+            fill: #4CAF50;
+        }
+
+        .io-blocked {
+            fill: #E57373;
+            stroke: #C62828;
+        }
+
+        .label {
+            fill: #fff;
+            font-size: 12px;
+            pointer-events: none;
+        }
+
+        .btn {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #00BCD4;
+            border: none;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Virtual Threads: M:N Scheduling</h1>
+    <p>100 Virtual Threads mapped to 4 Carrier Threads (OS).</p>
+    <button class="btn" onclick="schedule()">Run Tasks</button>
+    <button class="btn" style="background:#E57373" onclick="blockIO()">Simulate I/O</button>
+    <div id="stats">Active Threads: 0</div>
+    <svg width="800" height="500" id="viz"></svg>
+
+    <script>
+        const svg = d3.select("#viz");
+        const carriers = [100, 300, 500, 700];
+        const virtuals = d3.range(20).map(i => ({ id: i, state: 'ready' }));
+
+        // Draw Carriers
+        carriers.forEach((x, i) => {
+            svg.append("rect")
+                .attr("x", x - 60).attr("y", 400)
+                .attr("width", 120).attr("height", 80)
+                .attr("class", "carrier");
+            svg.append("text").attr("x", x).attr("y", 445).text("Available").attr("text-anchor", "middle").attr("id", "c-" + i).attr("class", "label");
+        });
+
+        // Draw Virtual Threads Queue
+        const vNodes = svg.selectAll(".vnode")
+            .data(virtuals).enter()
+            .append("g").attr("class", "vnode")
+            .attr("transform", (d, i) => `translate(${50 + i * 35}, 50)`);
+
+        vNodes.append("circle").attr("r", 15).attr("class", "virtual");
+        vNodes.append("text").attr("dy", 5).attr("text-anchor", "middle").text(d => d.id).attr("class", "label");
+
+        function schedule() {
+            // Move some VTs to Carriers
+            svg.selectAll(".vnode").each(function (d, i) {
+                if (i < 4) { // Only 4 cores
+                    d3.select(this).transition().duration(1000)
+                        .attr("transform", `translate(${carriers[i]}, 350)`);
+                    d3.select("#c-" + i).text("Running VT-" + d.id);
+                }
+            });
+        }
+
+        function blockIO() {
+            // Unmount running threads (move to wait area, free carriers)
+            svg.selectAll(".vnode").each(function (d, i) {
+                if (i < 4) {
+                    d3.select(this).select("circle").attr("class", "virtual io-blocked");
+                    d3.select(this).transition().duration(1000)
+                        .attr("transform", `translate(${100 + i * 50}, 200)`); // Parked
+                    d3.select("#c-" + i).text("Available"); // Carrier Free!
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>

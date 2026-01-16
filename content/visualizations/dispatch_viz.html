@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Dispatch</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #222;
+            color: #fff;
+            text-align: center;
+        }
+
+        .box {
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+
+        .label {
+            fill: #fff;
+            font-size: 14px;
+            text-anchor: middle;
+            alignment-baseline: middle;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Dynamic Method Dispatch</h1>
+    <svg width="600" height="300" id="viz"></svg>
+    <script>
+        const svg = d3.select("#viz");
+
+        // Object
+        svg.append("rect").attr("x", 50).attr("y", 100).attr("width", 100).attr("height", 100).attr("class", "box").style("fill", "#4CAF50");
+        svg.append("text").attr("x", 100).attr("y", 150).text("Object").attr("class", "label");
+
+        // V-Table
+        svg.append("rect").attr("x", 250).attr("y", 50).attr("width", 100).attr("height", 200).attr("class", "box").style("fill", "#2196F3");
+        svg.append("text").attr("x", 300).attr("y", 80).text("V-Table").attr("class", "label");
+        svg.append("text").attr("x", 300).attr("y", 120).text("draw() -> X").attr("class", "label");
+
+        // Code
+        svg.append("rect").attr("x", 450).attr("y", 100).attr("width", 100).attr("height", 50).attr("class", "box").style("fill", "#FF5722");
+        svg.append("text").attr("x", 500).attr("y", 130).text("Code").attr("class", "label");
+
+        // Pointer
+        svg.append("line").attr("x1", 150).attr("y1", 150).attr("x2", 250).attr("y2", 150).attr("stroke", "#fff").attr("stroke-width", 2);
+        svg.append("line").attr("x1", 350).attr("y1", 150).attr("x2", 450).attr("y2", 125).attr("stroke", "#fff").attr("stroke-width", 2);
+
+    </script>
+</body>
+
+</html>

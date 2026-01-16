@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>ECS Composition</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #222;
+            color: #fff;
+            text-align: center;
+        }
+
+        .entity {
+            fill: #444;
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+
+        .component {
+            rx: 5;
+            ry: 5;
+            stroke: none;
+        }
+
+        .label {
+            fill: #fff;
+            font-size: 12px;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+
+        .btn {
+            margin: 10px;
+            padding: 10px;
+            cursor: pointer;
+            background: #FF9800;
+            border: none;
+            color: white;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Entity Component System</h1>
+    <p>Entities are Containers. Components are Data blocks.</p>
+    <button class="btn" onclick="addComp()">Add 'Flying' Component</button>
+    <svg width="600" height="400" id="viz"></svg>
+    <script>
+        const svg = d3.select("#viz");
+
+        // Entity Container
+        svg.append("rect").attr("x", 200).attr("y", 100).attr("width", 200).attr("height", 250).attr("class", "entity");
+        svg.append("text").attr("x", 300).attr("y", 130).text("Entity: Orc #99").attr("class", "label").style("font-size", "16px");
+
+        let comps = [
+            { name: "Position {x,y}", color: "#2196F3" },
+            { name: "Health {hp}", color: "#F44336" },
+            { name: "Render {sprite}", color: "#9C27B0" }
+        ];
+
+        function draw() {
+            const sels = svg.selectAll(".comp-g").data(comps);
+
+            const g = sels.enter().append("g").attr("class", "comp-g")
+                .attr("transform", (d, i) => `translate(220, ${150 + i * 50})`);
+
+            g.append("rect")
+                .attr("width", 160).attr("height", 40).attr("class", "component")
+                .style("fill", d => d.color).style("opacity", 0)
+                .transition().duration(500).style("opacity", 1);
+
+            g.append("text")
+                .attr("x", 80).attr("y", 25).text(d => d.name).attr("class", "label")
+                .style("opacity", 0).transition().duration(500).style("opacity", 1);
+        }
+
+        draw();
+
+        function addComp() {
+            if (comps.find(c => c.name.includes("Flying"))) return;
+            comps.push({ name: "Flying {speed}", color: "#FFC107" });
+            draw();
+        }
+    </script>
+</body>
+
+</html>

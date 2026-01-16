@@ -1,0 +1,119 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background: #1a1a1a; color: #fff; text-align: center; }
+        .node { fill: #333; stroke: #fff; stroke-width: 2px; }
+        .node.active { fill: #4CAF50; stroke: #81C784; stroke-width: 4px; }
+        .link { stroke: #666; stroke-width: 2px; marker-end: url(#arrow); }
+        text { fill: #fff; font-size: 14px; pointer-events: none; }
+        button { padding: 10px 20px; font-size: 16px; margin: 10px; cursor: pointer; background: #333; color: white; border: 1px solid #555; }
+        button:hover { background: #444; }
+    </style>
+</head>
+<body>
+    <h2>Controls: Document Workflow FSM</h2>
+    <p>Current State: <span id="status">DRAFT</span></p>
+    <div style="margin-bottom: 20px;">
+        <button onclick="trigger('submit')">Submit for Review</button>
+        <button onclick="trigger('approve')">Approve (Publish)</button>
+        <button onclick="trigger('reject')">Reject (Back to Draft)</button>
+        <button onclick="trigger('archive')">Archive</button>
+    </div>
+    
+    <div id="viz"></div>
+    <script>
+        const width = 800, height = 500;
+        const svg = d3.select("#viz").append("svg").attr("width", width).attr("height", height);
+
+        // Arrows
+        svg.append("defs").append("marker")
+            .attr("id", "arrow")
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 35)
+            .attr("refY", 0)
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .attr("orient", "auto")
+            .append("path")
+            .attr("d", "M0,-5L10,0L0,5")
+            .attr("fill", "#888");
+
+        const nodes = [
+            { id: "DRAFT", x: 100, y: 250 },
+            { id: "MODERATION", x: 400, y: 250 },
+            { id: "PUBLISHED", x: 700, y: 250 },
+            { id: "ARCHIVED", x: 400, y: 450 }
+        ];
+
+        const links = [
+            { source: 0, target: 1, action: "submit", label: "submit" },
+            { source: 1, target: 2, action: "approve", label: "approve" },
+            { source: 1, target: 0, action: "reject", label: "reject" },
+            { source: 2, target: 3, action: "archive", label: "archive" },
+            { source: 0, target: 3, action: "archive", label: "archive" } // Draft -> Archive
+        ];
+
+        // Draw Links
+        const link = svg.selectAll(".link")
+            .data(links)
+            .enter().append("g")
+            .attr("class", "link-group");
+
+        link.append("line")
+            .attr("class", "link")
+            .attr("x1", d => nodes[d.source].x)
+            .attr("y1", d => nodes[d.source].y)
+            .attr("x2", d => nodes[d.target].x)
+            .attr("y2", d => nodes[d.target].y);
+
+        // Link Labels
+        link.append("text")
+            .attr("x", d => (nodes[d.source].x + nodes[d.target].x) / 2)
+            .attr("y", d => (nodes[d.source].y + nodes[d.target].y) / 2 - 10)
+            .attr("text-anchor", "middle")
+            .attr("fill", "#aaa")
+            .text(d => d.label);
+
+        // Draw Nodes
+        const node = svg.selectAll(".node-group")
+            .data(nodes)
+            .enter().append("g")
+            .attr("class", "node-group");
+
+        node.append("circle")
+            .attr("class", d => d.id === "DRAFT" ? "node active" : "node")
+            .attr("r", 40)
+            .attr("cx", d => d.x).attr("cy", d => d.y);
+
+        node.append("text")
+            .attr("x", d => d.x).attr("y", d => d.y + 5)
+            .attr("text-anchor", "middle")
+            .text(d => d.id);
+
+        let currentState = "DRAFT";
+
+        window.trigger = function(action) {
+            let nextState = null;
+            
+            // FSM Logic (Hardcoded for Viz)
+            if (currentState === "DRAFT" && action === "submit") nextState = "MODERATION";
+            else if (currentState === "DRAFT" && action === "archive") nextState = "ARCHIVED";
+            else if (currentState === "MODERATION" && action === "approve") nextState = "PUBLISHED";
+            else if (currentState === "MODERATION" && action === "reject") nextState = "DRAFT";
+            else if (currentState === "PUBLISHED" && action === "archive") nextState = "ARCHIVED";
+            
+            if (nextState) {
+                currentState = nextState;
+                document.getElementById("status").innerText = currentState;
+                svg.selectAll("circle").attr("class", d => d.id === currentState ? "node active" : "node");
+            } else {
+                console.log("Invalid Transition: " + currentState + " -> " + action);
+                // Flash red or shake?
+            }
+        };
+    </script>
+</body>
+</html>

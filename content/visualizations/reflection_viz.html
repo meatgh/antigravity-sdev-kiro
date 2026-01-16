@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reflection API Explorer</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+            color: #569cd6;
+        }
+
+        .container {
+            display: flex;
+            gap: 20px;
+            width: 100%;
+            max-width: 1000px;
+        }
+
+        .code-panel {
+            width: 40%;
+            background: #252526;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+
+        .viz-panel {
+            width: 60%;
+            background: #252526;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            position: relative;
+            height: 500px;
+        }
+
+        .keyword {
+            color: #c586c0;
+        }
+
+        .type {
+            color: #4ec9b0;
+        }
+
+        .string {
+            color: #ce9178;
+        }
+
+        .method {
+            color: #dcdcaa;
+        }
+
+        .field {
+            color: #9cdcfe;
+        }
+
+        .node circle {
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+
+        .node text {
+            font-size: 12px;
+            fill: white;
+            pointer-events: none;
+            text-anchor: middle;
+        }
+
+        .private {
+            fill: #e51400;
+        }
+
+        .public {
+            fill: #60a917;
+        }
+
+        .protected {
+            fill: #e3a21a;
+        }
+
+        .console {
+            margin-top: 20px;
+            width: 100%;
+            max-width: 1000px;
+            height: 150px;
+            background: #000;
+            border: 1px solid #555;
+            padding: 10px;
+            overflow-y: auto;
+            color: #0f0;
+        }
+
+        button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 5px 10px;
+            margin: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #444;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Class&lt;User&gt; Explorer</h1>
+
+    <div class="container">
+        <div class="code-panel">
+            <h3>Source Code</h3>
+            <pre>
+<span class="keyword">public class</span> <span class="type">User</span> {
+    <span class="keyword">private</span> <span class="type">String</span> <span class="field">password</span>;
+    <span class="keyword">public</span> <span class="type">String</span> <span class="field">email</span>;
+
+    <span class="keyword">private</span> <span class="method">void</span> secret() { ... }
+    <span class="keyword">public</span> <span class="method">void</span> login() { ... }
+}
+            </pre>
+            <hr>
+            <h3>Reflection Actions</h3>
+            <button onclick="inspect()">class.getDeclaredMethods()</button>
+            <button onclick="hack()">setAccessible(true)</button>
+        </div>
+
+        <div class="viz-panel" id="viz"></div>
+    </div>
+
+    <div class="console" id="console">
+        > JVM Started...
+    </div>
+
+    <script>
+        const width = 600;
+        const height = 500;
+
+        const svg = d3.select("#viz")
+            .append("svg")
+            .attr("width", "100%")
+            .attr("height", "100%")
+            .attr("viewBox", `0 0 ${width} ${height}`);
+
+        const data = {
+            name: "User.class",
+            type: "class",
+            children: [
+                { name: "password", type: "field", access: "private" },
+                { name: "email", type: "field", access: "public" },
+                { name: "secret()", type: "method", access: "private" },
+                { name: "login()", type: "method", access: "public" }
+            ]
+        };
+
+        const root = d3.hierarchy(data);
+        const tree = d3.tree().size([width - 100, height - 100]);
+        tree(root);
+
+        const g = svg.append("g").attr("transform", "translate(50, 50)");
+
+        // Links
+        g.selectAll(".link")
+            .data(root.links())
+            .enter().append("path")
+            .attr("class", "link")
+            .attr("d", d3.linkVertical().x(d => d.x).y(d => d.y))
+            .attr("fill", "none")
+            .attr("stroke", "#555")
+            .attr("stroke-width", 2);
+
+        // Nodes
+        const nodes = g.selectAll(".node")
+            .data(root.descendants())
+            .enter().append("g")
+            .attr("class", "node")
+            .attr("transform", d => `translate(${d.x},${d.y})`);
+
+        nodes.append("circle")
+            .attr("r", 20)
+            .attr("class", d => d.data.access || "public")
+            .attr("id", d => `node-${d.data.name.replace(/\W/g, '')}`);
+
+        nodes.append("text")
+            .attr("dy", 35)
+            .text(d => d.data.name);
+
+        function log(msg) {
+            const c = document.getElementById("console");
+            c.innerHTML += `> ${msg}<br>`;
+            c.scrollTop = c.scrollHeight;
+        }
+
+        function inspect() {
+            log("Reflecting on User.class...");
+            d3.selectAll("circle").transition().duration(500).attr("r", 25);
+            setTimeout(() => {
+                d3.selectAll("circle").transition().duration(500).attr("r", 20);
+                log("Found 2 Fields, 2 Methods.");
+                log("WARNING: 'password' is PRIVATE.");
+            }, 600);
+        }
+
+        function hack() {
+            log("Executing: field.setAccessible(true)...");
+            const privates = d3.selectAll(".private");
+
+            privates.transition()
+                .duration(1000)
+                .style("fill", "#60a917") // Turn Green
+                .style("stroke", "#f1c40f")
+                .style("stroke-width", "4px");
+
+            setTimeout(() => {
+                log("SUCCESS! Encapsulation Broken.");
+                log("Accessed value: 'hunter2'");
+            }, 1000);
+        }
+    </script>
+</body>
+
+</html>

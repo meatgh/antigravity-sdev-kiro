@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AOP Proxy Chain Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1e1e1e;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+        }
+
+        .legend {
+            font-size: 14px;
+            margin-bottom: 20px;
+            color: #aaa;
+            text-align: center;
+            max-width: 600px;
+        }
+
+        #viz {
+            position: relative;
+            border: 1px solid #333;
+            background: #252526;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .node rect {
+            stroke: #fff;
+            stroke-width: 2px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .node:hover rect {
+            stroke: #f1c40f;
+            stroke-width: 4px;
+        }
+
+        .node text {
+            font-size: 14px;
+            font-weight: bold;
+            pointer-events: none;
+            text-anchor: middle;
+            alignment-baseline: middle;
+            fill: white;
+        }
+
+        .link {
+            fill: none;
+            stroke: #555;
+            stroke-width: 2px;
+            marker-end: url(#arrow);
+        }
+
+        .link.active {
+            stroke: #00ff00;
+            stroke-width: 3px;
+            animation: flow 1s linear infinite;
+        }
+
+        @keyframes flow {
+            0% {
+                stroke-dashoffset: 20;
+            }
+
+            100% {
+                stroke-dashoffset: 0;
+            }
+        }
+
+        .control-panel {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        button:hover {
+            background: #444;
+        }
+
+        button.active {
+            background: #2ecc71;
+            color: #000;
+        }
+
+        .log-console {
+            margin-top: 20px;
+            width: 600px;
+            height: 150px;
+            background: #000;
+            color: #0f0;
+            font-family: monospace;
+            padding: 10px;
+            overflow-y: auto;
+            border: 1px solid #444;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>AOP Interceptor Chain</h1>
+    <div class="legend">
+        Visualizing the flow of a method call through Dynamic Proxies.
+        Click "Execute" to trace the call stack through the Aspects.
+    </div>
+
+    <div id="viz"></div>
+
+    <div class="control-panel">
+        <button id="btn-trace" onclick="animateTrace()">Execute save()</button>
+        <button onclick="toggleAspect('logging')">Toggle Logging</button>
+        <button onclick="toggleAspect('security')">Toggle Security</button>
+        <button onclick="toggleAspect('transaction')">Toggle Transaction</button>
+    </div>
+
+    <div class="log-console" id="console">
+        > AOP Proxy Initialized...
+    </div>
+
+    <script>
+        const width = 800;
+        const height = 300;
+
+        const svg = d3.select("#viz")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        // Arrow Marker
+        svg.append("defs").append("marker")
+            .attr("id", "arrow")
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 8)
+            .attr("refY", 0)
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .attr("orient", "auto")
+            .append("path")
+            .attr("d", "M0,-5L10,0L0,5")
+            .attr("fill", "#555");
+
+        // Aspect State
+        const aspects = {
+            client: { x: 50, y: 150, color: "#95a5a6", label: "Client", active: true },
+            logging: { x: 200, y: 150, color: "#3498db", label: "Logging Aspect", active: true },
+            security: { x: 350, y: 150, color: "#e74c3c", label: "Security Aspect", active: true },
+            transaction: { x: 500, y: 150, color: "#f1c40f", label: "@Transactional", active: true },
+            target: { x: 650, y: 150, color: "#2ecc71", label: "Target Method", active: true }
+        };
+
+        const render = () => {
+            svg.selectAll("*").remove();
+
+            // Re-add marker
+            svg.append("defs").append("marker")
+                .attr("id", "arrow")
+                .attr("viewBox", "0 -5 10 10")
+                .attr("refX", 8)
+                .attr("refY", 0)
+                .attr("markerWidth", 6)
+                .attr("markerHeight", 6)
+                .attr("orient", "auto")
+                .append("path")
+                .attr("d", "M0,-5L10,0L0,5")
+                .attr("fill", "#555");
+
+            // Filter active nodes
+            const chain = [aspects.client];
+            if (aspects.logging.active) chain.push(aspects.logging);
+            if (aspects.security.active) chain.push(aspects.security);
+            if (aspects.transaction.active) chain.push(aspects.transaction);
+            chain.push(aspects.target);
+
+            // Recalculate X positions for nice spacing
+            const step = width / (chain.length + 1);
+            chain.forEach((node, i) => node.x = step * (i + 1));
+
+            // Draw Links
+            for (let i = 0; i < chain.length - 1; i++) {
+                svg.append("line")
+                    .attr("x1", chain[i].x + 40)
+                    .attr("y1", chain[i].y)
+                    .attr("x2", chain[i + 1].x - 40)
+                    .attr("y2", chain[i + 1].y)
+                    .attr("class", "link")
+                    .attr("id", `link-${i}`);
+            }
+
+            // Draw Nodes
+            const nodes = svg.selectAll(".node")
+                .data(chain)
+                .enter()
+                .append("g")
+                .attr("class", "node")
+                .attr("transform", d => `translate(${d.x},${d.y})`);
+
+            nodes.append("rect")
+                .attr("x", -50)
+                .attr("y", -25)
+                .attr("width", 100)
+                .attr("height", 50)
+                .attr("rx", 5)
+                .attr("fill", d => d.color);
+
+            nodes.append("text")
+                .text(d => d.label)
+                .style("font-size", "10px");
+        };
+
+        render();
+
+        function log(msg) {
+            const c = document.getElementById("console");
+            c.innerHTML += `> ${msg}<br>`;
+            c.scrollTop = c.scrollHeight;
+        }
+
+        function toggleAspect(name) {
+            aspects[name].active = !aspects[name].active;
+            render();
+            log(`[Config] Aspect '${name}' is now ${aspects[name].active ? 'ON' : 'OFF'}`);
+        }
+
+        function animateTrace() {
+            document.getElementById("btn-trace").disabled = true;
+            log("--- Executing Trace ---");
+
+            const chain = [aspects.client];
+            if (aspects.logging.active) chain.push(aspects.logging);
+            if (aspects.security.active) chain.push(aspects.security);
+            if (aspects.transaction.active) chain.push(aspects.transaction);
+            chain.push(aspects.target);
+
+            let i = 0;
+
+            function stepForward() {
+                if (i >= chain.length - 1) {
+                    log("Target: save() executed!");
+                    stepBackward();
+                    return;
+                }
+
+                const curr = chain[i];
+                const next = chain[i + 1];
+
+                // Highlight Link
+                d3.select(`#link-${i}`).attr("stroke", "#00ff00").attr("stroke-width", 4);
+
+                // Log Advice
+                if (curr === aspects.logging) log("Logging: [BEFORE] Method called");
+                if (curr === aspects.security) log("Security: [BEFORE] Checking Roles...");
+                if (curr === aspects.transaction) log("Tx: [BEFORE] Begin Transaction");
+
+                i++;
+                setTimeout(stepForward, 600);
+            }
+
+            function stepBackward() {
+                let j = chain.length - 2;
+
+                function back() {
+                    if (j < 0) {
+                        document.getElementById("btn-trace").disabled = false;
+                        log("--- Done ---");
+                        // Reset lines
+                        d3.selectAll(".link").attr("stroke", "#555").attr("stroke-width", 2);
+                        return;
+                    }
+
+                    const curr = chain[j];
+                    // Log After Advice
+                    if (curr === aspects.transaction) log("Tx: [AFTER] Commit Transaction");
+                    if (curr === aspects.security) log("Security: [AFTER] Audit Log");
+                    if (curr === aspects.logging) log("Logging: [AFTER] Execution Time: 12ms");
+
+                    d3.select(`#link-${j}`).attr("stroke", "#3498db"); // Blue for return path
+
+                    j--;
+                    setTimeout(back, 600);
+                }
+                back();
+            }
+
+            stepForward();
+        }
+    </script>
+</body>
+
+</html>

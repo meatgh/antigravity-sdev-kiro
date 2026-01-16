@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Fluent Chain Viz</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #222;
+            color: #fff;
+            text-align: center;
+        }
+
+        .node {
+            fill: #4CAF50;
+            stroke: #fff;
+            rx: 10;
+            ry: 10;
+        }
+
+        .link {
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+
+        .label {
+            fill: #fff;
+            font-size: 14px;
+            text-anchor: middle;
+            alignment-baseline: middle;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Step Builder Flow</h1>
+    <p>Enforced State Machine: From -> To -> Subject -> Build</p>
+    <svg width="600" height="200" id="viz"></svg>
+    <script>
+        const svg = d3.select("#viz");
+        const steps = ["Start", "FromStep", "ToStep", "SubjectStep", "BodyStep", "Email (Done)"];
+
+        svg.selectAll("g").data(steps).enter().append("g")
+            .attr("transform", (d, i) => `translate(${50 + i * 100}, 100)`)
+            .each(function (d, i) {
+                d3.select(this).append("rect")
+                    .attr("width", 80).attr("height", 40).attr("x", -40).attr("y", -20).attr("class", "node")
+                    .style("fill", i === steps.length - 1 ? "#FFC107" : "#4CAF50");
+                d3.select(this).append("text").text(d).attr("class", "label");
+
+                if (i < steps.length - 1) {
+                    d3.select("#viz").append("line")
+                        .attr("x1", 50 + i * 100 + 40).attr("y1", 100)
+                        .attr("x2", 50 + (i + 1) * 100 - 40).attr("y2", 100)
+                        .attr("class", "link");
+                }
+            });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>NIO Event Loop</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: #000;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .loop {
+            fill: none;
+            stroke: #2196F3;
+            stroke-width: 5px;
+        }
+
+        .key {
+            fill: #4CAF50;
+            stroke: #fff;
+        }
+
+        .key-active {
+            fill: #FFEB3B;
+            stroke: #F44336;
+            stroke-width: 3px;
+        }
+
+        .label {
+            fill: #fff;
+            font-size: 14px;
+            text-anchor: middle;
+        }
+
+        .btn {
+            margin: 20px;
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #2196F3;
+            border: none;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Reactor Pattern: The Event Loop</h1>
+    <button class="btn" onclick="spin()">Process Events</button>
+    <div id="log" style="font-family: monospace; color: #0f0;">Status: Blocking on select()...</div>
+    <svg width="600" height="600" id="viz"></svg>
+    <script>
+        const svg = d3.select("#viz");
+
+        // Draw Loop
+        svg.append("circle").attr("cx", 300).attr("cy", 300).attr("r", 150).attr("class", "loop");
+        svg.append("text").attr("x", 300).attr("y", 300).text("Selector").attr("class", "label");
+
+        // Keys (Connections)
+        const keys = d3.range(8).map(i => {
+            const angle = (i / 8) * 2 * Math.PI;
+            return {
+                id: i,
+                x: 300 + Math.cos(angle) * 150,
+                y: 300 + Math.sin(angle) * 150
+            };
+        });
+
+        const keyNodes = svg.selectAll(".key")
+            .data(keys).enter().append("circle")
+            .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", 20)
+            .attr("class", "key")
+            .attr("id", d => "k-" + d.id);
+
+        function spin() {
+            document.getElementById("log").innerText = "Status: Waking Up! Events found!";
+
+            // Randomly activate
+            const active = Math.floor(Math.random() * 8);
+
+            d3.select("#k-" + active).classed("key-active", true);
+
+            svg.append("circle")
+                .attr("cx", 300).attr("cy", 300).attr("r", 10).style("fill", "#fff")
+                .transition().duration(500)
+                .attr("cx", keys[active].x).attr("cy", keys[active].y)
+                .on("end", function () {
+                    d3.select(this).remove();
+                    d3.select("#k-" + active).classed("key-active", false);
+                    document.getElementById("log").innerText = "Status: Dispatched Key #" + active;
+                });
+        }
+    </script>
+</body>
+
+</html>

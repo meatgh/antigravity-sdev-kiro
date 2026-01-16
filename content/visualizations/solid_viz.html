@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOLID Architecture Visualizer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(30, 41, 59, 0.9);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #334155;
+        }
+
+        button {
+            display: block;
+            width: 100%;
+            margin: 10px 0;
+            padding: 10px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #2563eb;
+            transform: translateY(-1px);
+        }
+
+        button.active {
+            background: #10b981;
+        }
+
+        .explanation {
+            margin-top: 15px;
+            font-size: 0.9em;
+            color: #94a3b8;
+            max-width: 250px;
+            line-height: 1.5;
+        }
+
+        svg {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        .node circle {
+            stroke-width: 2px;
+            transition: all 0.5s;
+        }
+
+        .link {
+            fill: none;
+            stroke-opacity: 0.6;
+            stroke-width: 1.5px;
+            transition: all 0.5s;
+        }
+
+        text {
+            font-size: 12px;
+            fill: #e2e8f0;
+            pointer-events: none;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="controls">
+        <h3>Architecture State</h3>
+        <button onclick="setMode('monolith')" id="btn-monolith">🍝 Tangled Monolith</button>
+        <button onclick="setMode('layered')" id="btn-layered">🍰 Layered (Separated)</button>
+        <button onclick="setMode('solid')" id="btn-solid">💎 SOLID (Inverted Deps)</button>
+        <div class="explanation" id="text-explanation">
+            Select a mode to visualize the dependency graph structure.
+        </div>
+    </div>
+
+    <script>
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        const svg = d3.select("body").append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        const simulation = d3.forceSimulation()
+            .force("link", d3.forceLink().id(d => d.id).distance(100))
+            .force("charge", d3.forceManyBody().strength(-300))
+            .force("center", d3.forceCenter(width / 2, height / 2))
+            .force("collide", d3.forceCollide(40));
+
+        let link = svg.append("g").attr("class", "links").selectAll("line");
+        let node = svg.append("g").attr("class", "nodes").selectAll("g");
+
+        // Data Models
+        const monolithData = {
+            nodes: [
+                { id: "OrderController", group: 1 }, { id: "OrderService", group: 2 },
+                { id: "PaymentService", group: 2 }, { id: "InventoryService", group: 2 },
+                { id: "UserUtils", group: 3 }, { id: "EmailSender", group: 3 },
+                { id: "Database", group: 4 }, { id: "PDFGenerator", group: 3 }
+            ],
+            links: [
+                { source: "OrderController", target: "OrderService" },
+                { source: "OrderController", target: "Database" }, // Violation!
+                { source: "OrderService", target: "PaymentService" },
+                { source: "OrderService", target: "InventoryService" },
+                { source: "OrderService", target: "UserUtils" },
+                { source: "PaymentService", target: "Database" },
+                { source: "InventoryService", target: "Database" },
+                { source: "OrderService", target: "EmailSender" },
+                { source: "PaymentService", target: "EmailSender" }, // Tight Coupling
+                { source: "OrderService", target: "PDFGenerator" }
+            ]
+        };
+
+        const layeredData = {
+            nodes: [...monolithData.nodes],
+            links: [
+                { source: "OrderController", target: "OrderService" },
+                { source: "OrderService", target: "PaymentService" },
+                { source: "OrderService", target: "InventoryService" },
+                { source: "OrderService", target: "Database" }, // Still direct DB dep
+                { source: "PaymentService", target: "Database" },
+                { source: "InventoryService", target: "Database" },
+                { source: "OrderService", target: "EmailSender" },
+                { source: "OrderService", target: "PDFGenerator" }
+            ]
+        };
+
+        const solidData = {
+            nodes: [
+                { id: "OrderController", group: 1 },
+                { id: "OrderUseCase", group: 2, label: "OrderUseCase (Core)" },
+                { id: "PaymentPort", group: 5, label: "PaymentPort (Interface)" },
+                { id: "RepoPort", group: 5, label: "RepoPort (Interface)" },
+                { id: "InventoryPort", group: 5, label: "InventoryPort" },
+                { id: "NotifPort", group: 5, label: "NotifPort" },
+                // Impls
+                { id: "StripeAdapter", group: 4 },
+                { id: "PostgresAdapter", group: 4 },
+                { id: "WarehouseAdapter", group: 4 },
+                { id: "SMTPSender", group: 4 }
+            ],
+            links: [
+                { source: "OrderController", target: "OrderUseCase" },
+                // DIP: UseCase points to Ports (Interfaces)
+                { source: "OrderUseCase", target: "PaymentPort" },
+                { source: "OrderUseCase", target: "RepoPort" },
+                { source: "OrderUseCase", target: "InventoryPort" },
+                { source: "OrderUseCase", target: "NotifPort" },
+                // Impls point to Ports (Inversion!)
+                { source: "StripeAdapter", target: "PaymentPort", dashed: true },
+                { source: "PostgresAdapter", target: "RepoPort", dashed: true },
+                { source: "WarehouseAdapter", target: "InventoryPort", dashed: true },
+                { source: "SMTPSender", target: "NotifPort", dashed: true }
+            ]
+        };
+
+        function update(data) {
+            // Update Nodes
+            node = node.data(data.nodes, d => d.id);
+            node.exit().transition().duration(500).attr("r", 0).remove();
+
+            const nodeEnter = node.enter().append("g")
+                .attr("class", "node")
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+
+            nodeEnter.append("circle")
+                .attr("r", 0)
+                .attr("fill", d => {
+                    if (d.group === 1) return "#60a5fa"; // Controller
+                    if (d.group === 2) return "#fbbf24"; // Service/UseCase
+                    if (d.group === 3) return "#f87171"; // Utils
+                    if (d.group === 4) return "#34d399"; // Infra/DB
+                    if (d.group === 5) return "#a78bfa"; // Interface/Port
+                    return "#94a3b8";
+                })
+                .transition().duration(750).attr("r", 20);
+
+            nodeEnter.append("text")
+                .attr("dy", 35)
+                .attr("text-anchor", "middle")
+                .text(d => d.label || d.id)
+                .style("opacity", 0)
+                .transition().duration(750).style("opacity", 1);
+
+            node = nodeEnter.merge(node);
+
+            // Update Links
+            link = link.data(data.links, d => d.source.id + "-" + d.target.id);
+            link.exit().transition().duration(500).style("opacity", 0).remove();
+
+            const linkEnter = link.enter().append("line")
+                .attr("class", "link")
+                .attr("stroke", d => d.dashed ? "#a78bfa" : "#94a3b8")
+                .style("stroke-dasharray", d => d.dashed ? "5,5" : "none")
+                .attr("marker-end", "url(#arrow)");
+
+            link = linkEnter.merge(link);
+
+            // Restart Simulation
+            simulation.nodes(data.nodes);
+            simulation.force("link").links(data.links);
+            simulation.alpha(1).restart();
+        }
+
+        // Arrows
+        svg.append("defs").selectAll("marker")
+            .data(["arrow"])
+            .enter().append("marker")
+            .attr("id", d => d)
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 25)
+            .attr("refY", 0)
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .attr("orient", "auto")
+            .append("path")
+            .attr("fill", "#94a3b8")
+            .attr("d", "M0,-5L10,0L0,5");
+
+        function setMode(mode) {
+            document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            document.getElementById(`btn-${mode}`).classList.add('active');
+
+            const txt = document.getElementById('text-explanation');
+
+            if (mode === 'monolith') {
+                update(monolithData);
+                txt.innerHTML = "<strong>Spaghetti Code</strong>: <br>Controllers talk to DB directly. <br>Services are tightly coupled to Utilities. <br>Circular dependencies are common.";
+            } else if (mode === 'layered') {
+                update(layeredData);
+                txt.innerHTML = "<strong>Layered Arch</strong>: <br>Separation of concerns exists. <br>BUT Business Logic still depends on DB (Infra). <br>Hard to test.";
+            } else {
+                update(solidData);
+                txt.innerHTML = "<strong>SOLID / Clean Arch</strong>: <br>Dependency Inversion Principle (DIP). <br>Business Logic defines Ports (Interfaces). <br>Infra implements them. Core is pure.";
+            }
+        }
+
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        simulation.on("tick", () => {
+            link
+                .attr("x1", d => d.source.x)
+                .attr("y1", d => d.source.y)
+                .attr("x2", d => d.target.x)
+                .attr("y2", d => d.target.y);
+
+            node
+                .attr("transform", d => `translate(${d.x},${d.y})`);
+        });
+
+        // Init
+        setMode('monolith');
+
+    </script>
+</body>
+
+</html>

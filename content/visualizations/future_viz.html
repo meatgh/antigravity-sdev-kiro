@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Valhalla Memory Layout</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Consolas', monospace;
+            background: #333;
+            color: #eee;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .memory-slot {
+            stroke: #fff;
+            stroke-width: 1px;
+            fill: #555;
+        }
+
+        .pointer {
+            fill: #2196F3;
+        }
+
+        .value {
+            fill: #4CAF50;
+        }
+
+        .label {
+            fill: #fff;
+            font-size: 14px;
+            text-anchor: middle;
+        }
+
+        .btn {
+            margin: 20px;
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #9C27B0;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Project Valhalla: Pointer vs Flattened</h1>
+    <div>
+        <button class="btn" onclick="showBoxed()">Boxed (Current Java)</button>
+        <button class="btn" style="background: #4CAF50;" onclick="showFlat()">Flattened (Value Classes)</button>
+    </div>
+    <svg width="800" height="400" id="viz"></svg>
+    <script>
+        const svg = d3.select("#viz");
+
+        // Array Slots
+        const slots = d3.range(10).map(i => ({ id: i, x: 50 + i * 70, y: 150 }));
+
+        svg.selectAll(".slot").data(slots).enter().append("rect")
+            .attr("x", d => d.x).attr("y", d => d.y).attr("width", 60).attr("height", 60)
+            .attr("class", "memory-slot");
+
+        function showBoxed() {
+            clear();
+            // Pointers in slots
+            svg.selectAll(".pointer").data(slots).enter().append("circle")
+                .attr("cx", d => d.x + 30).attr("cy", d => d.y + 30).attr("r", 5)
+                .attr("class", "pointer");
+
+            svg.append("text").attr("x", 400).attr("y", 100).text("Reference Array: Point[] points").attr("class", "label");
+
+            // Objects on Heap (Random)
+            slots.forEach(s => {
+                const rx = s.x + (Math.random() - 0.5) * 50;
+                const ry = s.y + 100 + Math.random() * 100;
+
+                svg.append("rect").attr("x", rx).attr("y", ry).attr("width", 40).attr("height", 40).attr("class", "memory-slot pointer").style("opacity", 0.7);
+                svg.append("line").attr("x1", s.x + 30).attr("y1", s.y + 30).attr("x2", rx + 20).attr("y2", ry).style("stroke", "#2196F3");
+            });
+        }
+
+        function showFlat() {
+            clear();
+
+            svg.selectAll(".value").data(slots).enter().append("text")
+                .attr("x", d => d.x + 30).attr("y", d => d.y + 35).text(d => "{x,y}")
+                .attr("class", "label value").style("font-weight", "bold");
+
+            svg.append("text").attr("x", 400).attr("y", 100).text("Flattened Array: Point[] points").attr("class", "label");
+            svg.append("text").attr("x", 400).attr("y", 250).text("Data is INLINE. No Cache Misses.").attr("class", "label").style("fill", "#4CAF50");
+        }
+
+        function clear() {
+            svg.selectAll("circle").remove();
+            svg.selectAll("line").remove();
+            svg.selectAll(".value").remove();
+            svg.selectAll(".label").remove();
+        }
+    </script>
+</body>
+
+</html>

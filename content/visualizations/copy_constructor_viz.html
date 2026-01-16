@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Copy Constructor: Deep vs Shallow Copy Visualizer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e1e;
+            color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .controls {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .main-viz {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            min-height: 500px;
+            position: relative;
+        }
+
+        button {
+            background: #4caf50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            font-weight: bold;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        button.danger {
+            background: #ff5252;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        h2,
+        h3 {
+            color: #64b5f6;
+            margin-top: 0;
+        }
+
+        .description {
+            font-size: 0.9em;
+            color: #aaa;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+
+        .node circle {
+            fill: #fff;
+            stroke: steelblue;
+            stroke-width: 2px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .node text {
+            font: 12px sans-serif;
+            fill: #eee;
+            pointer-events: none;
+        }
+
+        .link {
+            fill: none;
+            stroke: #555;
+            stroke-width: 2px;
+            transition: stroke 0.5s;
+            marker-end: url(#arrow);
+        }
+
+        .link.shared {
+            stroke: #ff5252;
+            stroke-dasharray: 5, 5;
+            animation: flow 1s linear infinite;
+        }
+
+        .link.independent {
+            stroke: #4caf50;
+        }
+
+        @keyframes flow {
+            from {
+                stroke-dashoffset: 10;
+            }
+
+            to {
+                stroke-dashoffset: 0;
+            }
+        }
+
+        .alert-box {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            background: #333;
+            border-left: 5px solid #4caf50;
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <div class="controls">
+            <h2>Copy Lab</h2>
+            <div class="description">
+                Experience the difference between Reference Copy (Shallow) and Object Copy (Deep).
+                <br><br>
+                <strong>Objects</strong>: Circles
+                <br>
+                <strong>References</strong>: Lines
+            </div>
+
+            <button onclick="setMode('shallow')">Mode: Shallow Copy (Risky)</button>
+            <button onclick="setMode('deep')">Mode: Deep Copy (Safe)</button>
+            <br><br>
+            <button class="danger" onclick="mutateChild()">⚠️ Mutate Shared Child</button>
+
+            <div id="status" style="margin-top:20px; padding:10px; background:#444; border-radius:4px;">
+                Current: <span id="mode-text" style="color:#64b5f6">None</span>
+            </div>
+        </div>
+
+        <div class="main-viz" id="viz">
+            <h3>Memory Heap</h3>
+            <svg width="100%" height="450"></svg>
+            <div id="alert" class="alert-box"></div>
+        </div>
+    </div>
+
+    <script>
+        const svg = d3.select("svg");
+        const width = 800;
+        const height = 450;
+
+        // Define arrow marker
+        svg.append("defs").append("marker")
+            .attr("id", "arrow")
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 20)
+            .attr("refY", 0)
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .attr("orient", "auto")
+            .append("path")
+            .attr("d", "M0,-5L10,0L0,5")
+            .attr("fill", "#555");
+
+        let currentMode = 'deep';
+
+        // Initial State: Object A pointing to Child C
+        let nodes = [
+            { id: "A", x: 200, y: 100, label: "Original (A)", color: "#64b5f6" },
+            { id: "C", x: 400, y: 200, label: "Child (Mutable)", color: "#fff" },
+        ];
+
+        let links = [
+            { source: "A", target: "C", type: "normal" }
+        ];
+
+        function update() {
+            // DATA JOIN
+            const link = svg.selectAll(".link")
+                .data(links, d => d.source + "-" + d.target);
+
+            const linkEnter = link.enter().append("path")
+                .attr("class", "link")
+                .attr("marker-end", "url(#arrow)");
+
+            link.merge(linkEnter)
+                .attr("class", d => "link " + d.type)
+                .attr("d", d => {
+                    const s = nodes.find(n => n.id === d.source);
+                    const t = nodes.find(n => n.id === d.target);
+                    return `M${s.x},${s.y} L${t.x},${t.y}`;
+                })
+                .style("stroke", d => d.type === 'shared' ? '#ff5252' : (d.type === 'independent' ? '#4caf50' : '#555'));
+
+            link.exit().remove();
+
+            const node = svg.selectAll(".node")
+                .data(nodes, d => d.id);
+
+            const nodeEnter = node.enter().append("g")
+                .attr("class", "node")
+                .attr("transform", d => `translate(${d.x},${d.y})`);
+
+            nodeEnter.append("circle")
+                .attr("r", 25)
+                .style("fill", d => d.color);
+
+            nodeEnter.append("text")
+                .attr("dy", -35)
+                .attr("text-anchor", "middle")
+                .text(d => d.label);
+
+            // Text inside
+            nodeEnter.append("text")
+                .attr("dy", 5)
+                .attr("text-anchor", "middle")
+                .style("fill", "#333")
+                .style("font-weight", "bold")
+                .style("font-size", "10px")
+                .text(d => d.id);
+
+            node.merge(nodeEnter).select("circle").style("fill", d => d.color);
+            node.exit().remove();
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('mode-text').innerText = mode === 'shallow' ? "Shallow Copy (Clone)" : "Deep Copy (Constructor)";
+
+            // Reset base state
+            nodes = [
+                { id: "A", x: 200, y: 100, label: "Original (A)", color: "#64b5f6" },
+                { id: "C", x: 400, y: 200, label: "Child (Mutable)", color: "#fff" },
+            ];
+            links = [{ source: "A", target: "C", type: "normal" }];
+
+            // Add Copy B
+            nodes.push({ id: "B", x: 600, y: 100, label: "Copy (B)", color: "#ba68c8" });
+
+            if (mode === 'shallow') {
+                // Shallow: B points to SAME C
+                links.push({ source: "B", target: "C", type: "shared" });
+                showAlert("Warning: B shares reference to Child C! Modifying C via B will affect A.", "#f44336");
+            } else {
+                // Deep: B points to NEW C2
+                nodes.push({ id: "C2", x: 600, y: 200, label: "Child Copy", color: "#fff" });
+                links.push({ source: "B", target: "C2", type: "independent" });
+                showAlert("Safe: B has its own independent Child C2. Isolation guaranteed.", "#4caf50");
+            }
+            update();
+        }
+
+        function mutateChild() {
+            if (!nodes.find(n => n.id === "B")) {
+                alert("Create a copy first!");
+                return;
+            }
+
+            if (currentMode === 'shallow') {
+                // Mutate C (Shared)
+                const c = nodes.find(n => n.id === "C");
+                c.color = "#ff5252"; // Red = Corrupted
+                c.label = "MUTATED!";
+                showAlert("CRITICAL: Original (A) is corrupted because Copy (B) mutated the shared child!", "#ff5252");
+            } else {
+                // Mutate C2 (Copy)
+                const c2 = nodes.find(n => n.id === "C2");
+                c2.color = "#66bb6a"; // Green = Safe mutation
+                c2.label = "Mutated Copy";
+
+                // C stays pure
+                const c = nodes.find(n => n.id === "C");
+                c.color = "#fff";
+
+                showAlert("Success: Only B's copy changed. Original (A) remains untouched.", "#4caf50");
+            }
+            update();
+        }
+
+        function showAlert(msg, color) {
+            const d = document.getElementById('alert');
+            d.style.display = 'block';
+            d.style.borderLeftColor = color;
+            d.innerHTML = `<strong>Status:</strong> ${msg}`;
+        }
+
+        setMode('deep'); // Default
+    </script>
+</body>
+
+</html>

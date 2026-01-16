@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Monad FlatMap Visualizer</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1e1e1e;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .box {
+            fill: #333;
+            stroke: #fff;
+            stroke-width: 2px;
+            rx: 10;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .box:hover {
+            fill: #444;
+            stroke: #4CAF50;
+        }
+
+        .value {
+            font-size: 20px;
+            font-weight: bold;
+            fill: #fff;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+
+        .label {
+            font-size: 14px;
+            fill: #aaa;
+            text-anchor: middle;
+        }
+
+        .arrow {
+            stroke: #4CAF50;
+            stroke-width: 2px;
+            marker-end: url(#arrow);
+        }
+
+        .btn {
+            margin: 20px;
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+
+        .btn:hover {
+            background: #45a049;
+        }
+
+        #log {
+            margin-top: 20px;
+            font-family: monospace;
+            color: #0f0;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Monad Pipeline: The Railway Track</h1>
+    <p>Click "Next Step" to flatMap through the pipeline.</p>
+    <div>
+        <button class="btn" onclick="nextStep()">Next Step (flatMap)</button>
+        <button class="btn" style="background: #f44336;" onclick="reset()">Reset</button>
+    </div>
+    <div id="log">Status: Start</div>
+    <svg width="800" height="400" id="viz">
+        <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"
+                markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L9,3 z" fill="#4CAF50" />
+            </marker>
+        </defs>
+    </svg>
+
+    <script>
+        const svg = d3.select("#viz");
+        let step = 0;
+        const width = 800;
+        const height = 400;
+        
+        // Monad State
+        let currentVal = 10;
+        let isError = false;
+
+        function drawBox(x, y, val, label, isErr) {
+            const g = svg.append("g").attr("class", "node").attr("opacity", 0);
+            
+            g.append("rect")
+                .attr("x", x).attr("y", y)
+                .attr("width", 100).attr("height", 60)
+                .attr("class", "box")
+                .style("stroke", isErr ? "#f44336" : "#fff");
+
+            g.append("text")
+                .attr("x", x + 50).attr("y", y + 35)
+                .attr("class", "value")
+                .text(val)
+                .style("fill", isErr ? "#f44336" : "#fff");
+                
+            g.append("text")
+                .attr("x", x + 50).attr("y", y + 80)
+                .attr("class", "label")
+                .text(label);
+                
+            g.transition().duration(500).attr("opacity", 1);
+        }
+
+        function drawArrow(x1, y1, x2, y2) {
+            svg.append("line")
+                .attr("x1", x1 + 100).attr("y1", y1 + 30)
+                .attr("x2", x1 + 100).attr("y2", y1 + 30) // Start at source
+                .attr("class", "arrow")
+                .transition().duration(500)
+                .attr("x2", x2).attr("y2", y2 + 30);
+        }
+
+        function reset() {
+            svg.selectAll(".node").remove();
+            svg.selectAll(".arrow").remove();
+            step = 0;
+            currentVal = 10;
+            isError = false;
+            document.getElementById("log").innerText = "Status: Start (Value=10)";
+            drawBox(50, 150, "Just(10)", "Unit", false);
+        }
+
+        function nextStep() {
+            step++;
+            const startX = 50 + (step-1) * 200;
+            const nextX = 50 + step * 200;
+            const y = 150;
+
+            if (step === 1) {
+                // Operation: Map (x * 2)
+                currentVal *= 2;
+                drawArrow(startX, y, nextX, y);
+                setTimeout(() => drawBox(nextX, y, `Just(${currentVal})`, "flatMap(x -> x*2)", false), 500);
+                document.getElementById("log").innerText += "\n-> flatMap(x*2) = " + currentVal;
+            } else if (step === 2) {
+                // Operation: Validation (Fail if > 15)
+                if (currentVal > 15) {
+                    isError = true;
+                    drawArrow(startX, y, nextX, y);
+                    setTimeout(() => drawBox(nextX, y, "Empty/Failure", "flatMap(validate)", true), 500);
+                    document.getElementById("log").innerText += "\n-> flatMap(validate) = FAIL (Too High)";
+                } else {
+                    drawArrow(startX, y, nextX, y);
+                    setTimeout(() => drawBox(nextX, y, `Just(${currentVal})`, "flatMap(validate)", false), 500);
+                }
+            } else if (step === 3) {
+                // Operation: Recovery
+                if (isError) {
+                    currentVal = 0; // Default
+                    drawArrow(startX, y, nextX, y + 100); // Divert
+                     setTimeout(() => drawBox(nextX, y + 100, `Just(0)`, "orElse(0)", false), 500);
+                     document.getElementById("log").innerText += "\n-> orElse(0) = Recovered";
+                } else {
+                    drawArrow(startX, y, nextX, y);
+                     setTimeout(() => drawBox(nextX, y, `Just(${currentVal})`, "orElse(0)", false), 500);
+                }
+            }
+        }
+
+        reset();
+    </script>
+</body>
+
+</html>

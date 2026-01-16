@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Double Dispatch: Interaction Matrix</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f2f5;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            flex: 1;
+        }
+
+        h2 {
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+            color: #333;
+            margin-top: 0;
+        }
+
+        .matrix-cell {
+            stroke: #e0e0e0;
+            stroke-width: 1px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .matrix-cell:hover {
+            opacity: 0.8;
+            stroke: #666;
+            stroke-width: 2px;
+        }
+
+        .label {
+            font-size: 12px;
+            fill: #666;
+            font-weight: bold;
+            text-anchor: middle;
+        }
+
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Consolas', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+            min-height: 150px;
+        }
+
+        .keyword {
+            color: #569cd6;
+        }
+
+        .type {
+            color: #4ec9b0;
+        }
+
+        .method {
+            color: #dcdcaa;
+        }
+
+        .string {
+            color: #ce9178;
+        }
+
+        .comment {
+            color: #6a9955;
+        }
+
+        .highlight {
+            fill: #e3f2fd;
+        }
+
+        .selected {
+            fill: #2196f3;
+            stroke: #1976d2;
+            stroke-width: 3px;
+        }
+
+        .selected text {
+            fill: white !important;
+            font-weight: bold;
+        }
+
+        #flow-diagram {
+            height: 200px;
+            border: 1px solid #eee;
+            margin-top: 20px;
+            background: white;
+            border-radius: 4px;
+            position: relative;
+        }
+
+        .step {
+            position: absolute;
+            padding: 8px 15px;
+            border-radius: 20px;
+            background: #eee;
+            color: #666;
+            font-size: 12px;
+            transition: all 0.5s;
+            opacity: 0.3;
+            border: 1px solid #ddd;
+        }
+
+        .step.active {
+            opacity: 1;
+            transform: scale(1.1);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            font-weight: bold;
+        }
+
+        .step-1 {
+            top: 20px;
+            left: 20px;
+            background: #e3f2fd;
+            border-color: #2196f3;
+            color: #0d47a1;
+        }
+
+        /* Dispatch 1 */
+        .step-2 {
+            top: 80px;
+            left: 150px;
+            background: #fff3e0;
+            border-color: #ff9800;
+            color: #e65100;
+        }
+
+        /* Dispatch 2 */
+        .step-3 {
+            top: 140px;
+            left: 280px;
+            background: #e8f5e9;
+            border-color: #4caf50;
+            color: #1b5e20;
+        }
+
+        /* Execution */
+
+        .arrow {
+            position: absolute;
+            height: 2px;
+            background: #ccc;
+            transform-origin: left;
+        }
+    </style>
+</head>
+
+<body>
+    <div style="text-align:center; padding: 20px;">
+        <h1>Double Dispatch Visualization</h1>
+        <p style="color:#666;">Click any cell in the Collision Matrix to trace the execution path.</p>
+    </div>
+
+    <div class="container">
+        <!-- LEFT: MATRIX -->
+        <div class="card">
+            <h2>Interaction Matrix</h2>
+            <div id="matrix-viz"></div>
+        </div>
+
+        <!-- RIGHT: LOGIC TRACE -->
+        <div class="card">
+            <h2>Execution Trace</h2>
+            <div id="flow-diagram">
+                <div id="s1" class="step step-1">1. receiver.collide(arg)<br><small>Dynamic Dispatch on Receiver</small>
+                </div>
+                <div id="s2" class="step step-2">2. arg.collideWith(this)<br><small>Dynamic Dispatch on Argument</small>
+                </div>
+                <div id="s3" class="step step-3">3. Logic Executed<br><small>Concrete Type A + Concrete Type B</small>
+                </div>
+
+                <!-- Arrows drawn via CSS ideally, simplified here -->
+            </div>
+
+            <h3>Code Path:</h3>
+            <div id="code-display" class="code-block">
+                <span class="comment">// Select a cell to see the dispatch code...</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const types = ["Asteroid", "Spaceship", "Missile", "PowerUp"];
+        const interactions = {
+            "Asteroid-Asteroid": { res: "Bounce", code: "return 'Boing!';" },
+            "Asteroid-Spaceship": { res: "Crash", code: "ship.takeDamage(10);" },
+            "Asteroid-Missile": { res: "Explode", code: "asteroid.destroy();" },
+            "Asteroid-PowerUp": { res: "Ignore", code: "return;" },
+
+            "Spaceship-Asteroid": { res: "Crash", code: "ship.takeDamage(10);" },
+            "Spaceship-Spaceship": { res: "Hail", code: "ship.openComms();" },
+            "Spaceship-Missile": { res: "Damage", code: "ship.takeDamage(50);" },
+            "Spaceship-PowerUp": { res: "Collect", code: "ship.addShield();" },
+
+            "Missile-Asteroid": { res: "Explode", code: "asteroid.destroy();" },
+            "Missile-Spaceship": { res: "Hit", code: "ship.takeDamage(50);" },
+            "Missile-Missile": { res: "Intercept", code: "both.destroy();" },
+            "Missile-PowerUp": { res: "Ignore", code: "return;" },
+
+            "PowerUp-Asteroid": { res: "Ignore", code: "return;" },
+            "PowerUp-Spaceship": { res: "Collect", code: "ship.addShield();" },
+            "PowerUp-Missile": { res: "Ignore", code: "return;" },
+            "PowerUp-PowerUp": { res: "Merge", code: "createSuperPowerUp();" }
+        };
+
+        const width = 500, height = 500;
+        const svg = d3.select("#matrix-viz").append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        const cellSize = 80;
+        const offset = 80;
+
+        // Draw Headers
+        svg.selectAll(".row-label")
+            .data(types).enter().append("text")
+            .attr("x", offset - 10)
+            .attr("y", (d, i) => offset + i * cellSize + cellSize / 2)
+            .text(d => d)
+            .attr("class", "label")
+            .style("text-anchor", "end");
+
+        svg.selectAll(".col-label")
+            .data(types).enter().append("text")
+            .attr("x", (d, i) => offset + i * cellSize + cellSize / 2)
+            .attr("y", offset - 10)
+            .text(d => d)
+            .attr("class", "label");
+
+        // Labels
+        svg.append("text").attr("x", 10).attr("y", offset - 30).text("Receiver (this)").attr("class", "label").style("font-style", "italic");
+        svg.append("text").attr("x", offset + 150).attr("y", 20).text("Argument (other)").attr("class", "label").style("font-style", "italic");
+
+        // Draw Grid
+        for (let r = 0; r < types.length; r++) {
+            for (let c = 0; c < types.length; c++) {
+                const type1 = types[r]; // Receiver
+                const type2 = types[c]; // Argument
+                const key = type1 + "-" + type2;
+                const data = interactions[key];
+
+                const g = svg.append("g")
+                    .attr("transform", `translate(${offset + c * cellSize}, ${offset + r * cellSize})`)
+                    .style("cursor", "pointer")
+                    .on("click", () => activate(type1, type2, data));
+
+                g.append("rect")
+                    .attr("width", cellSize)
+                    .attr("height", cellSize)
+                    .attr("class", "matrix-cell")
+                    .attr("fill", getColor(data.res));
+
+                g.append("text")
+                    .attr("x", cellSize / 2)
+                    .attr("y", cellSize / 2)
+                    .attr("dy", ".35em")
+                    .text(data.res)
+                    .style("text-anchor", "middle")
+                    .style("font-size", "11px")
+                    .style("pointer-events", "none");
+            }
+        }
+
+        function getColor(res) {
+            if (res === "Crash" || res === "Explode" || res === "Damage" || res === "Hit") return "#ffcdd2"; // Red
+            if (res === "Collect" || res === "Merge") return "#c8e6c9"; // Green
+            if (res === "Ignore") return "#f5f5f5"; // Gray
+            if (res === "Bounce" || res === "Hail" || res === "Intercept") return "#fff9c4"; // Yellow
+            return "white";
+        }
+
+        function activate(t1, t2, data) {
+            // Animate trace
+            document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+
+            // Step 1
+            setTimeout(() => {
+                document.getElementById('s1').classList.add('active');
+                updateCode(1, t1, t2);
+            }, 0);
+
+            // Step 2
+            setTimeout(() => {
+                document.getElementById('s2').classList.add('active');
+                updateCode(2, t1, t2);
+            }, 1000);
+
+            // Step 3
+            setTimeout(() => {
+                document.getElementById('s3').classList.add('active');
+                updateCode(3, t1, t2, data.code);
+            }, 2000);
+        }
+
+        function updateCode(step, t1, t2, logic) {
+            const el = document.getElementById('code-display');
+            let html = "";
+
+            if (step === 1) {
+                html = `
+<span class="type">GameObject</span> a = <span class="keyword">new</span> <span class="type">${t1}</span>();
+<span class="type">GameObject</span> b = <span class="keyword">new</span> <span class="type">${t2}</span>();
+
+<span class="comment">// 1. Single Dispatch: Runtime type of 'a' is found</span>
+a.<span class="method">collide</span>(b); 
+<span class="comment">// --> Jumps to ${t1}.class::collide(GameObject)</span>`;
+            } else if (step === 2) {
+                html = `
+<span class="keyword">class</span> <span class="type">${t1}</span> {
+    <span class="keyword">void</span> <span class="method">collide</span>(<span class="type">GameObject</span> other) {
+        <span class="comment">// 2. Double Dispatch: 'this' sends its specific type back</span>
+        other.<span class="method">collideWith</span>(<span class="keyword">this</span>); 
+        <span class="comment">// --> Jumps to ${t2}.class::collideWith(${t1})</span>
+    }
+}`;
+            } else if (step === 3) {
+                html = `
+<span class="keyword">class</span> <span class="type">${t2}</span> {
+    <span class="keyword">void</span> <span class="method">collideWith</span>(<span class="type">${t1}</span> origin) {
+        <span class="comment">// 3. Execution: Both types are now known!</span>
+        <span class="keyword">${logic}</span>
+    }
+}`;
+            }
+            el.innerHTML = html;
+        }
+
+        // Init
+        activate("Asteroid", "Spaceship", interactions["Asteroid-Spaceship"]);
+
+    </script>
+</body>
+
+</html>

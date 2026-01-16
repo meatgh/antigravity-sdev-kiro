@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Strategy Pattern: Payment Routing Engine</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; overflow: hidden; margin: 0; }
+        .node circle { stroke: #fff; stroke-width: 2px; transition: all 0.3s; }
+        .node text { font-size: 12px; fill: #ccc; pointer-events: none; text-shadow: 0 1px 4px #000; }
+        .link { fill: none; stroke-opacity: 0.4; stroke-width: 1.5px; transition: stroke 0.5s; }
+        .packet { fill: #00ffcc; filter: drop-shadow(0 0 4px #00ffcc); }
+        .control-panel { position: absolute; top: 20px; left: 20px; background: rgba(30, 30, 30, 0.9); padding: 20px; border-radius: 8px; border: 1px solid #444; width: 250px; }
+        button { width: 100%; margin: 5px 0; padding: 10px; background: #333; color: white; border: 1px solid #555; cursor: pointer; transition: 0.2s; }
+        button:hover { background: #444; border-color: #00ffcc; }
+        .active-strategy { border-left: 4px solid #00ffcc; background: #2a2a2a; }
+        .metric { font-family: monospace; color: #00ffcc; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="control-panel">
+    <h3>💳 Payment Router</h3>
+    <div id="status" class="metric">Mode: FASTEST (Default)</div>
+    <hr style="border-color: #444;">
+    <button onclick="setStrategy('low_fee')" id="btn-fee">💰 Low Fee Strategy</button>
+    <button onclick="setStrategy('reliability')" id="btn-rel">🛡️ High Reliability</button>
+    <button onclick="setStrategy('crypto')" id="btn-cry">₿ Crypto / Web3</button>
+    <button onclick="setStrategy('fastest')" id="btn-fast" class="active-strategy">⚡ Fastest Route</button>
+</div>
+
+<svg width="100vw" height="100vh"></svg>
+
+<script>
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const svg = d3.select("svg");
+    
+    // -------------------------------------------------
+    // STRATEGIES (The "Interchangeable Algorithms")
+    // -------------------------------------------------
+    const strategies = {
+        'low_fee': { color: '#ffd700', linkColor: '#886600', speed: 1000, label: "Optimizing for Margins..." },
+        'reliability': { color: '#4488ff', linkColor: '#003366', speed: 1500, label: "Redundant Verification..." },
+        'crypto': { color: '#ff6600', linkColor: '#662200', speed: 800, label: "Blockchain Consensus..." },
+        'fastest': { color: '#00ffcc', linkColor: '#004433', speed: 400, label: "Latency Arbitrage..." }
+    };
+
+    let currentStrategy = 'fastest';
+
+    // -------------------------------------------------
+    // NODES (Gateways & Processors)
+    // -------------------------------------------------
+    const nodes = [
+        { id: "Checkout", group: 0, x: width * 0.1, y: height * 0.5 },
+        
+        // Low Fee Path
+        { id: "ACH", group: 1, x: width * 0.4, y: height * 0.2 },
+        { id: "BankTransfer", group: 1, x: width * 0.7, y: height * 0.2 },
+        
+        // Reliability Path
+        { id: "Visa", group: 2, x: width * 0.35, y: height * 0.4 },
+        { id: "MasterCard", group: 2, x: width * 0.35, y: height * 0.6 },
+        { id: "FraudCheck", group: 2, x: width * 0.6, y: height * 0.5 },
+        
+        // Crypto Path
+        { id: "LightningNode", group: 3, x: width * 0.5, y: height * 0.8 },
+        
+        // Destination
+        { id: "Settlement", group: 4, x: width * 0.9, y: height * 0.5 }
+    ];
+
+    // -------------------------------------------------
+    // LINKS (Routing Paths)
+    // -------------------------------------------------
+    const links = [
+        { source: "Checkout", target: "ACH", strategy: "low_fee" },
+        { source: "ACH", target: "BankTransfer", strategy: "low_fee" },
+        { source: "BankTransfer", target: "Settlement", strategy: "low_fee" },
+
+        { source: "Checkout", target: "Visa", strategy: "reliability" },
+        { source: "Checkout", target: "MasterCard", strategy: "reliability" },
+        { source: "Visa", target: "FraudCheck", strategy: "reliability" },
+        { source: "MasterCard", target: "FraudCheck", strategy: "reliability" },
+        { source: "FraudCheck", target: "Settlement", strategy: "reliability" },
+        
+        { source: "Checkout", target: "Visa", strategy: "fastest" }, // Visa is fast too
+        { source: "Visa", target: "Settlement", strategy: "fastest" }, // Skip Fraud for Speed (Risky!)
+
+        { source: "Checkout", target: "LightningNode", strategy: "crypto" },
+        { source: "LightningNode", target: "Settlement", strategy: "crypto" }
+    ];
+
+    // Force Simulation
+    const simulation = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(links).id(d => d.id).strength(0.01))
+        .force("charge", d3.forceManyBody().strength(-400))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("x", d3.forceX(d => d.x).strength(0.8))
+        .force("y", d3.forceY(d => d.y).strength(0.8));
+
+    // Draw Links
+    const link = svg.append("g")
+        .selectAll("line")
+        .data(links)
+        .enter().append("line")
+        .attr("class", "link")
+        .style("stroke", "#333");
+
+    // Draw Nodes
+    const node = svg.append("g")
+        .selectAll("g")
+        .data(nodes)
+        .enter().append("g")
+        .attr("class", "node");
+
+    node.append("circle")
+        .attr("r", 15)
+        .style("fill", d => {
+            if(d.group === 0) return "#fff";
+            if(d.group === 4) return "#0f0";
+            return "#444";
+        });
+
+    node.append("text")
+        .attr("dx", 20)
+        .attr("dy", 5)
+        .text(d => d.id);
+
+    simulation.on("tick", () => {
+        link
+            .attr("x1", d => d.source.x)
+            .attr("y1", d => d.source.y)
+            .attr("x2", d => d.target.x)
+            .attr("y2", d => d.target.y);
+
+        node.attr("transform", d => `translate(${d.x},${d.y})`);
+    });
+
+    // -------------------------------------------------
+    // DYNAMIC STRATEGY SWITCHING
+    // -------------------------------------------------
+    function setStrategy(stratName) {
+        currentStrategy = stratName;
+        const config = strategies[stratName];
+
+        // Update UI
+        d3.selectAll("button").classed("active-strategy", false);
+        d3.select("#btn-" + (stratName === 'low_fee' ? 'fee' : stratName.substring(0,3))).classed("active-strategy", true);
+        d3.select("#status").text(config.label).style("color", config.color);
+
+        // Highlight Active Path
+        link.style("stroke", l => l.strategy === stratName ? config.color : "#222")
+            .style("stroke-opacity", l => l.strategy === stratName ? 1 : 0.1)
+            .style("stroke-width", l => l.strategy === stratName ? 3 : 1);
+
+        // Highlight Nodes involved
+        node.selectAll("circle")
+            .style("stroke", config.color)
+            .style("fill", d => { 
+                // Simple logic: is this node in the active path?
+                const activeLinks = links.filter(l => l.strategy === stratName);
+                const isConnected = activeLinks.some(l => l.source.id === d.id || l.target.id === d.id);
+                return isConnected ? "#333" : "#111";
+            });
+    }
+
+    // -------------------------------------------------
+    // TRAFFIC SIMULATION (Packets)
+    // -------------------------------------------------
+    function emitPacket() {
+        const strat = strategies[currentStrategy];
+        const activeLinks = links.filter(l => l.strategy === currentStrategy);
+        
+        // Find path from Checkout (simplified)
+        // We'll just animate a packet on every active link for visual effect
+        activeLinks.forEach(l => {
+            const packet = svg.append("circle")
+                .attr("r", 4)
+                .attr("class", "packet")
+                .style("fill", strat.color)
+                .attr("cx", l.source.x)
+                .attr("cy", l.source.y);
+
+            packet.transition()
+                .duration(strat.speed)
+                .ease(d3.easeLinear)
+                .attr("cx", l.target.x)
+                .attr("cy", l.target.y)
+                .on("end", () => packet.remove());
+        });
+
+        setTimeout(emitPacket, 800);
+    }
+
+    // Init
+    setStrategy('fastest');
+    emitPacket();
+
+</script>
+</body>
+</html>

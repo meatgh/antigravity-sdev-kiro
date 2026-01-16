@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serialization Internals Visualizer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e1e;
+            color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+        }
+
+        .panel {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        h2 {
+            color: #64b5f6;
+            margin-top: 0;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #aaa;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            background: #3d3d3d;
+            border: 1px solid #555;
+            color: white;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background: #4caf50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        .byte-stream {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 20px;
+            align-items: flex-start;
+        }
+
+        .byte {
+            width: 30px;
+            height: 40px;
+            border: 1px solid #555;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: monospace;
+            font-size: 10px;
+            position: relative;
+        }
+
+        .byte span.val {
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .byte span.desc {
+            font-size: 8px;
+            color: #aaa;
+            position: absolute;
+            bottom: -15px;
+            width: 60px;
+            text-align: center;
+            display: none;
+            z-index: 10;
+            background: #222;
+            padding: 2px;
+            border-radius: 2px;
+        }
+
+        .byte:hover span.desc {
+            display: block;
+        }
+
+        .legend {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+            font-size: 12px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .box {
+            width: 12px;
+            height: 12px;
+            border: 1px solid white;
+        }
+
+        .viz-row {
+            margin-bottom: 30px;
+        }
+
+        .viz-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .size-badge {
+            background: #444;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        /* Colors */
+        .c-header {
+            background: #3f51b5;
+        }
+
+        .c-marker {
+            background: #e91e63;
+        }
+
+        .c-field {
+            background: #ff9800;
+            color: black;
+        }
+
+        .c-value {
+            background: #4caf50;
+            color: black;
+        }
+
+        .c-overhead {
+            background: #9e9e9e;
+            color: black;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <!-- Controls -->
+        <div class="panel">
+            <h2>Object Definition</h2>
+            <div id="fields">
+                <div class="field-row">
+                    <label>Field 1: ID (Int)</label>
+                    <input type="number" id="f1-val" value="1001">
+                </div>
+                <div class="field-row">
+                    <label>Field 2: Name (String)</label>
+                    <input type="text" id="f2-val" value="Alice">
+                </div>
+                <div class="field-row">
+                    <label>Field 3: Active (Boolean)</label>
+                    <select id="f3-val">
+                        <option value="true">True</option>
+                        <option value="false">False</option>
+                    </select>
+                </div>
+            </div>
+            <button onclick="updateViz()">Visualize & Compare</button>
+            <br><br>
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="box c-header"></div>Header
+                </div>
+                <div class="legend-item">
+                    <div class="box c-marker"></div>Tag/Marker
+                </div>
+                <div class="legend-item">
+                    <div class="box c-field"></div>Field Name
+                </div>
+                <div class="legend-item">
+                    <div class="box c-value"></div>Value
+                </div>
+                <div class="legend-item">
+                    <div class="box c-overhead"></div>Overhead
+                </div>
+            </div>
+            <p style="font-size: 0.9em; color: #aaa;">
+                Currently visualizing a class `User` with the fields defined above.
+                Notice how Field Names take up space in JSON but are omitted (schema-based) or minimized (tag-based) in
+                binary formats.
+            </p>
+        </div>
+
+        <!-- Visualization -->
+        <div class="panel">
+            <h2>Byte Stream Inspector</h2>
+
+            <div class="viz-row">
+                <div class="viz-label">
+                    1. Java Serialization (Default)
+                    <span class="size-badge" id="size-java">0 bytes</span>
+                </div>
+                <div class="byte-stream" id="viz-java"></div>
+            </div>
+
+            <div class="viz-row">
+                <div class="viz-label">
+                    2. JSON (Text)
+                    <span class="size-badge" id="size-json">0 bytes</span>
+                </div>
+                <div class="byte-stream" id="viz-json"></div>
+            </div>
+
+            <div class="viz-row">
+                <div class="viz-label">
+                    3. Custom Binary / Protobuf (Packed)
+                    <span class="size-badge" id="size-proto">0 bytes</span>
+                </div>
+                <div class="byte-stream" id="viz-proto"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function updateViz() {
+            const id = parseInt(document.getElementById('f1-val').value);
+            const name = document.getElementById('f2-val').value;
+            const active = document.getElementById('f3-val').value === 'true';
+
+            renderJava(id, name, active);
+            renderJson(id, name, active);
+            renderProto(id, name, active);
+        }
+
+        function createByte(val, type, desc) {
+            return `<div class="byte ${type}">
+                <span class="val">${val}</span>
+                <span class="desc">${desc}</span>
+            </div>`;
+        }
+
+        function hex(n) {
+            return n.toString(16).toUpperCase().padStart(2, '0');
+        }
+
+        // 1. JAVA SERIALIZATION SIMULATION
+        // AC ED 00 05 (Magic) + SR (New Class) + Name + UID + Flags + Fields
+        function renderJava(id, name, active) {
+            let html = '';
+            let size = 0;
+
+            // Header
+            html += createByte('AC', 'c-header', 'Magic 1');
+            html += createByte('ED', 'c-header', 'Magic 2');
+            html += createByte('00', 'c-header', 'Version Hi');
+            html += createByte('05', 'c-header', 'Version Lo');
+            size += 4;
+
+            // Object Metadata
+            html += createByte('73', 'c-marker', 'TC_OBJECT');
+            html += createByte('72', 'c-marker', 'TC_CLASSDESC');
+            // Class Name "User" (len 4)
+            html += createByte('00', 'c-overhead', 'Name Len Hi');
+            html += createByte('04', 'c-overhead', 'Name Len Lo');
+            html += createByte('55', 'c-field', 'U');
+            html += createByte('73', 'c-field', 's');
+            html += createByte('65', 'c-field', 'e');
+            html += createByte('72', 'c-field', 'r');
+            // SerialVersionUID (8 bytes)
+            for (let i = 0; i < 8; i++) html += createByte('FF', 'c-overhead', 'UID');
+
+            // Flags
+            html += createByte('02', 'c-overhead', 'SC_SERIALIZABLE');
+            html += createByte('00', 'c-overhead', 'Field Count Hi');
+            html += createByte('03', 'c-overhead', 'Field Count Lo (3)');
+
+            size += 1 + 1 + 2 + 4 + 8 + 1 + 2;
+
+            // Field Descriptions (Java sends field names!)
+            // I (Int) "id"
+            html += createByte('49', 'c-overhead', 'Type Int');
+            html += createByte('00', 'c-overhead', 'Len');
+            html += createByte('02', 'c-overhead', 'Len');
+            html += createByte('69', 'c-field', 'i');
+            html += createByte('64', 'c-field', 'd');
+
+            // L (Object) "name" (String) - Simplified
+            html += createByte('4C', 'c-overhead', 'Type Obj');
+            html += createByte('00', 'c-overhead', 'Len');
+            html += createByte('04', 'c-overhead', 'Len');
+            html += createByte('6E', 'c-field', 'n');
+            html += createByte('61', 'c-field', 'a');
+            html += createByte('6D', 'c-field', 'm');
+            html += createByte('65', 'c-field', 'e'); // + Type String specific logic omitted
+
+            // Z (Boolean) "active"
+            html += createByte('5A', 'c-overhead', 'Type Bool');
+            html += createByte('00', 'c-overhead', 'Len');
+            html += createByte('06', 'c-overhead', 'Len');
+            html += createByte('61', 'c-field', 'a');
+            html += createByte('63', 'c-field', 'c');
+            html += createByte('74', 'c-field', 't');
+            html += createByte('69', 'c-field', 'i');
+            html += createByte('76', 'c-field', 'v');
+            html += createByte('65', 'c-field', 'e');
+
+            size += 5 + 7 + 9;
+
+            // Values
+            // Int ID
+            html += createByte(hex((id >> 24) & 0xFF), 'c-value', 'Val Hi');
+            html += createByte(hex((id >> 16) & 0xFF), 'c-value', 'Val');
+            html += createByte(hex((id >> 8) & 0xFF), 'c-value', 'Val');
+            html += createByte(hex(id & 0xFF), 'c-value', 'Val Lo');
+
+            // Bool Active
+            html += createByte(active ? '01' : '00', 'c-value', 'Bool Val');
+
+            // String Name
+            html += createByte('74', 'c-marker', 'TC_STRING');
+            html += createByte(hex(name.length), 'c-overhead', 'Str Len');
+            for (let i = 0; i < name.length; i++) {
+                html += createByte(hex(name.charCodeAt(i)), 'c-value', name[i]);
+            }
+            size += 4 + 1 + 1 + 1 + name.length;
+
+            // End BlockData
+            html += createByte('78', 'c-marker', 'TC_ENDBLOCKDATA');
+            size += 1;
+
+            document.getElementById('viz-java').innerHTML = html;
+            document.getElementById('size-java').innerText = size + " bytes (approx)";
+        }
+
+        // 2. JSON RENDERER
+        // {"id":1001,"name":"Alice","active":true}
+        function renderJson(id, name, active) {
+            let html = '';
+            let jsonStr = `{"id":${id},"name":"${name}","active":${active}}`;
+
+            for (let i = 0; i < jsonStr.length; i++) {
+                let char = jsonStr[i];
+                let type = 'c-value';
+
+                if (['{', '}', ':', ',', '"'].includes(char)) type = 'c-overhead';
+                if (jsonStr.substring(i).startsWith('"id"') || jsonStr.substring(i).startsWith('"name"') || jsonStr.substring(i).startsWith('"active"')) {
+                    // This is crude highlighting logic for demo
+                    // In a real loop checking exact state is harder
+                }
+
+                // Simple heuristics for demo color
+                if (char === '"') type = 'c-overhead';
+                else if (jsonStr.substring(i - 4, i) === '"id"') type = 'c-value'; // value part
+
+                // Actually, let's just highlight keys vs values manually for clearer demo
+                // Parsing manually to colorize
+            }
+
+            // Cleaner loop
+            let parts = [
+                { t: '{', c: 'c-overhead' },
+                { t: '"id"', c: 'c-field' }, { t: ':', c: 'c-overhead' }, { t: id.toString(), c: 'c-value' }, { t: ',', c: 'c-overhead' },
+                { t: '"name"', c: 'c-field' }, { t: ':', c: 'c-overhead' }, { t: '"' + name + '"', c: 'c-value' }, { t: ',', c: 'c-overhead' },
+                { t: '"active"', c: 'c-field' }, { t: ':', c: 'c-overhead' }, { t: active.toString(), c: 'c-value' },
+                { t: '}', c: 'c-overhead' }
+            ];
+
+            let size = 0;
+            parts.forEach(p => {
+                for (let i = 0; i < p.t.length; i++) {
+                    html += createByte(p.t[i], p.c, 'ASCII');
+                    size++;
+                }
+            });
+
+            document.getElementById('viz-json').innerHTML = html;
+            document.getElementById('size-json').innerText = size + " bytes";
+        }
+
+        // 3. PROTOBUF / CUSTOM
+        // Tag-Length-Value
+        function renderProto(id, name, active) {
+            let html = '';
+            let size = 0;
+
+            // Field 1: ID (Tag 1, Type Int/Varint) -> (1 << 3) | 0 = 0x08
+            html += createByte('08', 'c-marker', 'Tag 1 (Varint)');
+            size++;
+
+            // Varint Encoding of ID
+            let val = id;
+            while (val >= 128) {
+                html += createByte(hex((val & 0x7F) | 0x80), 'c-value', 'Varint Part');
+                val = val >>> 7;
+                size++;
+            }
+            html += createByte(hex(val), 'c-value', 'Varint End');
+            size++;
+
+            // Field 2: Name (Tag 2, Type LenDelim) -> (2 << 3) | 2 = 0x12
+            html += createByte('12', 'c-marker', 'Tag 2 (String)');
+            size++;
+            // Length
+            html += createByte(hex(name.length), 'c-overhead', 'Length');
+            size++;
+            // Bytes
+            for (let i = 0; i < name.length; i++) {
+                html += createByte(hex(name.charCodeAt(i)), 'c-value', name[i]);
+                size++;
+            }
+
+            // Field 3: Active (Tag 3, Varint) -> (3 << 3) | 0 = 0x18
+            html += createByte('18', 'c-marker', 'Tag 3 (Bool)');
+            size++;
+            html += createByte(active ? '01' : '00', 'c-value', 'Val');
+            size++;
+
+            document.getElementById('viz-proto').innerHTML = html;
+            document.getElementById('size-proto').innerText = size + " bytes";
+        }
+
+        // Init
+        updateViz();
+    </script>
+</body>
+
+</html>

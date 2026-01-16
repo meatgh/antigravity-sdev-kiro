@@ -1,0 +1,109 @@
+
+html_content = """
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background: #1a1a1a; color: #fff; text-align: center; }
+        .controls { margin-top: 20px; }
+        button { padding: 8px 16px; margin: 4px; cursor: pointer; border: 1px solid #555; background: #444; color: white; border-radius: 4px; }
+        button:hover { background: #555; }
+        #canvas { margin-top: 30px; display: flex; justify-content: center; min-height: 250px; }
+        .bucket { fill: #333; stroke: #555; stroke-width: 2px; }
+        .item text { font-family: monospace; font-size: 14px; fill: white; text-anchor: middle; }
+        .type-label { font-size: 10px; fill: #aaa; }
+        #log { font-family: monospace; color: #4CAF50; margin-top: 10px; min-height: 20px; }
+    </style>
+</head>
+<body>
+    <h2>Type-Safe Heterogeneous Container</h2>
+    <p>A Map where the KEY is the TYPE itself (Class&lt;T&gt;).</p>
+
+    <div class="controls">
+        <button onclick="put('String', 'Hello World', '#E91E63')">put(String.class, "Hello")</button>
+        <button onclick="put('Integer', 42, '#2196F3')">put(Integer.class, 42)</button>
+        <button onclick="put('Double', 3.14, '#FF9800')">put(Double.class, 3.14)</button>
+        <button onclick="get('String')">get(String.class)</button>
+    </div>
+    
+    <div id="log">Favorites: {}</div>
+    <div id="canvas"></div>
+
+    <script>
+        const width = 600, height = 300;
+        const svg = d3.select("#canvas").append("svg").attr("width", width).attr("height", height);
+        
+        let data = [];
+        
+        // Draw Container Box
+        svg.append("rect")
+            .attr("x", 50).attr("y", 50).attr("width", 500).attr("height", 200)
+            .attr("rx", 10).attr("ry", 10)
+            .attr("fill", "#222").attr("stroke", "#444").attr("stroke-width", 2);
+            
+        svg.append("text").attr("x", 70).attr("y", 80).text("Map<Class<?>, Object> favorites").attr("fill", "#888");
+
+        function update() {
+            const items = svg.selectAll(".item").data(data, d => d.type);
+            
+            const enter = items.enter().append("g")
+                .attr("class", "item")
+                .attr("transform", (d, i) => `translate(${100 + i * 120}, 150)`); // Initial
+                
+            enter.append("rect")
+                .attr("width", 100).attr("height", 60)
+                .attr("rx", 5).attr("ry", 5)
+                .attr("fill", d => d.color)
+                .attr("opacity", 0)
+                .transition().duration(500).attr("opacity", 1);
+                
+            enter.append("text")
+                .attr("x", 50).attr("y", 25)
+                .attr("class", "val")
+                .text(d => d.value);
+                
+            enter.append("text")
+                .attr("x", 50).attr("y", 50)
+                .attr("class", "type-label")
+                .text(d => "Key: " + d.type + ".class");
+
+            items.attr("transform", (d, i) => `translate(${100 + i * 120}, 150)`);
+            
+            items.exit().transition().duration(500).attr("opacity", 0).remove();
+        }
+
+        function put(type, val, color) {
+            // Remove existing of same type
+            data = data.filter(d => d.type !== type);
+            data.push({ type: type, value: val, color: color });
+            update();
+            log(`favorites.put(${type}.class, ${JSON.stringify(val)})`);
+        }
+
+        function get(type) {
+            const item = data.find(d => d.type === type);
+            if (item) {
+                // Highlight
+                svg.selectAll(".item").filter(d => d.type === type)
+                    .select("rect")
+                    .transition().duration(200).attr("stroke", "white").attr("stroke-width", 4)
+                    .transition().duration(200).attr("stroke", "none");
+                log(`favorites.get(${type}.class) -> Returns ${JSON.stringify(item.value)} (Type Safe!)`);
+            } else {
+                log(`favorites.get(${type}.class) -> null`);
+            }
+        }
+        
+        function log(msg) {
+            document.getElementById("log").textContent = "> " + msg;
+        }
+
+    </script>
+</body>
+</html>
+"""
+
+with open("heterogeneous_container.html", "w") as f:
+    f.write(html_content)
+print("✅ Generated heterogeneous_container.html")

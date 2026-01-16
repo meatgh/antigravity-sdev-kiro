@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Reactive Streams</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', system-ui;
+            background: #222;
+            color: #fff;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .stream-line {
+            stroke: #555;
+            stroke-width: 2px;
+        }
+
+        .marble {
+            fill: #2196F3;
+            stroke: #fff;
+        }
+
+        .requested {
+            fill: none;
+            stroke: #4CAF50;
+            stroke-dasharray: 4;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 10px;
+            cursor: pointer;
+            background: #009688;
+            border: none;
+            color: white;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Reactive Backpressure: request(n)</h1>
+    <p>Subscriber asks. Publisher delivers.</p>
+    <button class="btn" onclick="request(1)">Subscription.request(1)</button>
+    <svg width="800" height="400" id="viz">
+        <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"
+                markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L9,3 z" fill="#fff" />
+            </marker>
+        </defs>
+    </svg>
+
+    <script>
+        const svg = d3.select("#viz");
+
+        // Lines
+        svg.append("line").attr("x1", 50).attr("y1", 100).attr("x2", 750).attr("y2", 100).attr("class", "stream-line").attr("marker-end", "url(#arrow)");
+        svg.append("text").attr("x", 50).attr("y", 80).text("Time ->");
+
+        svg.append("text").attr("x", 100).attr("y", 150).text("Publisher (Source)").style("fill", "#2196F3");
+        svg.append("text").attr("x", 700).attr("y", 150).text("Subscriber (Sink)").style("fill", "#4CAF50");
+
+        let time = 100;
+
+        function request(n) {
+            const t = time;
+            time += 100;
+
+            // Demand Signal (Right to Left)
+            svg.append("circle")
+                .attr("cx", 700).attr("cy", 200).attr("r", 5).style("fill", "#4CAF50")
+                .transition().duration(1000).attr("cx", 100)
+                .on("end", function () {
+                    d3.select(this).remove();
+                    emit(t);
+                });
+
+            svg.append("text").attr("x", 400).attr("y", 220).text("request(" + n + ")").style("fill", "#4CAF50").transition().duration(1000).attr("x", 100).remove();
+        }
+
+        function emit(startTime) {
+            // Data Signal (Left to Right)
+            svg.append("circle")
+                .attr("cx", 100).attr("cy", 100).attr("r", 15).attr("class", "marble")
+                .transition().duration(1000).attr("cx", 700);
+        }
+    </script>
+</body>
+
+</html>

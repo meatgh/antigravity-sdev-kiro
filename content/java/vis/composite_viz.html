@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Composite Pattern: Recursive File System</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1e1e1e;
+            color: #fff;
+            text-align: center;
+        }
+
+        #viz {
+            width: 800px;
+            height: 500px;
+            margin: 0 auto;
+            background: #252526;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        .node circle {
+            fill: #999;
+            stroke: #fff;
+            stroke-width: 2px;
+            cursor: pointer;
+        }
+
+        .node text {
+            font-size: 14px;
+            fill: #fff;
+            font-weight: bold;
+            pointer-events: none;
+            text-anchor: middle;
+        }
+
+        .link {
+            fill: none;
+            stroke: #555;
+            stroke-width: 2px;
+        }
+
+        .node--leaf circle {
+            fill: #4CAF50;
+        }
+
+        .node--composite circle {
+            fill: #FF9800;
+        }
+
+        #controls {
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 14px;
+            background: #333;
+            border: 1px solid #555;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 0 5px;
+        }
+
+        button:hover {
+            background: #555;
+        }
+
+        #status {
+            margin-top: 15px;
+            font-family: monospace;
+            color: #00bcd4;
+            min-height: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Composite Pattern: File System Sizer</h2>
+    <div id="viz"></div>
+    <div id="controls">
+        <button onclick="calculateSize()">Recursive getSize()</button>
+        <button onclick="resetTree()">Reset</button>
+    </div>
+    <div id="status">Click Orange Nodes to Expand/Collapse. Click Green to see size.</div>
+
+    <script>
+        const treeData = {
+            "name": "root", "type": "dir",
+            "children": [
+                {
+                    "name": "usr", "type": "dir",
+                    "children": [
+                        {
+                            "name": "bin", "type": "dir", "children": [
+                                { "name": "java", "type": "file", "size": 150 },
+                                { "name": "docker", "type": "file", "size": 300 }
+                            ]
+                        },
+                        {
+                            "name": "lib", "type": "dir", "children": [
+                                { "name": "libc.so", "type": "file", "size": 80 }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "name": "home", "type": "dir",
+                    "children": [
+                        {
+                            "name": "user", "type": "dir", "children": [
+                                { "name": "notes.txt", "type": "file", "size": 5 },
+                                { "name": "photo.jpg", "type": "file", "size": 2000 }
+                            ]
+                        }
+                    ]
+                },
+                { "name": "boot.ini", "type": "file", "size": 1 }
+            ]
+        };
+
+        const margin = { top: 20, right: 90, bottom: 30, left: 90 },
+            width = 800 - margin.left - margin.right,
+            height = 500 - margin.top - margin.bottom;
+
+        const svg = d3.select("#viz").append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+        let i = 0, duration = 750, root;
+        const treemap = d3.tree().size([height, width]);
+
+        root = d3.hierarchy(treeData, d => d.children);
+        root.x0 = height / 2;
+        root.y0 = 0;
+
+        // Recursively set size for initial display (just for info)
+        function calcSize(d) {
+            if (d.type === 'file') return d.size;
+            if (d.children) {
+                d.size = d.children.reduce((acc, c) => acc + calcSize(c), 0);
+            } else if (d._children) {
+                d.size = d._children.reduce((acc, c) => acc + calcSize(c), 0);
+            }
+            return d.size || 0;
+        }
+
+        update(root);
+
+        function update(source) {
+            const treeData = treemap(root);
+            const nodes = treeData.descendants();
+            const links = treeData.descendants().slice(1);
+
+            nodes.forEach(d => d.y = d.depth * 150);
+
+            const node = svg.selectAll('g.node')
+                .data(nodes, d => d.id || (d.id = ++i));
+
+            const nodeEnter = node.enter().append('g')
+                .attr('class', d => "node node--" + (d.data.type === 'dir' ? 'composite' : 'leaf'))
+                .attr("transform", d => "translate(" + source.y0 + "," + source.x0 + ")")
+                .on('click', click);
+
+            nodeEnter.append('circle')
+                .attr('r', 1e-6)
+                .style("fill", d => d._children ? "#FF9800" : (d.data.type === 'dir' ? "#FFCB76" : "#4CAF50"));
+
+            nodeEnter.append('text')
+                .attr("dy", ".35em")
+                .attr("x", d => d.children || d._children ? -13 : 13)
+                .attr("text-anchor", d => d.children || d._children ? "end" : "start")
+                .text(d => d.data.name);
+
+            const nodeUpdate = node.merge(nodeEnter);
+
+            nodeUpdate.transition().duration(duration)
+                .attr("transform", d => "translate(" + d.y + "," + d.x + ")");
+
+            nodeUpdate.select('circle')
+                .attr('r', 10)
+                .style("fill", d => d._children ? "#FF9800" : (d.data.type === 'dir' ? "#FFCB76" : "#4CAF50")); // Closed=DarkOrange, Open=LightOrange, Leaf=Green
+
+            const nodeExit = node.exit().transition().duration(duration)
+                .attr("transform", d => "translate(" + source.y + "," + source.x + ")")
+                .remove();
+
+            nodeExit.select('circle').attr('r', 1e-6);
+            nodeExit.select('text').style('fill-opacity', 1e-6);
+
+            const link = svg.selectAll('path.link')
+                .data(links, d => d.id);
+
+            const linkEnter = link.enter().insert('path', "g")
+                .attr("class", "link")
+                .attr('d', d => {
+                    const o = { x: source.x0, y: source.y0 };
+                    return diagonal(o, o);
+                });
+
+            const linkUpdate = link.merge(linkEnter);
+            linkUpdate.transition().duration(duration).attr('d', d => diagonal(d, d.parent));
+
+            const linkExit = link.exit().transition().duration(duration)
+                .attr('d', d => {
+                    const o = { x: source.x, y: source.y };
+                    return diagonal(o, o);
+                })
+                .remove();
+
+            nodes.forEach(d => {
+                d.x0 = d.x;
+                d.y0 = d.y;
+            });
+        }
+
+        function diagonal(s, d) {
+            return `M ${s.y} ${s.x}
+                    C ${(s.y + d.y) / 2} ${s.x},
+                      ${(s.y + d.y) / 2} ${d.x},
+                      ${d.y} ${d.x}`;
+        }
+
+        function click(event, d) {
+            if (d.data.type === 'file') {
+                document.getElementById('status').innerText = `File: ${d.data.name} (${d.data.size}kb)`;
+                return;
+            }
+            if (d.children) {
+                d._children = d.children;
+                d.children = null;
+            } else {
+                d.children = d._children;
+                d._children = null;
+            }
+            update(d);
+        }
+
+        async function calculateSize() {
+            // Animate a traversal
+            const nodes = root.descendants();
+            let total = 0;
+            for (let n of nodes) {
+                // Blink
+                d3.select(n.nodeElement).select('circle').attr('r', 15).style('stroke', 'white');
+                let val = n.data.size || 0;
+                if (n.data.type === 'file') total += val;
+                document.getElementById('status').innerText = `Visiting ${n.data.name}... Current Total: ${total}kb`;
+                await new Promise(r => setTimeout(r, 200));
+                // Reset
+                update(root);
+            }
+            document.getElementById('status').innerText = `COMPLETE. Total Size: ${total}kb`;
+        }
+    </script>
+</body>
+
+</html>

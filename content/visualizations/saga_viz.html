@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>SAGA Distributed Transaction</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Verdana', sans-serif;
+            background: #fff;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .service {
+            fill: #2196F3;
+            stroke: #1976D2;
+            rx: 5;
+        }
+
+        .service-text {
+            fill: #fff;
+            font-size: 14px;
+            text-anchor: middle;
+            font-weight: bold;
+        }
+
+        .success {
+            fill: #4CAF50;
+        }
+
+        .fail {
+            fill: #f44336;
+        }
+
+        .compensated {
+            fill: #FF9800;
+            stroke-dasharray: 4;
+        }
+
+        .arrow {
+            stroke: #333;
+            stroke-width: 2px;
+            marker-end: url(#arrow);
+        }
+
+        .rollback-arrow {
+            stroke: #FF9800;
+            stroke-width: 2px;
+            stroke-dasharray: 4;
+            marker-end: url(#arrow-orange);
+        }
+
+        .btn {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>SAGA Pattern: Checkout Flow</h1>
+    <div>
+        <button class="btn" onclick="runSaga(true)">Simulate Success</button>
+        <button class="btn" onclick="runSaga(false)">Simulate Failure (at Payment)</button>
+    </div>
+    <svg width="800" height="300" id="viz">
+        <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"
+                markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L9,3 z" fill="#333" />
+            </marker>
+            <marker id="arrow-orange" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"
+                markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L9,3 z" fill="#FF9800" />
+            </marker>
+        </defs>
+    </svg>
+    <script>
+        const svg = d3.select("#viz");
+        const services = [
+            { id: 0, name: "Order", x: 100 },
+            { id: 1, name: "Inventory", x: 300 },
+            { id: 2, name: "Payment", x: 500 },
+            { id: 3, name: "Shipping", x: 700 }
+        ];
+
+        // Draw Services
+        const g = svg.selectAll(".svc").data(services).enter().append("g").attr("class", "svc");
+        g.append("rect")
+            .attr("x", d => d.x).attr("y", 100).attr("width", 100).attr("height", 60)
+            .attr("class", "service").attr("id", d => "svc-" + d.id);
+        g.append("text").attr("x", d => d.x + 50).attr("y", 135).text(d => d.name).attr("class", "service-text");
+
+        // Links
+        d3.range(3).forEach(i => {
+            svg.append("line").attr("x1", 200 + i * 200).attr("y1", 130).attr("x2", 300 + i * 200).attr("y2", 130).attr("class", "arrow");
+        });
+
+        async function runSaga(success) {
+            // Reset
+            d3.selectAll(".service").attr("class", "service").style("fill", "#2196F3");
+
+            // Step 1: Order
+            await sleep(500);
+            d3.select("#svc-0").style("fill", "#4CAF50"); // Green
+
+            // Step 2: Inventory
+            await sleep(500);
+            d3.select("#svc-1").style("fill", "#4CAF50");
+
+            // Step 3: Payment
+            await sleep(500);
+            if (success) {
+                d3.select("#svc-2").style("fill", "#4CAF50");
+                await sleep(500);
+                d3.select("#svc-3").style("fill", "#4CAF50");
+            } else {
+                d3.select("#svc-2").style("fill", "#f44336"); // Red
+
+                // Rollback
+                await sleep(500);
+                d3.select("#svc-1").style("fill", "#FF9800"); // Orange
+                await sleep(500);
+                d3.select("#svc-0").style("fill", "#FF9800");
+                alert("SAGA Compensation Complete: Order Cancelled, Inventory Released.");
+            }
+        }
+
+        function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+    </script>
+</body>
+
+</html>

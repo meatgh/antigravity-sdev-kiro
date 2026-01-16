@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Visitor Pattern: AST Traversal</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1e1e1e;
+            color: #fff;
+            text-align: center;
+        }
+
+        #viz {
+            width: 800px;
+            height: 500px;
+            margin: 0 auto;
+            background: #252526;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        .node circle {
+            fill: #333;
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+
+        .node text {
+            font-size: 14px;
+            fill: #fff;
+            font-weight: bold;
+            pointer-events: none;
+            text-anchor: middle;
+            dy: 0.35em;
+        }
+
+        .link {
+            fill: none;
+            stroke: #555;
+            stroke-width: 2px;
+        }
+
+        .visitor {
+            fill: #FF9800;
+            stroke: #fff;
+            stroke-width: 2px;
+            r: 10;
+        }
+
+        #controls {
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #007acc;
+            border: none;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #0098ff;
+        }
+
+        #status {
+            margin-top: 15px;
+            font-family: monospace;
+            color: #00ff00;
+            height: 30px;
+        }
+
+        #callstack {
+            margin-top: 15px;
+            font-family: monospace;
+            color: #aaa;
+            height: 60px;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Visitor Pattern: Double Dispatch</h2>
+    <div id="viz"></div>
+    <div id="controls">
+        <button onclick="startEval()">Run EvaluateVisitor</button>
+        <button onclick="startPrint()">Run PrintVisitor</button>
+    </div>
+    <div id="status">Ready...</div>
+    <div id="callstack">Stack: [Empty]</div>
+
+    <script>
+        const width = 800, height = 500;
+        const svg = d3.select("#viz").append("svg").attr("width", width).attr("height", height);
+
+        // AST: (3 + (4 * 5))
+        const data = {
+            name: "+", type: "Add", value: null,
+            children: [
+                { name: "3", type: "Num", value: 3 },
+                {
+                    name: "*", type: "Mult", value: null,
+                    children: [
+                        { name: "4", type: "Num", value: 4 },
+                        { name: "5", type: "Num", value: 5 }
+                    ]
+                }
+            ]
+        };
+
+        const root = d3.hierarchy(data);
+        const treeLayout = d3.tree().size([700, 400]);
+        treeLayout(root);
+
+        // Shift tree to center
+        root.descendants().forEach(d => { d.y += 50; d.x += 50; });
+
+        // Links
+        svg.selectAll(".link")
+            .data(root.links())
+            .enter().append("path")
+            .attr("class", "link")
+            .attr("d", d3.linkVertical().x(d => d.x).y(d => d.y));
+
+        // Nodes
+        const nodes = svg.selectAll(".node")
+            .data(root.descendants())
+            .enter().append("g")
+            .attr("class", "node")
+            .attr("transform", d => `translate(${d.x},${d.y})`);
+
+        nodes.append("circle").attr("r", 20);
+        nodes.append("text").attr("dy", 5).text(d => d.data.name);
+
+        const visitor = svg.append("circle").attr("class", "visitor").attr("r", 0);
+
+        function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+        async function visitNode(node, visitorName) {
+            // Move visitor
+            visitor.transition().duration(500).attr("cx", node.x).attr("cy", node.y).attr("r", 15);
+            await sleep(500);
+
+            // Double Dispatch Animation
+            document.getElementById("status").innerText = `1. ${node.data.type}.accept(v)`;
+            document.getElementById("callstack").innerText = `Stack:\n> ${node.data.type}.accept()`;
+            await sleep(800);
+
+            document.getElementById("status").innerText = `2. v.visit${node.data.type}(this)`;
+            document.getElementById("callstack").innerText = `Stack:\n> ${node.data.type}.accept()\n  > ${visitorName}.visit${node.data.type}()`;
+            await sleep(800);
+        }
+
+        async function traverse(node, type) {
+            await visitNode(node, type);
+
+            if (node.children) {
+                // Post-order for Eval, Pre-order for Print? 
+                // Let's do In-Order for visualization simplicity of flow
+                for (let child of node.children) {
+                    await traverse(child, type);
+                    // Return to parent
+                    visitor.transition().duration(300).attr("cx", node.x).attr("cy", node.y);
+                    await sleep(300);
+                }
+            }
+
+            document.getElementById("status").innerText = `Processed: ${node.data.name}`;
+            await sleep(300);
+        }
+
+        async function startEval() {
+            visitor.attr("fill", "#FF9800"); // Orange
+            await traverse(root, "EvalVisitor");
+            document.getElementById("status").innerText = "Result: 23";
+            document.getElementById("callstack").innerText = "Done.";
+            visitor.transition().attr("r", 0);
+        }
+
+        async function startPrint() {
+            visitor.attr("fill", "#00E676"); // Green
+            await traverse(root, "PrintVisitor");
+            document.getElementById("status").innerText = "Output: (+ 3 (* 4 5))";
+            document.getElementById("callstack").innerText = "Done.";
+            visitor.transition().attr("r", 0);
+        }
+    </script>
+</body>
+
+</html>

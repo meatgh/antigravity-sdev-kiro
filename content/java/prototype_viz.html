@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prototype Pattern - Cellular Cloning</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a2e;
+            color: #e0e0e0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            width: 90%;
+            max-width: 1000px;
+            background: #16213e;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            margin-top: 20px;
+        }
+        h2 { border-bottom: 2px solid #0f3460; padding-bottom: 10px; color: #e94560; }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            background: #0f3460;
+            padding: 15px;
+            border-radius: 8px;
+            align-items: center;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        .clone-btn { background-color: #e94560; color: white; }
+        .clone-btn:hover { background-color: #c12945; transform: translateY(-2px); }
+        .reset-btn { background-color: #533483; color: white; }
+        .viz-area {
+            height: 400px;
+            background: #0f3460;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+        .code-panel {
+            margin-top: 20px;
+            background: #000;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Consolas', monospace;
+            color: #00ff00;
+            height: 100px;
+            overflow-y: auto;
+            border: 1px solid #333;
+        }
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🧬 The Prototype Pattern: Biological Cloning</h2>
+        <p>Creating complex objects from scratch (<code>new Cell()</code>) is slow. Cloning an existing prototype is fast.</p>
+        
+        <div class="stats">
+            <div>Cells: <span id="cell-count">1</span></div>
+            <div>Creation Time: <span id="time-cost">0 ms</span></div>
+        </div>
+
+        <div class="controls">
+            <button class="clone-btn" onclick="cloneCells(1)">Clone (x2)</button>
+            <button class="clone-btn" onclick="cloneCells(5)">Mass Clone (x5)</button>
+            <button class="reset-btn" onclick="reset()">Reset</button>
+            <label><input type="checkbox" id="deep-copy" checked> Deep Copy DNA</label>
+        </div>
+
+        <div class="viz-area" id="viz"></div>
+
+        <div class="code-panel" id="log">
+            > System initialized. Prototype Cell ready.
+        </div>
+    </div>
+
+    <script>
+        const viz = d3.select("#viz");
+        const width = viz.node().getBoundingClientRect().width;
+        const height = 400;
+        const svg = viz.append("svg").attr("width", "100%").attr("height", "100%");
+
+        let cells = [{id: 0, x: width/2, y: height/2, r: 20, color: '#4cc9f0', dna: 'ATCG'}];
+        let idCounter = 1;
+
+        function render() {
+            const simulation = d3.forceSimulation(cells)
+                .force("charge", d3.forceManyBody().strength(-30))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("collision", d3.forceCollide().radius(25))
+                .on("tick", ticked);
+
+            function ticked() {
+                const u = svg.selectAll("circle")
+                    .data(cells, d => d.id);
+
+                u.enter()
+                    .append("circle")
+                    .attr("r", 0)
+                    .attr("fill", d => d.color)
+                    .merge(u)
+                    .attr("cx", d => d.x)
+                    .attr("cy", d => d.y)
+                    .transition().duration(500)
+                    .attr("r", d => d.r);
+
+                u.exit().remove();
+            }
+        }
+
+        function log(msg) {
+            const el = document.getElementById('log');
+            el.innerHTML += `<div>> ${msg}</div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function cloneCells(multiplier) {
+            const start = performance.now();
+            const currentCount = cells.length;
+            const limit = 100;
+
+            if (currentCount >= limit) {
+                log("⚠️ Petri dish full! Cannot clone.");
+                return;
+            }
+
+            const newCells = [];
+            for (let i = 0; i < currentCount * multiplier && (cells.length + newCells.length) < limit; i++) {
+                // Select a random parent to clone
+                const parent = cells[Math.floor(Math.random() * cells.length)];
+                
+                // PROTOTYPE PATTERN: clone()
+                const clone = {
+                    id: idCounter++,
+                    x: parent.x + (Math.random() - 0.5) * 50,
+                    y: parent.y + (Math.random() - 0.5) * 50,
+                    r: 20,
+                    color: document.getElementById('deep-copy').checked ? parent.color : '#ff0055', // Mutation if shallow?
+                    dna: parent.dna // Shared ref if shallow (metaphorically)
+                };
+                newCells.push(clone);
+            }
+
+            cells = [...cells, ...newCells];
+            const end = performance.now();
+            
+            document.getElementById('cell-count').innerText = cells.length;
+            document.getElementById('time-cost').innerText = (end - start).toFixed(2) + " ms";
+            log(`Cloned ${newCells.length} cells via Prototype.`);
+            render();
+        }
+
+        function reset() {
+            cells = [{id: 0, x: width/2, y: height/2, r: 20, color: '#4cc9f0', dna: 'ATCG'}];
+            idCounter = 1;
+            document.getElementById('cell-count').innerText = 1;
+            log("System reset.");
+            render();
+        }
+
+        render();
+    </script>
+</body>
+</html>

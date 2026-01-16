@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Garbage Collection Simulator</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+            color: #569cd6;
+        }
+
+        .heap {
+            display: flex;
+            gap: 20px;
+            width: 100%;
+            max-width: 1000px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 20px;
+            background: #252526;
+        }
+
+        .generation {
+            border: 1px dashed #555;
+            position: relative;
+        }
+
+        .eden {
+            width: 30%;
+            border-color: #60a917;
+        }
+
+        .survivor {
+            width: 20%;
+            border-color: #e3a21a;
+        }
+
+        .old {
+            width: 50%;
+            border-color: #ce9178;
+        }
+
+        .title {
+            position: absolute;
+            top: -25px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .object {
+            width: 10px;
+            height: 10px;
+            background: #fff;
+            position: absolute;
+            border-radius: 50%;
+            transition: all 0.5s;
+        }
+
+        .live {
+            background: #0f0;
+        }
+
+        .dead {
+            background: #f00;
+            opacity: 0.5;
+        }
+
+        .controls {
+            margin-top: 20px;
+        }
+
+        button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 5px 10px;
+            margin: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #444;
+        }
+
+        .log {
+            margin-top: 20px;
+            width: 800px;
+            height: 100px;
+            background: #111;
+            border: 1px solid #333;
+            overflow-y: auto;
+            padding: 5px;
+            color: #0f0;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>GC Simulator: Generational Hypothesis</h1>
+
+    <div class="heap">
+        <div class="generation eden" id="eden">
+            <div class="title" style="color:#60a917">Eden Space (Young)</div>
+        </div>
+        <div class="generation survivor" id="survivor">
+            <div class="title" style="color:#e3a21a">Survivor Space</div>
+        </div>
+        <div class="generation old" id="old">
+            <div class="title" style="color:#ce9178">Old Gen (Tenured)</div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button onclick="allocate()">Allocate Objects</button>
+        <button onclick="minorGC()">Run Minor GC</button>
+        <button onclick="majorGC()">Run Major GC</button>
+    </div>
+
+    <div class="log" id="log"></div>
+
+    <script>
+        const eden = document.getElementById("eden");
+        const survivor = document.getElementById("survivor");
+        const old = document.getElementById("old");
+        let objects = [];
+
+        function log(msg) {
+            const l = document.getElementById("log");
+            l.innerHTML += `> ${msg}<br>`;
+            l.scrollTop = l.scrollHeight;
+        }
+
+        function createObject(gen, age) {
+            const obj = document.createElement("div");
+            obj.className = "object live";
+            obj.style.left = Math.random() * (gen.offsetWidth - 15) + "px";
+            obj.style.top = Math.random() * (gen.offsetHeight - 15) + "px";
+            gen.appendChild(obj);
+            return { el: obj, gen: gen, age: age, dead: false };
+        }
+
+        function allocate() {
+            log("Allocating 10 objects in Eden...");
+            for (let i = 0; i < 10; i++) {
+                objects.push(createObject(eden, 0));
+            }
+        }
+
+        function minorGC() {
+            log("Running Minor GC (Stop-The-World)...");
+
+            // 1. Mark (Randomly kill 70% of objects in Eden)
+            let survivors = 0;
+            objects.forEach(o => {
+                if (o.gen === eden && !o.dead) {
+                    if (Math.random() < 0.7) {
+                        o.dead = true; // Died young
+                        o.el.className = "object dead";
+                    } else {
+                        survivors++;
+                    }
+                }
+            });
+
+            setTimeout(() => {
+                // 2. Sweep (Remove dead)
+                objects = objects.filter(o => {
+                    if (o.dead) {
+                        o.el.remove();
+                        return false;
+                    }
+                    return true;
+                });
+
+                // 3. Promote (Eden -> Survivor, Survivor -> Old)
+                objects.forEach(o => {
+                    if (o.gen === eden) {
+                        o.age++;
+                        o.gen = survivor;
+                        survivor.appendChild(o.el);
+                        // Reset pos
+                        o.el.style.left = Math.random() * (survivor.offsetWidth - 15) + "px";
+                        o.el.style.top = Math.random() * (survivor.offsetHeight - 15) + "px";
+                    } else if (o.gen === survivor) {
+                        o.age++;
+                        if (o.age > 2) { // Promotion Threshold
+                            o.gen = old;
+                            old.appendChild(o.el);
+                            o.el.style.left = Math.random() * (old.offsetWidth - 15) + "px";
+                            o.el.style.top = Math.random() * (old.offsetHeight - 15) + "px";
+                            log("Object Promoted to Old Gen!");
+                        }
+                    }
+                });
+
+                log(`Minor GC Done. ${survivors} survivors promoted/aged.`);
+            }, 1000);
+        }
+
+        function majorGC() {
+            log("Running Major GC (Old Gen)...");
+            objects.forEach(o => {
+                if (o.gen === old) {
+                    if (Math.random() < 0.2) { // Old objects die hard
+                        o.dead = true;
+                        o.el.className = "object dead";
+                    }
+                }
+            });
+            setTimeout(() => {
+                objects = objects.filter(o => {
+                    if (o.dead) {
+                        o.el.remove();
+                        return false;
+                    }
+                    return true;
+                });
+                log("Major GC Done.");
+            }, 1000);
+
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Interpreter Pattern: AST Evaluator</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            text-align: center;
+            padding: 20px;
+        }
+
+        #viz {
+            width: 700px;
+            height: 400px;
+            margin: 20px auto;
+            background: #16213e;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        .node circle {
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+
+        .node text {
+            font-size: 12px;
+            fill: #fff;
+            font-weight: bold;
+            pointer-events: none;
+        }
+
+        .link {
+            fill: none;
+            stroke: #555;
+            stroke-width: 2px;
+        }
+
+        .node--terminal circle {
+            fill: #4CAF50;
+        }
+
+        .node--nonterminal circle {
+            fill: #FF9800;
+        }
+
+        .node--result circle {
+            fill: #e94560;
+        }
+
+        #controls {
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 14px;
+            background: #0f3460;
+            border: 1px solid #e94560;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 0 5px;
+        }
+
+        button:hover {
+            background: #e94560;
+        }
+
+        #expression-input {
+            padding: 10px;
+            font-size: 16px;
+            width: 300px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background: #16213e;
+            color: #fff;
+        }
+
+        #status {
+            margin-top: 15px;
+            font-family: monospace;
+            color: #00bcd4;
+            min-height: 40px;
+            font-size: 14px;
+        }
+
+        h2 {
+            color: #e94560;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Interpreter Pattern: Expression AST Evaluator</h2>
+    <input type="text" id="expression-input" value="(5 + 3) * 2" placeholder="Enter expression..." />
+    <div id="controls">
+        <button onclick="buildAst()">Build AST</button>
+        <button onclick="evaluateAst()">Evaluate Step-by-Step</button>
+    </div>
+    <div id="viz"></div>
+    <div id="status">Enter an expression like "(5 + 3) * 2" and click Build AST.</div>
+
+    <script>
+        let currentAst = null;
+        let root = null;
+
+        // --- Simple Expression Parser (Shunting Yard + AST Build) ---
+        function tokenize(expr) {
+            const tokens = [];
+            let i = 0;
+            while (i < expr.length) {
+                if (/\s/.test(expr[i])) { i++; continue; }
+                if (/\d/.test(expr[i])) {
+                    let num = '';
+                    while (i < expr.length && /\d/.test(expr[i])) num += expr[i++];
+                    tokens.push({ type: 'NUM', value: parseInt(num) });
+                } else if ('+-*/'.includes(expr[i])) {
+                    tokens.push({ type: 'OP', value: expr[i++] });
+                } else if (expr[i] === '(') {
+                    tokens.push({ type: 'LPAREN' }); i++;
+                } else if (expr[i] === ')') {
+                    tokens.push({ type: 'RPAREN' }); i++;
+                } else { i++; }
+            }
+            return tokens;
+        }
+
+        function precedence(op) {
+            if (op === '+' || op === '-') return 1;
+            if (op === '*' || op === '/') return 2;
+            return 0;
+        }
+
+        function buildAstFromTokens(tokens) {
+            const outputQ = [];
+            const opStack = [];
+            for (const t of tokens) {
+                if (t.type === 'NUM') {
+                    outputQ.push({ name: String(t.value), type: 'terminal', value: t.value });
+                } else if (t.type === 'OP') {
+                    while (opStack.length && opStack[opStack.length - 1].type === 'OP' &&
+                        precedence(opStack[opStack.length - 1].value) >= precedence(t.value)) {
+                        outputQ.push(opStack.pop());
+                    }
+                    opStack.push({ name: t.value, type: 'nonterminal', op: t.value });
+                } else if (t.type === 'LPAREN') {
+                    opStack.push(t);
+                } else if (t.type === 'RPAREN') {
+                    while (opStack.length && opStack[opStack.length - 1].type !== 'LPAREN') {
+                        outputQ.push(opStack.pop());
+                    }
+                    opStack.pop(); // Remove LPAREN
+                }
+            }
+            while (opStack.length) outputQ.push(opStack.pop());
+
+            // Build tree from RPN
+            const nodeStack = [];
+            for (const item of outputQ) {
+                if (item.type === 'terminal') {
+                    nodeStack.push(item);
+                } else {
+                    const right = nodeStack.pop();
+                    const left = nodeStack.pop();
+                    const node = { name: item.name, type: 'nonterminal', op: item.op, children: [left, right] };
+                    nodeStack.push(node);
+                }
+            }
+            return nodeStack.length ? nodeStack[0] : null;
+        }
+
+        function buildAst() {
+            const expr = document.getElementById('expression-input').value;
+            const tokens = tokenize(expr);
+            currentAst = buildAstFromTokens(tokens);
+            if (!currentAst) {
+                document.getElementById('status').innerText = 'Error: Could not parse expression.';
+                return;
+            }
+            renderTree(currentAst);
+            document.getElementById('status').innerText = `AST Built for: ${expr}. Click "Evaluate Step-by-Step" to see interpretation.`;
+        }
+
+        async function evaluateAst() {
+            if (!currentAst) { buildAst(); await new Promise(r => setTimeout(r, 500)); }
+            document.getElementById('status').innerText = 'Evaluating...';
+            const result = await interpret(currentAst);
+            document.getElementById('status').innerHTML = `<b>Result: ${result}</b>`;
+            // Highlight result at root
+            d3.select("#viz svg g").selectAll(".node circle")
+                .filter(d => d.data === currentAst)
+                .transition().duration(300)
+                .style("fill", "#e94560").attr("r", 18);
+        }
+
+        async function interpret(node) {
+            // Highlight current node
+            d3.select("#viz svg g").selectAll(".node circle")
+                .filter(d => d.data === node)
+                .transition().duration(200)
+                .style("stroke", "#e94560").attr("r", 14);
+            await new Promise(r => setTimeout(r, 400));
+
+            if (node.type === 'terminal') {
+                return node.value;
+            }
+            const left = await interpret(node.children[0]);
+            const right = await interpret(node.children[1]);
+            let result;
+            switch (node.op) {
+                case '+': result = left + right; break;
+                case '-': result = left - right; break;
+                case '*': result = left * right; break;
+                case '/': result = left / right; break;
+                default: result = 0;
+            }
+            node.name = String(result); // Update name for visual
+            node.value = result;
+            node.type = 'result'; // Mark as computed
+            renderTree(currentAst); // Re-render
+            await new Promise(r => setTimeout(r, 300));
+            return result;
+        }
+
+        // --- D3.js Tree Rendering ---
+        function renderTree(data) {
+            d3.select("#viz").html(""); // Clear
+            const margin = { top: 40, right: 40, bottom: 40, left: 40 };
+            const width = 700 - margin.left - margin.right;
+            const height = 400 - margin.top - margin.bottom;
+
+            const svg = d3.select("#viz").append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", `translate(${margin.left + width / 2},${margin.top})`);
+
+            const treemap = d3.tree().size([width, height - 80]);
+            root = d3.hierarchy(data, d => d.children);
+            treemap(root);
+
+            // Links
+            svg.selectAll(".link")
+                .data(root.descendants().slice(1))
+                .enter().append("path")
+                .attr("class", "link")
+                .attr("d", d => `M${d.x},${d.y}C${d.x},${(d.y + d.parent.y) / 2} ${d.parent.x},${(d.y + d.parent.y) / 2} ${d.parent.x},${d.parent.y}`);
+
+            // Nodes
+            const node = svg.selectAll(".node")
+                .data(root.descendants())
+                .enter().append("g")
+                .attr("class", d => `node node--${d.data.type}`)
+                .attr("transform", d => `translate(${d.x},${d.y})`);
+
+            node.append("circle").attr("r", 12);
+            node.append("text").attr("dy", "0.35em").attr("text-anchor", "middle").text(d => d.data.name);
+        }
+    </script>
+</body>
+
+</html>

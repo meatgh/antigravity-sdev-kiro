@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Double Dispatch Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            color: #61dafb;
+        }
+
+        .controls {
+            margin: 20px;
+            padding: 10px;
+            background: #2d2d2d;
+            border-radius: 8px;
+        }
+
+        select {
+            padding: 8px;
+            border-radius: 4px;
+            border: none;
+            margin-right: 10px;
+        }
+
+        button {
+            padding: 8px 16px;
+            background: #61dafb;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background: #4fa8d1;
+        }
+
+        #viz {
+            border: 1px solid #444;
+            background: #252526;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        }
+
+        .node text {
+            font-size: 14px;
+            fill: white;
+            pointer-events: none;
+            text-anchor: middle;
+        }
+
+        .node rect {
+            stroke-width: 2px;
+        }
+
+        .link {
+            fill: none;
+            stroke: #666;
+            stroke-width: 2px;
+            marker-end: url(#arrow);
+        }
+
+        .code-panel {
+            margin-top: 20px;
+            font-family: 'Courier New', Courier, monospace;
+            background: #111;
+            padding: 15px;
+            border-radius: 5px;
+            width: 600px;
+            border-left: 5px solid #61dafb;
+        }
+
+        .highlight {
+            color: #ffff00;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Double Dispatch Flow (Visitor Pattern)</h1>
+
+    <div class="controls">
+        <label>Element:</label>
+        <select id="elementSelect">
+            <option value="Circle">Circle</option>
+            <option value="Square">Square</option>
+            <option value="Triangle">Triangle</option>
+        </select>
+
+        <label>Visitor:</label>
+        <select id="visitorSelect">
+            <option value="JsonVisitor">JsonVisitor</option>
+            <option value="XmlVisitor">XmlVisitor</option>
+            <option value="AreaVisitor">AreaVisitor</option>
+        </select>
+
+        <button onclick="runSimulation()">Dispatch!</button>
+    </div>
+
+    <svg id="viz" width="800" height="400"></svg>
+
+    <div class="code-panel" id="codeDisplay">
+        Ready to Dispatch...
+    </div>
+
+    <script>
+        const svg = d3.select("#viz");
+        const width = +svg.attr("width");
+        const height = +svg.attr("height");
+
+        // Define Arrow Marker
+        svg.append("defs").append("marker")
+            .attr("id", "arrow")
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 25)
+            .attr("refY", 0)
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .attr("orient", "auto")
+            .append("path")
+            .attr("d", "M0,-5L10,0L0,5")
+            .attr("fill", "#666");
+
+        const nodes = [
+            { id: "Client", x: 100, y: 200, color: "#ff6b6b", type: "Actor" },
+            { id: "Element", x: 400, y: 100, color: "#4ecdc4", type: "Interface" },
+            { id: "Visitor", x: 400, y: 300, color: "#ffe66d", type: "Interface" }
+        ];
+
+        // Draw Nodes
+        const g = svg.append("g");
+
+        g.selectAll(".node")
+            .data(nodes)
+            .enter().append("g")
+            .attr("class", "node")
+            .attr("transform", d => `translate(${d.x},${d.y})`)
+            .call(s => {
+                s.append("rect")
+                    .attr("x", -60)
+                    .attr("y", -30)
+                    .attr("width", 120)
+                    .attr("height", 60)
+                    .attr("rx", 10)
+                    .attr("fill", d => d.color)
+                    .attr("stroke", "#fff");
+                s.append("text")
+                    .attr("dy", 5)
+                    .text(d => d.id);
+            });
+
+        function runSimulation() {
+            const elemType = document.getElementById("elementSelect").value;
+            const visitorType = document.getElementById("visitorSelect").value;
+            const codePanel = document.getElementById("codeDisplay");
+
+            // Reset Animation
+            svg.selectAll(".token").remove();
+
+            // Step 1: Client calls accept()
+            codePanel.innerHTML = `// 1. Client calls accept<br>Shape s = new ${elemType}();<br>Visitor v = new ${visitorType}();<br><span class="highlight">s.accept(v);</span>`;
+
+            animateToken(nodes[0], nodes[1], () => {
+                // Step 2: Inside Element.accept()
+                codePanel.innerHTML = `// 2. Inside ${elemType}.accept()<br>public void accept(Visitor v) {<br>    <span class="highlight">v.visit(this);</span> // 'this' is ${elemType}<br>}`;
+
+                animateToken(nodes[1], nodes[2], () => {
+                    // Step 3: Inside Visitor.visit()
+                    codePanel.innerHTML = `// 3. Inside ${visitorType}.visit(${elemType})<br>public void visit(${elemType} e) {<br>    <span class="highlight">System.out.println("Processing ${elemType} via ${visitorType}");</span><br>}`;
+
+                    // Final Flash
+                    svg.selectAll("rect")
+                        .transition().duration(200).style("fill", "white")
+                        .transition().duration(200).style("fill", d => d.color);
+                });
+            });
+        }
+
+        function animateToken(from, to, callback) {
+            const token = svg.append("circle")
+                .attr("class", "token")
+                .attr("r", 8)
+                .attr("fill", "white")
+                .attr("cx", from.x)
+                .attr("cy", from.y);
+
+            token.transition()
+                .duration(1500)
+                .ease(d3.easeCubicInOut)
+                .attr("cx", to.x)
+                .attr("cy", to.y)
+                .on("end", () => {
+                    token.remove();
+                    callback();
+                });
+        }
+    </script>
+</body>
+
+</html>

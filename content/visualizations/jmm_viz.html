@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Java Memory Model: MESI Protocol Viz</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+            color: #569cd6;
+        }
+
+        .container {
+            display: flex;
+            gap: 40px;
+            justify-content: center;
+            width: 100%;
+            max-width: 1000px;
+        }
+
+        .core {
+            width: 300px;
+            height: 300px;
+            background: #252526;
+            border: 2px solid #555;
+            border-radius: 8px;
+            position: relative;
+            padding: 10px;
+        }
+
+        .core h3 {
+            text-align: center;
+            margin: 0 0 10px 0;
+            color: #dcdcaa;
+        }
+
+        .cache-line {
+            background: #333;
+            margin: 5px;
+            padding: 5px;
+            border: 1px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .state {
+            font-weight: bold;
+            width: 30px;
+            text-align: center;
+        }
+
+        .value {
+            color: #9cdcfe;
+        }
+
+        .ram {
+            width: 640px;
+            height: 80px;
+            background: #000;
+            border: 2px solid #333;
+            margin-top: 40px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 8px;
+        }
+
+        .ram-content {
+            color: #4ec9b0;
+            font-size: 20px;
+        }
+
+        .bus {
+            width: 800px;
+            height: 10px;
+            background: #c586c0;
+            margin: 20px 0;
+        }
+
+        .modified {
+            color: #e51400;
+        }
+
+        /* M */
+        .exclusive {
+            color: #e3a21a;
+        }
+
+        /* E */
+        .shared {
+            color: #60a917;
+        }
+
+        /* S */
+        .invalid {
+            color: #888;
+            text-decoration: line-through;
+        }
+
+        /* I */
+
+        .controls {
+            margin-top: 20px;
+        }
+
+        button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 5px 10px;
+            margin: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #444;
+        }
+
+        .log {
+            margin-top: 20px;
+            width: 800px;
+            height: 100px;
+            background: #111;
+            border: 1px solid #333;
+            overflow-y: auto;
+            padding: 5px;
+            color: #0f0;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>JMM & Cache Coherence (MESI)</h1>
+
+    <div class="container">
+        <!-- Core 1 -->
+        <div class="core" id="core1">
+            <h3>Thread 1 (Core 1)</h3>
+            <div class="cache-line" id="c1-var">
+                <span>var x</span>
+                <span class="value">0</span>
+                <span class="state invalid">I</span>
+            </div>
+            <hr>
+            <code>x = <span id="c1-local">0</span>;</code>
+        </div>
+
+        <!-- Core 2 -->
+        <div class="core" id="core2">
+            <h3>Thread 2 (Core 2)</h3>
+            <div class="cache-line" id="c2-var">
+                <span>var x</span>
+                <span class="value">0</span>
+                <span class="state invalid">I</span>
+            </div>
+            <hr>
+            <code>if (x == 1) print("Visible");</code>
+        </div>
+    </div>
+
+    <div class="bus"></div>
+
+    <div class="ram">
+        RAM: x = <span id="ram-val" class="ram-content">0</span>
+    </div>
+
+    <div class="controls">
+        <button onclick="writeVolatile()">Thread 1: Write x = 1 (Volatile)</button>
+        <button onclick="writeNormal()">Thread 1: Write x = 1 (Normal)</button>
+        <button onclick="readT2()">Thread 2: Read x</button>
+    </div>
+
+    <div class="log" id="log"></div>
+
+    <script>
+        // State
+        let ram = 0;
+        let c1 = { val: 0, state: 'I' };
+        let c2 = { val: 0, state: 'I' };
+
+        function log(msg) {
+            const l = document.getElementById("log");
+            l.innerHTML += `> ${msg}<br>`;
+            l.scrollTop = l.scrollHeight;
+        }
+
+        function updateUI() {
+            document.getElementById("ram-val").innerText = ram;
+
+            updateLine("c1-var", c1);
+            updateLine("c2-var", c2);
+        }
+
+        function updateLine(id, cache) {
+            const el = document.getElementById(id);
+            const valSpan = el.querySelector(".value");
+            const stateSpan = el.querySelector(".state");
+
+            valSpan.innerText = cache.val;
+            stateSpan.innerText = cache.state;
+            stateSpan.className = "state";
+
+            if (cache.state === 'M') stateSpan.classList.add("modified");
+            if (cache.state === 'E') stateSpan.classList.add("exclusive");
+            if (cache.state === 'S') stateSpan.classList.add("shared");
+            if (cache.state === 'I') stateSpan.classList.add("invalid");
+        }
+
+        function writeVolatile() {
+            log("T1: Writing volatile x = 1...");
+            // Volatile write flushes directly to main memory and invalidates others
+            c1.val = 1;
+            c1.state = 'E'; // Exclusive
+            ram = 1; // Flush
+            log("BUS: Flush Store Buffer -> RAM");
+
+            if (c2.state !== 'I') {
+                c2.state = 'I';
+                log("BUS: Invalidate Core 2 Cache Line");
+            }
+            updateUI();
+        }
+
+        function writeNormal() {
+            log("T1: Writing normal x = 1...");
+            c1.val = 1;
+            c1.state = 'M'; // Modified (Local only)
+            log("Core 1: Clean -> Modified (Written to L1 only)");
+            // RAM NOT Updated
+            updateUI();
+        }
+
+        function readT2() {
+            log("T2: Reading x...");
+            if (c2.state === 'I') {
+                log("Core 2: Cache Miss. Fetching from RAM/Bus...");
+                // Bus Snooping
+                if (c1.state === 'M') {
+                    log("BUS: Core 1 holds Modified state. Flushing...");
+                    ram = c1.val;
+                    c1.state = 'S';
+                }
+                c2.val = ram;
+                c2.state = 'S';
+            } else {
+                log("Core 2: Cache Hit.");
+            }
+            log(`T2 see x = ${c2.val}`);
+            updateUI();
+        }
+
+        updateUI();
+        log("System Started. All caches Invalid.");
+    </script>
+</body>
+
+</html>
