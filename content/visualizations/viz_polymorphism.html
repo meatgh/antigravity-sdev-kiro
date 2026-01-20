@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Polymorphism: The Universal Interface</title>
+    <style>
+        body {
+            background: #0f172a;
+            color: white;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .stage {
+            display: flex;
+            gap: 40px;
+            margin-top: 40px;
+        }
+
+        .actor {
+            width: 120px;
+            height: 120px;
+            background: #334155;
+            border: 2px solid #64748b;
+            border-radius: 15px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            cursor: pointer;
+            position: relative;
+        }
+
+        .actor .icon {
+            font-size: 40px;
+            margin-bottom: 10px;
+        }
+
+        .actor .label {
+            font-size: 14px;
+            color: #cbd5e1;
+        }
+
+        /* Polymorphic Behaviors */
+        .actor.singing {
+            transform: scale(1.1) translateY(-10px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+            border-color: #f472b6;
+        }
+
+        .actor.singing::after {
+            content: '🎵';
+            position: absolute;
+            top: -20px;
+            right: -20px;
+            font-size: 30px;
+            animation: float 1s infinite alternate;
+        }
+
+        /* Specific Shapes */
+        #cat.singing {
+            background: #fdba74;
+            color: #7c2d12;
+        }
+
+        #dog.singing {
+            background: #93c5fd;
+            color: #1e3a8a;
+        }
+
+        #bird.singing {
+            background: #86efac;
+            color: #14532d;
+        }
+
+        @keyframes float {
+            from {
+                transform: translateY(0);
+            }
+
+            to {
+                transform: translateY(-10px);
+            }
+        }
+
+        .code-display {
+            background: #020617;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: monospace;
+            margin-bottom: 30px;
+            width: 500px;
+            text-align: center;
+            border: 1px solid #1e293b;
+        }
+
+        .btn-main {
+            background: #8b5cf6;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 30px;
+            cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+            transition: 0.3s;
+        }
+
+        .btn-main:hover {
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🦎 Pillar 4: Polymorphism</h1>
+    <p style="color: #94a3b8;">One command: <b>makeSound()</b>. Different behaviors depending on the object.</p>
+
+    <div class="code-display">
+        <span style="color: #f472b6">List</span>&lt;Animal&gt; zoo = [Cat, Dog, Bird];<br>
+        <span style="color: #f472b6">zoo</span>.forEach(animal => <b style="color: #22c55e">animal.makeSound()</b>);
+    </div>
+
+    <button class="btn-main" onclick="triggerPolymorphism()">📢 Call methods()</button>
+
+    <div class="stage">
+        <div class="actor" id="cat">
+            <div class="icon">🐱</div>
+            <div class="label">Cat</div>
+        </div>
+        <div class="actor" id="dog">
+            <div class="icon">🐶</div>
+            <div class="label">Dog</div>
+        </div>
+        <div class="actor" id="bird">
+            <div class="icon">🐦</div>
+            <div class="label">Bird</div>
+        </div>
+    </div>
+
+    <script>
+        function triggerPolymorphism() {
+            const actors = document.querySelectorAll('.actor');
+
+            // Loop through all (forEach) and just call the same trigger
+            actors.forEach((actor, i) => {
+                setTimeout(() => {
+                    actor.classList.add('singing');
+
+                    // Simulate specific sound
+                    let sound = "";
+                    if (actor.id === 'cat') sound = "Meow!";
+                    if (actor.id === 'dog') sound = "Woof!";
+                    if (actor.id === 'bird') sound = "Chirp!";
+
+                    const label = actor.querySelector('.label');
+                    const originalText = label.textContent;
+                    label.textContent = sound;
+
+                    setTimeout(() => {
+                        actor.classList.remove('singing');
+                        label.textContent = originalText;
+                    }, 1500);
+                }, i * 300); // Stagger them slightly for visual effect
+            });
+        }
+    </script>
+</body>
+
+</html>

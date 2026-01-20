@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Encapsulation: The Secure Vault</title>
+    <style>
+        body {
+            background: #0f172a;
+            color: white;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            display: flex;
+            gap: 50px;
+            align-items: center;
+        }
+
+        .vault {
+            width: 250px;
+            height: 300px;
+            background: #334155;
+            border: 4px solid #94a3b8;
+            border-radius: 20px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.5s;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        }
+
+        .vault.open {
+            background: #1e293b;
+            border-color: #22c55e;
+        }
+
+        .door {
+            width: 220px;
+            height: 270px;
+            background: #475569;
+            border: 2px dashed #64748b;
+            border-radius: 15px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: transform 1s;
+            transform-origin: left;
+        }
+
+        .vault.open .door {
+            transform: perspective(1000px) rotateY(-110deg);
+        }
+
+        .gold {
+            font-size: 50px;
+            opacity: 0;
+            transition: opacity 0.5s 0.5s;
+        }
+
+        .vault.open .gold {
+            opacity: 1;
+        }
+
+        .controls {
+            background: #1e293b;
+            padding: 30px;
+            border-radius: 15px;
+            border: 1px solid #334155;
+            width: 300px;
+        }
+
+        .code-block {
+            background: #020617;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            color: #a5b4fc;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .keyword {
+            color: #f472b6;
+        }
+
+        .var {
+            color: #cbd5e1;
+        }
+
+        .func {
+            color: #60a5fa;
+        }
+
+        button {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            width: 100%;
+            margin-top: 10px;
+            transition: 0.2s;
+        }
+
+        button.success {
+            background: #22c55e;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        input {
+            background: #334155;
+            border: 1px solid #475569;
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            flex: 1;
+            text-align: center;
+        }
+
+        .status {
+            margin-top: 15px;
+            font-size: 14px;
+            min-height: 20px;
+            text-align: center;
+            color: #94a3b8;
+        }
+
+        .status.error {
+            color: #ef4444;
+        }
+
+        .status.success {
+            color: #22c55e;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🧱 Pillar 1: Encapsulation</h1>
+    <p style="color: #94a3b8; margin-bottom: 40px;">Data is hidden. You must use the public interface (keypad) to access
+        it.</p>
+
+    <div class="container">
+        <!-- The Object -->
+        <div class="vault" id="vault">
+            <div class="gold">💰 Gold</div>
+            <div class="door">
+                <div style="font-size: 40px; margin-bottom: 10px;">🔒</div>
+                <div style="font-size: 12px; color: #cbd5e1;">PRIVATE STATE</div>
+            </div>
+        </div>
+
+        <!-- The Interface -->
+        <div class="controls">
+            <div class="code-block">
+                <span class="keyword">private</span> <span class="var">gold</span>;<br>
+                <br>
+                <span class="keyword">public</span> <span class="func">getGold</span>(<span class="var">password</span>)
+                {<br>
+                &nbsp;&nbsp;<span class="keyword">if</span> (password === '1234')<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">return</span> <span class="var">this</span>.gold;<br>
+                }
+            </div>
+
+            <div class="input-group">
+                <input type="password" id="pin" placeholder="Enter PIN (Try 1234)" maxlength="4">
+            </div>
+
+            <button id="accessBtn" onclick="tryAccess()">Access Gold</button>
+            <button onclick="directAccess()" style="background: #334155; margin-top: 20px;">Try Direct Access
+                (vault.gold)</button>
+
+            <div class="status" id="status">Waiting for input...</div>
+        </div>
+    </div>
+
+    <script>
+        const vault = document.getElementById('vault');
+        const status = document.getElementById('status');
+        const btn = document.getElementById('accessBtn');
+
+        function tryAccess() {
+            const pin = document.getElementById('pin').value;
+            status.className = 'status';
+
+            if (pin === '1234') {
+                vault.classList.add('open');
+                status.textContent = "Access Granted! Getter specific logic executed.";
+                status.classList.add('success');
+                btn.className = 'success';
+                btn.textContent = "Unlocked";
+            } else {
+                vault.classList.remove('open');
+                status.textContent = "Access Denied: Invalid PIN.";
+                status.classList.add('error');
+                btn.className = '';
+                btn.textContent = "Access Gold";
+
+                // Shake animation
+                vault.style.transform = "translateX(10px)";
+                setTimeout(() => vault.style.transform = "translateX(-10px)", 100);
+                setTimeout(() => vault.style.transform = "translateX(10px)", 200);
+                setTimeout(() => vault.style.transform = "translateX(0)", 300);
+            }
+        }
+
+        function directAccess() {
+            status.textContent = "Compiler Error: 'gold' has private access in 'Vault'.";
+            status.className = 'status error';
+            vault.classList.remove('open');
+        }
+    </script>
+</body>
+
+</html>
