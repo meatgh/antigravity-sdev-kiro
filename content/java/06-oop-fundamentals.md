@@ -26,13 +26,13 @@
 - [Common Misconceptions](#common-misconceptions)
 - [Industry Use Cases](#industry-use-cases)
 
-### Layer 2: Simple to Comprehensive Definition
+#### 2. Formal Definition
 - [Simple Explanation](#simple-explanation)
 - [Comprehensive Definition](#comprehensive-definition)
 - [Theoretical Foundation](#theoretical-foundation)
 - [Formal Specifications](#formal-specifications)
 
-### Layer 3: Progressive Learning Path
+#### 3. How It Works
 - [Level 0: Discover](#level-0-discover)
 - [Level 1: Understand](#level-1-understand)
 - [Level 2: Apply](#level-2-apply)
@@ -40,7 +40,7 @@
 - [Level 4: Extend](#level-4-extend)
 - [Level 5: Interview](#level-5-interview)
 
-### Layer 4: Multi-Language Implementation
+#### 4. Standard Implementation
 - [Java Implementation](#java-implementation)
 - [Python Implementation](#python-implementation)
 - [JavaScript Implementation](#javascript-implementation)
@@ -956,7 +956,7 @@ class InventoryService {
 - **Auditability**: Event objects provide complete audit trail
 
 ---
-# Layer 2: Simple to Comprehensive Definition
+## 2. Formal Definition
 
 ## Simple Explanation
 
@@ -1303,7 +1303,7 @@ For method overriding, if method m' in subclass overrides method m in superclass
 ```
 
 ---
-# Layer 3: Progressive Learning Path
+## 3. How It Works
 
 ## Level 0: Discover
 
@@ -2998,7 +2998,7 @@ public class Car {
 - [ ] Communicates design rationale effectively
 
 ---
-# Layer 4: Multi-Language Implementation
+## 4. Standard Implementation
 
 ## Java Implementation
 
@@ -10711,225 +10711,6 @@ public class ParkingLot {
 - "How would you scale this for multiple parking lots?"
 - "What if we need to reserve spots in advance?"
 
-#### Q5: Design a comprehensive digital library management system with advanced features
-**Companies**: Amazon, Microsoft, Apple, Google, Meta  
-**Difficulty**: Medium → Hard (with digital features and analytics)  
-**Category**: System Design & Data Management  
-**Interview Frequency**: 75% (Common system design question)
-
-**Question**: Design a modern digital library management system that handles physical and digital books, member management, borrowing/reservation system, late fee calculation, recommendation engine, and real-time analytics. The system should support multiple library branches and integrate with external book databases.
-
-**Conceptual Understanding**:
-This question tests your ability to:
-1. **Domain Modeling**: Representing real-world library concepts in code
-2. **Business Logic**: Complex rules for borrowing, reservations, and fees
-3. **Data Relationships**: Managing associations between books, members, and transactions
-4. **State Management**: Tracking book availability and member status
-5. **Integration**: External APIs and multi-branch coordination
-
-### Solution Approach 1: Basic Implementation (Naive Design)
-
-**Java - Simple but Problematic Implementation**:
-```java
-/**
- * BAD EXAMPLE: Simple library system with major design flaws
- * Problems: No validation, poor data modeling, limited functionality
- */
-public class BasicLibrary {
-    // PROBLEM: Public fields, no encapsulation
-    public String[] bookTitles;
-    public boolean[] bookAvailable;
-    public String[] memberNames;
-    public String[] borrowedBooks; // Member index maps to book index
-    
-    // PROBLEM: Fixed arrays, no flexibility
-    public BasicLibrary() {
-        bookTitles = new String[1000];     // Fixed 1000 books
-        bookAvailable = new boolean[1000];
-        memberNames = new String[500];     // Fixed 500 members
-        borrowedBooks = new String[500];
-        
-        // Initialize all books as available
-        Arrays.fill(bookAvailable, true);
-    }
-    
-    // PROBLEM: No validation, no business rules
-    public boolean borrowBook(int memberId, int bookId) {
-        if (bookAvailable[bookId]) {
-            bookAvailable[bookId] = false;
-            borrowedBooks[memberId] = bookTitles[bookId];
-            return true;
-        }
-        return false;
-    }
-    
-    // PROBLEM: No due dates, no late fees
-    public boolean returnBook(int memberId, int bookId) {
-        bookAvailable[bookId] = true;
-        borrowedBooks[memberId] = null;
-        return true;
-    }
-    
-    // PROBLEM: Linear search, no indexing
-    public int findBook(String title) {
-        for (int i = 0; i < bookTitles.length; i++) {
-            if (bookTitles[i] != null && bookTitles[i].equals(title)) {
-                return i;
-            }
-        }
-        return -1; // Not found
-    }
-}
-```
-
-**Problems with Basic Design**:
-- ❌ No book metadata (author, ISBN, genre, publication date)
-- ❌ No member information (contact details, membership type)
-- ❌ No borrowing limits or due dates
-- ❌ No reservation system for popular books
-- ❌ No late fee calculation
-- ❌ No digital book support
-- ❌ No search and filtering capabilities
-- ❌ No audit trail or transaction history
-```java
-public class Book {
-    private String isbn;
-    private String title;
-    private String author;
-    private boolean isAvailable;
-    private LocalDate dueDate;
-    
-    public Book(String isbn, String title, String author) {
-        this.isbn = isbn;
-        this.title = title;
-        this.author = author;
-        this.isAvailable = true;
-    }
-    
-    public boolean checkOut(int loanPeriodDays) {
-        if (isAvailable) {
-            isAvailable = false;
-            dueDate = LocalDate.now().plusDays(loanPeriodDays);
-            return true;
-        }
-        return false;
-    }
-    
-    public void returnBook() {
-        isAvailable = true;
-        dueDate = null;
-    }
-    
-    public boolean isOverdue() {
-        return dueDate != null && LocalDate.now().isAfter(dueDate);
-    }
-    
-    // Getters
-    public String getIsbn() { return isbn; }
-    public String getTitle() { return title; }
-    public String getAuthor() { return author; }
-    public boolean isAvailable() { return isAvailable; }
-    public LocalDate getDueDate() { return dueDate; }
-}
-
-public class Member {
-    private String memberId;
-    private String name;
-    private String email;
-    private List<Book> borrowedBooks;
-    private double fines;
-    
-    public Member(String memberId, String name, String email) {
-        this.memberId = memberId;
-        this.name = name;
-        this.email = email;
-        this.borrowedBooks = new ArrayList<>();
-        this.fines = 0.0;
-    }
-    
-    public boolean canBorrowBook() {
-        return borrowedBooks.size() < 5 && fines < 10.0; // Max 5 books, max $10 fines
-    }
-    
-    public void borrowBook(Book book) {
-        if (canBorrowBook() && book.checkOut(14)) { // 14-day loan
-            borrowedBooks.add(book);
-        }
-    }
-    
-    public void returnBook(Book book) {
-        if (borrowedBooks.remove(book)) {
-            if (book.isOverdue()) {
-                long daysOverdue = ChronoUnit.DAYS.between(book.getDueDate(), LocalDate.now());
-                fines += daysOverdue * 0.50; // $0.50 per day
-            }
-            book.returnBook();
-        }
-    }
-    
-    public void payFine(double amount) {
-        fines = Math.max(0, fines - amount);
-    }
-    
-    // Getters
-    public String getMemberId() { return memberId; }
-    public String getName() { return name; }
-    public List<Book> getBorrowedBooks() { return new ArrayList<>(borrowedBooks); }
-    public double getFines() { return fines; }
-}
-
-public class Library {
-    private String name;
-    private Map<String, Book> books; // ISBN -> Book
-    private Map<String, Member> members; // MemberID -> Member
-    
-    public Library(String name) {
-        this.name = name;
-        this.books = new HashMap<>();
-        this.members = new HashMap<>();
-    }
-    
-    public void addBook(Book book) {
-        books.put(book.getIsbn(), book);
-    }
-    
-    public void registerMember(Member member) {
-        members.put(member.getMemberId(), member);
-    }
-    
-    public boolean borrowBook(String memberId, String isbn) {
-        Member member = members.get(memberId);
-        Book book = books.get(isbn);
-        
-        if (member != null && book != null && member.canBorrowBook() && book.isAvailable()) {
-            member.borrowBook(book);
-            return true;
-        }
-        return false;
-    }
-    
-    public boolean returnBook(String memberId, String isbn) {
-        Member member = members.get(memberId);
-        Book book = books.get(isbn);
-        
-        if (member != null && book != null) {
-            member.returnBook(book);
-            return true;
-        }
-        return false;
-    }
-    
-    public List<Book> searchBooks(String query) {
-        return books.values().stream()
-                   .filter(book -> book.getTitle().toLowerCase().contains(query.toLowerCase()) ||
-                                 book.getAuthor().toLowerCase().contains(query.toLowerCase()))
-                   .collect(Collectors.toList());
-    }
-}
-```
-
-### Advanced Questions (Hard)
-
 #### Q6: Design a thread-safe singleton with lazy initialization
 **Companies**: Google, Meta, Microsoft  
 **Difficulty**: Hard  
@@ -13030,438 +12811,6 @@ public class OrderProcessingSystem {
 - **LSP**: Different EC2 instance types are substitutable
 - **ISP**: Fine-grained IAM permissions
 - **DIP**: Services depend on interfaces, not implementations
-
-#### Q20: Design a comprehensive file system using advanced OOP principles
-**Companies**: Google, Amazon, Microsoft  
-**Difficulty**: Hard  
-**Category**: System Design + Advanced OOP
-
-**Question**: Design a file system that supports files, directories, permissions, operations like create, delete, move, copy, and advanced features like file search, size calculation, permission management, and file versioning. Use advanced OOP concepts including composition, aggregation, template method pattern, and strategy pattern.
-
-**Brute Force Approach**:
-```java
-// Bad approach - monolithic class handling everything
-public class FileSystem {
-    private Map<String, Object> items; // Mixed files and directories
-    private Map<String, String> permissions; // Flat permission structure
-    
-    public void createFile(String path, String content, String user) {
-        // Hundreds of lines mixing:
-        // - Path parsing and validation
-        // - Permission checking
-        // - File creation logic
-        // - Directory structure management
-        // - Error handling
-        // No separation of concerns, hard to maintain and extend
-    }
-    
-    public void createDirectory(String path, String user) {
-        // More mixed logic without proper abstraction
-        // Duplicate permission checking code
-        // No proper hierarchy management
-    }
-    
-    public long getSize(String path) {
-        // Complex recursive logic without proper OOP structure
-        // No caching, inefficient for large directories
-        // Mixed file and directory handling
-    }
-    
-    public List<String> search(String query) {
-        // Linear search through all items
-        // No indexing or optimization
-        // Mixed search criteria without strategy pattern
-    }
-}
-```
-
-**Optimal Solution - Advanced OOP Design**:
-
-```java
-// Enums for type safety and clarity
-public enum Permission {
-    READ("r", 4), WRITE("w", 2), EXECUTE("x", 1);
-    
-    private final String symbol;
-    private final int value;
-    
-    Permission(String symbol, int value) {
-        this.symbol = symbol;
-        this.value = value;
-    }
-    
-    public String getSymbol() { return symbol; }
-    public int getValue() { return value; }
-}
-
-public enum ItemStatus {
-    ACTIVE, DELETED, ARCHIVED, LOCKED
-}
-
-public enum FileType {
-    TEXT("txt", "text/plain"),
-    IMAGE("jpg", "image/jpeg"),
-    DOCUMENT("pdf", "application/pdf"),
-    EXECUTABLE("exe", "application/octet-stream"),
-    DIRECTORY("dir", "inode/directory");
-    
-    private final String extension;
-    private final String mimeType;
-    
-    FileType(String extension, String mimeType) {
-        this.extension = extension;
-        this.mimeType = mimeType;
-    }
-    
-    public String getExtension() { return extension; }
-    public String getMimeType() { return mimeType; }
-}
-
-// Abstract base class for all file system items using Template Method Pattern
-public abstract class FileSystemItem {
-    protected final String name;
-    protected final String path;
-    protected final LocalDateTime createdAt;
-    protected LocalDateTime modifiedAt;
-    protected final String owner;
-    protected final Map<String, Set<Permission>> permissions;
-    protected FileSystemItem parent;
-    protected ItemStatus status;
-    protected final Map<String, String> metadata;
-    
-    protected FileSystemItem(String name, String path, String owner) {
-        this.name = validateName(name);
-        this.path = validatePath(path);
-        this.owner = validateOwner(owner);
-        this.createdAt = LocalDateTime.now();
-        this.modifiedAt = LocalDateTime.now();
-        this.permissions = new ConcurrentHashMap<>();
-        this.parent = null;
-        this.status = ItemStatus.ACTIVE;
-        this.metadata = new ConcurrentHashMap<>();
-        
-        // Owner gets all permissions by default
-        this.permissions.put(owner, EnumSet.allOf(Permission.class));
-    }
-    
-    // Template method for deletion - defines algorithm structure
-    public final OperationResult delete(String user) {
-        // Pre-deletion validation
-        if (!hasPermission(user, Permission.WRITE)) {
-            return OperationResult.failure("No write permission for user: " + user);
-        }
-        
-        if (status == ItemStatus.DELETED) {
-            return OperationResult.failure("Item already deleted");
-        }
-        
-        if (!canDelete(user)) {
-            return OperationResult.failure("Item cannot be deleted");
-        }
-        
-        // Hook method for subclass-specific pre-deletion logic
-        OperationResult preDeleteResult = performPreDeletion(user);
-        if (!preDeleteResult.isSuccess()) {
-            return preDeleteResult;
-        }
-        
-        // Perform the actual deletion
-        boolean deleteSuccess = performDeletion(user);
-        
-        if (deleteSuccess) {
-            this.status = ItemStatus.DELETED;
-            updateModifiedTime();
-            
-            // Remove from parent if exists
-            if (parent != null) {
-                parent.removeChild(this);
-            }
-            
-            // Hook method for post-deletion cleanup
-            performPostDeletion(user);
-            
-            return OperationResult.success("Item deleted successfully");
-        } else {
-            return OperationResult.failure("Deletion failed");
-        }
-    }
-    
-    // Template method for copying
-    public final OperationResult copy(String destinationPath, String user) {
-        if (!hasPermission(user, Permission.READ)) {
-            return OperationResult.failure("No read permission");
-        }
-        
-        if (!canCopy(destinationPath, user)) {
-            return OperationResult.failure("Cannot copy to destination");
-        }
-        
-        FileSystemItem copy = createCopy(destinationPath, user);
-        if (copy == null) {
-            return OperationResult.failure("Failed to create copy");
-        }
-        
-        return OperationResult.success("Item copied successfully").withResult(copy);
-    }
-    
-    // Abstract methods for subclasses to implement
-    public abstract long getSize();
-    public abstract FileType getType();
-    protected abstract boolean canDelete(String user);
-    protected abstract boolean canCopy(String destinationPath, String user);
-    protected abstract OperationResult performPreDeletion(String user);
-    protected abstract boolean performDeletion(String user);
-    protected abstract void performPostDeletion(String user);
-    protected abstract FileSystemItem createCopy(String destinationPath, String user);
-    protected abstract void removeChild(FileSystemItem child);
-    
-    // Permission management with fine-grained control
-    public boolean hasPermission(String user, Permission permission) {
-        if (owner.equals(user)) {
-            return true; // Owner has all permissions
-        }
-        
-        Set<Permission> userPermissions = permissions.get(user);
-        if (userPermissions != null && userPermissions.contains(permission)) {
-            return true;
-        }
-        
-        // Check group permissions (simplified - could be extended)
-        Set<Permission> groupPermissions = permissions.get("group");
-        if (groupPermissions != null && groupPermissions.contains(permission)) {
-            return true;
-        }
-        
-        // Check other permissions
-        Set<Permission> otherPermissions = permissions.get("other");
-        return otherPermissions != null && otherPermissions.contains(permission);
-    }
-    
-    public void grantPermission(String grantor, String user, Permission permission) {
-        if (!owner.equals(grantor)) {
-            throw new SecurityException("Only owner can grant permissions");
-        }
-        
-        permissions.computeIfAbsent(user, k -> EnumSet.noneOf(Permission.class))
-                  .add(permission);
-        updateModifiedTime();
-    }
-    
-    public void revokePermission(String grantor, String user, Permission permission) {
-        if (!owner.equals(grantor)) {
-            throw new SecurityException("Only owner can revoke permissions");
-        }
-        
-        Set<Permission> userPermissions = permissions.get(user);
-        if (userPermissions != null) {
-            userPermissions.remove(permission);
-            if (userPermissions.isEmpty()) {
-                permissions.remove(user);
-            }
-        }
-        updateModifiedTime();
-    }
-    
-    public String getPermissionString() {
-        StringBuilder sb = new StringBuilder();
-        
-        // Owner permissions
-        Set<Permission> ownerPerms = permissions.get(owner);
-        sb.append(formatPermissions(ownerPerms));
-        
-        // Group permissions
-        Set<Permission> groupPerms = permissions.get("group");
-        sb.append(formatPermissions(groupPerms));
-        
-        // Other permissions
-        Set<Permission> otherPerms = permissions.get("other");
-        sb.append(formatPermissions(otherPerms));
-        
-        return sb.toString();
-    }
-    
-    private String formatPermissions(Set<Permission> perms) {
-        if (perms == null) perms = EnumSet.noneOf(Permission.class);
-        
-        return (perms.contains(Permission.READ) ? "r" : "-") +
-               (perms.contains(Permission.WRITE) ? "w" : "-") +
-               (perms.contains(Permission.EXECUTE) ? "x" : "-");
-    }
-    
-    protected void updateModifiedTime() {
-        this.modifiedAt = LocalDateTime.now();
-        if (parent != null) {
-            parent.updateModifiedTime();
-        }
-    }
-    
-    // Metadata management
-    public void setMetadata(String key, String value) {
-        metadata.put(key, value);
-        updateModifiedTime();
-    }
-    
-    public String getMetadata(String key) {
-        return metadata.get(key);
-    }
-    
-    public Map<String, String> getAllMetadata() {
-        return new HashMap<>(metadata);
-    }
-    
-    // Validation methods
-    private String validateName(String name) {
-        if (name == null || name.trim().isEmpty()) {
-            throw new IllegalArgumentException("Name cannot be null or empty");
-        }
-        if (name.contains("/") || name.contains("\\") || name.contains(":")) {
-            throw new IllegalArgumentException("Name cannot contain path separators or colons");
-        }
-        if (name.length() > 255) {
-            throw new IllegalArgumentException("Name cannot exceed 255 characters");
-        }
-        return name.trim();
-    }
-    
-    private String validatePath(String path) {
-        if (path == null || !path.startsWith("/")) {
-            throw new IllegalArgumentException("Path must start with /");
-        }
-        if (path.length() > 4096) {
-            throw new IllegalArgumentException("Path cannot exceed 4096 characters");
-        }
-        return path;
-    }
-    
-    private String validateOwner(String owner) {
-        if (owner == null || owner.trim().isEmpty()) {
-            throw new IllegalArgumentException("Owner cannot be null or empty");
-        }
-        return owner.trim();
-    }
-    
-    // Getters
-    public String getName() { return name; }
-    public String getPath() { return path; }
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public LocalDateTime getModifiedAt() { return modifiedAt; }
-    public String getOwner() { return owner; }
-    public Map<String, Set<Permission>> getPermissions() { 
-        return permissions.entrySet().stream()
-            .collect(Collectors.toMap(
-                Map.Entry::getKey,
-                entry -> EnumSet.copyOf(entry.getValue())
-            ));
-    }
-    public FileSystemItem getParent() { return parent; }
-    public ItemStatus getStatus() { return status; }
-    
-    public void setParent(FileSystemItem parent) {
-        this.parent = parent;
-    }
-    
-    @Override
-    public boolean equals(Object obj) {
-        if (this == obj) return true;
-        if (!(obj instanceof FileSystemItem)) return false;
-        FileSystemItem other = (FileSystemItem) obj;
-        return Objects.equals(path, other.path);
-    }
-    
-    @Override
-    public int hashCode() {
-        return Objects.hash(path);
-    }
-    
-    @Override
-    public String toString() {
-        return String.format("%s{name='%s', path='%s', owner='%s', size=%d, permissions='%s'}", 
-            getClass().getSimpleName(), name, path, owner, getSize(), getPermissionString());
-    }
-}
-```
-
-This is a comprehensive start to the file system design. The implementation demonstrates advanced OOP principles including:
-
-1. **Template Method Pattern**: The `delete()` and `copy()` methods define algorithm structure
-2. **Strategy Pattern**: Can be extended for different permission strategies
-3. **Composition**: FileSystemItem contains permissions, metadata, and parent relationships
-4. **Encapsulation**: Proper validation and access control
-5. **Polymorphism**: Abstract methods implemented differently by subclasses
-
-The design is production-ready with proper error handling, security considerations, and extensibility for real-world file systems like those used by Google Drive, Amazon S3, or Microsoft OneDrive.
-
-Would you like me to continue with the File and Directory implementations, or shall we move to the next batch of questions?
-    void sleep();
-}
-
-// Good - Segregated interfaces
-interface Workable {
-    void work();
-}
-
-interface Eatable {
-    void eat();
-}
-
-interface Sleepable {
-    void sleep();
-}
-
-class Human implements Workable, Eatable, Sleepable {
-    public void work() { /* implementation */ }
-    public void eat() { /* implementation */ }
-    public void sleep() { /* implementation */ }
-}
-
-class Robot implements Workable {
-    public void work() { /* implementation */ }
-    // Robot doesn't need to eat or sleep
-}
-```
-
-**D - Dependency Inversion Principle**:
-Depend on abstractions, not concretions.
-
-```java
-// Bad - High-level module depends on low-level module
-class EmailService {
-    public void sendEmail(String message) { /* email logic */ }
-}
-
-class NotificationService {
-    private EmailService emailService = new EmailService(); // Direct dependency
-    
-    public void notify(String message) {
-        emailService.sendEmail(message);
-    }
-}
-
-// Good - Depend on abstraction
-interface MessageService {
-    void sendMessage(String message);
-}
-
-class EmailService implements MessageService {
-    public void sendMessage(String message) { /* email logic */ }
-}
-
-class SMSService implements MessageService {
-    public void sendMessage(String message) { /* SMS logic */ }
-}
-
-class NotificationService {
-    private MessageService messageService;
-    
-    public NotificationService(MessageService messageService) {
-        this.messageService = messageService; // Dependency injection
-    }
-    
-    public void notify(String message) {
-        messageService.sendMessage(message);
-    }
-}
-```
 
 #### Q20: Design a file system using OOP
 **Companies**: Google, Meta, Amazon  
@@ -33778,9 +33127,13 @@ This question is a litmus test for a candidate's understanding of **Dependency I
 
 ---
 
-### **2. Solution Progression - From Brute Force to Enterprise DI**
+### **2.
 
-#### Approach 1: The "New" Operator (Tight Coupling)
+
+### 2. Evolution
+Solution Progression - From Brute Force to Enterprise DI**
+
+##### Approach 1: The "New" Operator (Tight Coupling)
 *   **Concept**: Direct instantiation using `new`.
 *   **Verdict**: **Anti-Pattern** in large systems.
 *   **Why**: Violates OCP. If you change `Truck` constructor signature, you break 500 files.
@@ -33795,7 +33148,7 @@ public class Logistics {
 }
 ```
 
-#### Approach 2: Simple Factory Idiom (Centralized Switch)
+##### Approach 2: Simple Factory Idiom (Centralized Switch)
 *   **Concept**: A static utility class that decides what to create.
 *   **Verdict**: **acceptable for small apps**, but rigid.
 *   **Why**: The Factory itself violates OCP. Adding `Drone` requires editing the `switch` statement in the `Factory`.
@@ -33811,19 +33164,23 @@ public class TransportFactory {
 }
 ```
 
-#### Approach 3: Factory Method (Polymorphic Creation)
+##### Approach 3: Factory Method (Polymorphic Creation)
 *   **Concept**: Defer instantiation to subclasses. `Logistics` is abstract. `RoadLogistics` knows about `Truck`.
 *   **Verdict**: **Gold Standard** for library design.
 *   **Why**: The Base `Logistics` class works with ANY future Transport type without recompilation.
 
-#### Approach 4: Dependency Injection (The "Framework" Level)
+##### Approach 4: Dependency Injection (The "Framework" Level)
 *   **Concept**: Externalize creation entirely.
 *   **Verdict**: **Enterprise Standard** (Spring/Jakarta EE).
 *   **Why**: Zero code changes to swap implementations. Configuration drives behavior.
 
 ---
 
-### **3. Comprehensive Definition**
+#### **3.
+
+
+### 3. Definition
+Comprehensive Definition**
 
 **Formal Definition**:
 > The Factory Method Pattern defines an interface for creating an object, but lets subclasses decide which class to instantiate. Factory Method lets a class defer instantiation to subclasses.
@@ -33841,7 +33198,7 @@ public class TransportFactory {
 
 ---
 
-### **2. Comprehensive Definition**
+#### **2. Comprehensive Definition**
 
 **Formal Definition**:
 > The Factory Method Pattern defines an interface for creating an object, but lets subclasses decide which class to instantiate. Factory Method lets a class defer instantiation to subclasses.
@@ -33859,9 +33216,9 @@ public class TransportFactory {
 
 ---
 
-### **3. Progressive Solution Evolution**
+#### **3. Progressive Solution Evolution**
 
-#### Approach 1: The "New" Operator (Tight Coupling)
+##### Approach 1: The "New" Operator (Tight Coupling)
 ```java
 public class ShippingService {
     public void ship(String type) {
@@ -33877,7 +33234,7 @@ public class ShippingService {
 ```
 *   **Critique**: Violates OCP. Every new transport type breaks `ShippingService`.
 
-#### Approach 2: Simple Factory Idiom (Centralized Switch)
+##### Approach 2: Simple Factory Idiom (Centralized Switch)
 ```java
 public class TransportFactory {
     public static Transport create(String type) {
@@ -33889,7 +33246,7 @@ public class TransportFactory {
 ```
 *   **Critique**: Better. `ShippingService` is cleaner. But `TransportFactory` still violates OCP (must edit it to add `Drone`).
 
-#### Approach 3: Factory Method (Polymorphic Creation)
+##### Approach 3: Factory Method (Polymorphic Creation)
 ```java
 abstract class Logistics {
     // The Factory Method
@@ -33908,7 +33265,7 @@ class RoadLogistics extends Logistics {
 ```
 *   **Verdict**: **Gold Standard** for library design. The `Logistics` class works with ANY future Transport type.
 
-#### Approach 4: Dependency Injection (The "Framework" Level)
+##### Approach 4: Dependency Injection (The "Framework" Level)
 Instead of the class asking a Factory, an external container gives the object.
 ```java
 @Inject
@@ -33918,7 +33275,13 @@ Transport transport; // Spring/Guice handles the rest
 
 ---
 
-### **4. Implementation I: Cross-Platform UI Framework**
+#### **4.
+
+
+### 4. Solution
+::: tab [group] Factory Pattern
+::: tab [java] Java
+Implementation I: Cross-Platform UI Framework**
 
 We will build a UI system (like Java AWT or MacOS Cocoa) where the same code renders "Windows Style" buttons on Windows and "HTML Style" buttons on Web.
 
@@ -34024,153 +33387,10 @@ public class Application {
 
 ---
 
-### **5. Implementation II: The Plugin Architecture (Dynamic Factory)**
-
-In enterprise systems (like IDEs or Game Engines), you can't recompile the code to add a new feature. You need to load it dynamically from a JAR or DLL.
-This is where the Factory Method meets **Reflection**.
-
-**Scenario**: A Text Editor that supports 3rd party "Export Plugins" (PDF, Markdown, HTML).
-
-```java
-import java.util.*;
-import java.lang.reflect.Constructor;
-
-// 1. THE PLUGIN INTERFACE
-interface Exporter {
-    void export(String content);
-}
-
-// 2. CONCRETE PLUGINS (Could be in external JARs)
-class PdfExporter implements Exporter {
-    public void export(String content) { System.out.println("Generating PDF: " + content); }
-}
-
-class MarkdownExporter implements Exporter {
-    public void export(String content) { System.out.println("Generating MD: " + content); }
-}
-
-// 3. THE DYNAMIC FACTORY
-class PluginFactory {
-    
-    // Registry of known plugins (usually loaded from config.xml)
-    private static final Map<String, String> pluginRegistry = new HashMap<>();
-    
-    static {
-        pluginRegistry.put("pdf", "PdfExporter");
-        pluginRegistry.put("md",  "MarkdownExporter");
-    }
-    
-    public static Exporter createExporter(String format) {
-        String className = pluginRegistry.get(format);
-        if (className == null) throw new IllegalArgumentException("Unknown format: " + format);
-        
-        try {
-            // DYNAMIC INSTANTIATION via Reflection
-            // Ideally, use a proper ClassLoader here
-            Class<?> clazz = Class.forName(className);
-            Constructor<?> ctor = clazz.getDeclaredConstructor();
-            return (Exporter) ctor.newInstance();
-            
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to load plugin: " + className, e);
-        }
-    }
-}
-
-// 4. USAGE
-public class Editor {
-    public static void main(String[] args) {
-        // User selects "pdf" from dropdown
-        String userSelection = "pdf"; 
-        
-        Exporter plugin = PluginFactory.createExporter(userSelection);
-        plugin.export("Hello World");
-    }
-}
-```
-
----
-
-### **6. Implementation III: Security Analysis (Reflection Attacks)**
-
-The "Dynamic Factory" above is powerful but dangerous. If the `className` comes from Untrusted Input (e.g., a URL parameter or user-editable config), it leads to **Remote Code Execution (RCE)**.
-
-**The Attack Scenario**:
-Attacker sets `format` to a Gadget Class present in the classpath (e.g., a specific Apache Commons class that executes commands in its constructor).
-
-```java
-public class FactorySecurityTest {
-    
-    // MALICIOUS GADGET CLASS (Simulating an attack)
-    public static class MaliciousPayload {
-        public MaliciousPayload() {
-            try {
-                // If this class is instantiated, it deletes files!
-                System.out.println("☠️ PWNED! Executing: rm -rf /");
-                // Runtime.getRuntime().exec("rm -rf /"); 
-            } catch (Exception e) {}
-        }
-    }
-
-    // VULNERABLE FACTORY
-    public static Object vulnerableCreate(String className) {
-        try {
-            // UNFILTERED REFLECTION
-            return Class.forName(className).getDeclaredConstructor().newInstance();
-        } catch (Exception e) {
-            return null;
-        }
-    }
-    
-    // SECURE FACTORY
-    public static Object secureCreate(String className) {
-        // 1. Allowlist Check
-        if (!className.startsWith("com.myapp.plugins.")) {
-            throw new SecurityException("Access Denied: " + className);
-        }
-        
-        // 2. Type Check before instantiation
-        try {
-            Class<?> clazz = Class.forName(className);
-            if (!Exporter.class.isAssignableFrom(clazz)) {
-                throw new SecurityException("Class is not an Exporter: " + className);
-            }
-            return clazz.getDeclaredConstructor().newInstance();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    public static void main(String[] args) {
-        System.out.println("--- Testing Vulnerable Factory ---");
-        // Attacker passes the malicious class name
-        vulnerableCreate("FactorySecurityTest$MaliciousPayload");
-        
-        System.out.println("\n--- Testing Secure Factory ---");
-        try {
-            secureCreate("FactorySecurityTest$MaliciousPayload");
-        } catch (Exception e) {
-            System.out.println("✅ Attack Blocked: " + e.getMessage());
-        }
-    }
-}
-```
-**Takeaway**:
-*   NEVER allow arbitrary strings to feed `Class.forName()`.
-*   ALWAYS validate against a strict **Allowlist**.
-*   ALWAYS check `isAssignableFrom()` before casting.
-
----
-
-
----
-
-
----
-
-### **3. Multi-Language Implementations**
-
-#### 🌐 Python Implementation: `__init_subclass__` Registry
+### **5.
+:::
+::: tab [python] Python
+Python Implementation: `__init_subclass__` Registry
 Python allows classes to automatically register themselves upon definition. This creates a "Zero-Boilerplate" factory.
 
 ```python
@@ -34210,7 +33430,79 @@ def main():
     exporter.export("/tmp/vid")
 ```
 
-#### 🌐 Go Implementation: Functional Options & Interface Constructors
+#### 🌐
+:::
+::: tab [cpp] C++
+C++: Modern Factory with `std::unique_ptr`
+In Modern C++ (11/14/17), we **never** return raw pointers. We use Smart Pointers.
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <string>
+
+// 1. The Product Interface
+class Transport {
+public:
+    virtual void deliver() = 0;
+    virtual ~Transport() = default; // Essential for polymorphism!
+};
+
+// 2. Concrete Products
+class Truck : public Transport {
+public:
+    void deliver() override { std::cout << "Truck delivering cargo." << std::endl; }
+};
+
+class Ship : public Transport {
+public:
+    void deliver() override { std::cout << "Ship delivering cargo." << std::endl; }
+};
+
+// 3. The Factory (Creator)
+class Logistics {
+public:
+    // PURE VIRTUAL Factory Method
+    virtual std::unique_ptr<Transport> createTransport() = 0;
+
+    // Core Logic (The Template)
+    void planDelivery() {
+        // We get a Smart Pointer, no `delete` needed!
+        auto t = createTransport();
+        t->deliver();
+    }
+    
+    virtual ~Logistics() = default;
+};
+
+// 4. Concrete Creators
+class RoadLogistics : public Logistics {
+public:
+    std::unique_ptr<Transport> createTransport() override {
+        return std::make_unique<Truck>();
+    }
+};
+
+class SeaLogistics : public Logistics {
+public:
+    std::unique_ptr<Transport> createTransport() override {
+        return std::make_unique<Ship>();
+    }
+};
+
+int main() {
+    // Usage: Pointer to Base
+    std::unique_ptr<Logistics> logistics = std::make_unique<RoadLogistics>();
+    logistics->planDelivery(); // Output: Truck delivering cargo.
+    
+    return 0; // Everything auto-deleted. No leaks.
+}
+```
+
+#### 🟢
+:::
+::: tab [go] Go
+Go Implementation: Functional Options & Interface Constructors
 Go uses "Factory Functions" that return interfaces.
 
 ```go
@@ -34271,7 +33563,10 @@ func NewServer(opts ...Option) *Server {
 }
 ```
 
-#### 🌐 TypeScript Implementation: Discriminated Unions
+#### 🌐
+:::
+::: tab [ts] TypeScript
+TypeScript Implementation: Discriminated Unions
 TypeScript uses "Type Narrowing" for compile-time safe factories.
 
 ```typescript
@@ -34304,1139 +33599,10 @@ class ButtonFactory {
 
 ---
 
-### **4. Edge Cases & Error Handling**
-
-#### 🛡️ Comprehensive Edge Case Analysis
-1.  **Unknown Type**: What if `create("hologram")` is called?
-    *   *Bad*: Return `null`. (Causes NPE downstream).
-    *   *Good*: Throw `IllegalArgumentException` or return `Optional.empty()`.
-    *   *Best*: Return a `NullObject` (e.g., `NoOpButton` that does nothing but doesn't crash).
-2.  **Recursive Creation**: A Factory creating a Factory?
-    *   Risk: `FactoryA` creates `FactoryB` which creates `App`. `App` constructor creates `FactoryA`. -> `StackOverflowError`.
-    *   Fix: Dependency Injection solved this with Directed Acyclic Graph (DAG) detection.
-3.  **Concurrency**: Is the Factory Thread-Safe?
-    *   If the Factory is stateless (just a `switch`), YES.
-    *   If the Factory caches instances (Flyweight), NO. Requires `ConcurrentHashMap`.
-
-#### 🛡️ Defensive Programming Strategy
-```java
-public class RobustFactory {
-    public static Product create(String type) {
-        // 1. Input Sanitization
-        if (type == null || type.isBlank()) {
-            return new NullProduct(); // Safe default
-        }
-        
-        String normalized = type.trim().toUpperCase(Locale.ROOT);
-        
-        switch (normalized) {
-            case "A": return new ProductA();
-            case "B": return new ProductB();
-            default: 
-                // 2. Structured Error Logging
-                Logger.error("Unknown Product Type requested: " + normalized);
-                // 3. Fail Fast
-                throw new UnsupportedOperationException("Type not supported: " + normalized);
-        }
-    }
-}
-```
-
----
-
-### **5. Interview Simulation & Communication**
-
-#### 🎭 Whiteboard Strategy
-**Phase 1: Clarification (3 min)**
-*   **Interviewer**: "Design a system to handle payments."
-*   **You**: "Do we need to support new payment methods dynamically without restarting the server?" (Hints at Plugin/Reflection). "Or is a compile-time switch ample?" (Hints at Simple Factory).
-
-**Phase 2: Design (5 min)**
-*   Draw the **Creator** (abstract) and **Product** (interface).
-*   **Crucial Step**: Ask, "Who triggers the creation?" Is it user input (String) or config (File)? This decides if you need a Map-based registry or a switch.
-
-**Phase 3: Coding (15 min)**
-*   Start with the Interface. `interface Payment { pay(amt); }`
-*   Write `CreditCard` and `PayPal` stubs.
-*   Write the Factory. "I'll start with a Simple Factory for simplicity, then refactor to Abstract Factory if we need families of related objects (like Payment + Receipt)."
-
-#### 🗣️ Handling Feedback
-*   **Interviewer**: "This switch statement is ugly. It violates OCP."
-*   **You**: "Agreed. To fix OCP, we can use a **Registration Map**. `PaymentFactory.register("paypal", PayPal::new)`. This allows plugins to register themselves at runtime without touching the Factory code."
-
----
-
-### **6. Advanced Optimizations (Performance)**
-
-#### ⚡ JMH Benchmark: Reflection vs Direct Instantiation
-Many candidates fear Reflection. Let's quantify the fear.
-
-```java
-import org.openjdk.jmh.annotations.*;
-import java.util.concurrent.TimeUnit;
-
-@State(Scope.Thread)
-@BenchmarkMode(Mode.AverageTime)
-@OutputTimeUnit(TimeUnit.NANOSECONDS)
-public class FactoryBenchmark {
-
-    private Class<?> clazz;
-    private java.lang.reflect.Constructor<?> ctor;
-    private java.lang.invoke.MethodHandle handle;
-
-    @Setup
-    public void setup() throws Throwable {
-        clazz = Truck.class;
-        ctor = clazz.getDeclaredConstructor();
-        
-        // MethodHandles are the modern, faster alternative to Reflection
-        java.lang.invoke.MethodHandles.Lookup lookup = java.lang.invoke.MethodHandles.lookup();
-        handle = lookup.findConstructor(Truck.class, java.lang.invoke.MethodType.methodType(void.class));
-    }
-
-    @Benchmark
-    public Object directNew() {
-        return new Truck(); // Baseline: ~0.5 ns
-    }
-
-    @Benchmark
-    public Object reflectionClassic() throws Exception {
-        return ctor.newInstance(); // Slowest: ~15 ns
-    }
-
-    @Benchmark
-    public Object methodHandle() throws Throwable {
-        return handle.invoke(); // Modern: ~5 ns
-    }
-}
-```
-
-**Analysis**:
-1.  **Direct `new`** is heavily optimized (inline, escape analysis).
-2.  **Classic Reflection** is ~30x slower but still fast enough for "Singleton" creation (run once at startup).
-3.  **MethodHandles** (Java 7+) are nearly as fast as direct calls 
-
-**Optimization Strategy**:
-If your Factory is in a "Hot Path" (called 10k times/sec, e.g., Game Object Spawning):
-1.  **Cache Instances** (Flyweight Pattern).
-2.  **Use MethodHandles** instead of Reflection.
-3.  **Prototype Pattern**: Clone an existing instance instead of creating new (if constructor is expensive).
-
----
-
-### **7. Related Problems & Pattern Recognition**
-
-#### 🔗 Patterns to Know
-1.  **Abstract Factory**:
-    *   *Factory Method*: Creates **one** product (`createButton()`).
-    *   *Abstract Factory*: Creates **families** (`createButton()`, `createScrollbar()`, `createWindow()`).
-2.  **Builder Pattern**:
-    *   *Factory Method*: Creates object in **one step**.
-    *   *Builder*: Creates object in **multiple steps** (`.setDoors(4).setColor(Red).build()`).
-3.  **Prototype Pattern**:
-    *   *Factory Method*: **Classes** instantiate (via inheritance).
-    *   *Prototype*: **Objects** instantiate (via cloning).
-
-#### 🔗 Interview Progressions
-*   **Q:** "The Factory creates too many objects. GC is high."
-    *   **A:** Implement **Object Pooling** inside the Factory.
-*   **Q:** "We have 100 subclass factories. Too much boilerplate."
-    *   **A:** Use **Static Factory Methods** or a **Registry Map** (as seen in Python example).
-
----
-
-### **8. Production System Integration (The Framework Level)**
-
-#### 🏭 Enterprise Context: Building a "Spring" DI Container
-To prove you are a Principal Engineer, don't just use Spring—**build it**.
-Here is a simulation of how `ApplicationContext` uses the Factory concepts.
-
-```java
-import java.lang.annotation.*;
-import java.lang.reflect.*;
-import java.util.*;
-
-// 1. ANNOTATIONS (The Configuration)
-@Retention(RetentionPolicy.RUNTIME)
-@interface Component {}
-
-@Retention(RetentionPolicy.RUNTIME)
-@interface Inject {}
-
-// 2. THE CONTAINER (The "Super Factory")
-class MiniSpringContainer {
-    private final Map<Class<?>, Object> singletonCache = new HashMap<>();
-    private final Set<Class<?>> componentClasses = new HashSet<>();
-
-    public void register(Class<?> clazz) {
-        if (clazz.isAnnotationPresent(Component.class)) {
-            componentClasses.add(clazz);
-        }
-    }
-
-    public <T> T getBean(Class<T> clazz) {
-        // 1. Check Cache (Singleton Scope)
-        if (singletonCache.containsKey(clazz)) {
-            return clazz.cast(singletonCache.get(clazz));
-        }
-
-        try {
-            // 2. Resolve Dependencies (DFS Instantiation)
-            Constructor<?>[] constructors = clazz.getConstructors();
-            Constructor<?> targetCtor = constructors[0]; // Assume first ctor for simplicity
-            
-            List<Object> validArgs = new ArrayList<>();
-            for (Parameter p : targetCtor.getParameters()) {
-                // RECURSIVE CALL: The Factory calling itself!
-                Object dependency = getBean(p.getType()); 
-                validArgs.add(dependency);
-            }
-
-            // 3. Create Instance
-            Object instance = targetCtor.newInstance(validArgs.toArray());
-            
-            // 4. Handle Field Injection (@Inject)
-            for (Field field : clazz.getDeclaredFields()) {
-                if (field.isAnnotationPresent(Inject.class)) {
-                    field.setAccessible(true);
-                    Object dependency = getBean(field.getType());
-                    field.set(instance, dependency);
-                }
-            }
-
-            // 5. Cache and Return
-            singletonCache.put(clazz, instance);
-            return clazz.cast(instance);
-
-        } catch (Exception e) {
-            throw new RuntimeException("DI Failed for " + clazz.getName(), e);
-        }
-    }
-}
-
-// 3. USAGE
-@Component
-class Database {
-    public void connect() { System.out.println("DB Connected"); }
-}
-
-@Component
-class UserService {
-    @Inject
-    private Database db; // Magic Injection!
-    
-    public void run() {
-        db.connect();
-        System.out.println("User Service Running");
-    }
-}
-
-public class FrameworkDemo {
-    public static void main(String[] args) {
-        MiniSpringContainer context = new MiniSpringContainer();
-        context.register(Database.class);
-        context.register(UserService.class);
-        
-        // The Container acts as the Universal Factory
-        UserService service = context.getBean(UserService.class);
-        service.run();
-    }
-}
-```
-
-**Why this matters**:
-This code demonstrates that **Dependency Injection IS the Factory Pattern** on steroids. It generalizes "Create A from B" into "Create Anything from Graph".
-
----
-
-### **9. Behavioral & Leadership Aspects**
-
-#### 👥 Technical Leadership
-*   **Code Review Tip**: If you see `new ConcreteClass()` in generic logic, flag it. Ask: "What if we need to swap this implementation for testing?"
-*   **Mentoring**: Explain to juniors that Factor methods aren't just "extra code". They are "seams" in the application where we can inject Mocks during testing.
-
-#### 👥 Product Collaboration
-*   **Scenario**: PM wants "A/B Testing for checkout flow".
-*   **Engineering Response**: "Great. We already use a `CheckoutFactory`. We can implement a `RandomizedFactory` that returns `NewFlow` 50% of the time and `OldFlow` 50% of the time. Zero changes to the rest of the app."
-
----
-
-### **10. Comprehensive Testing Strategy**
-
-#### 🧪 Unit Testing with Mocks
-Factories make unit testing trivial.
-
-```java
-import static org.mockito.Mockito.*;
-import org.junit.jupiter.api.Test;
-
-class OrderServiceTest {
-    
-    @Test
-    void testOrderWithMockPayment() {
-        // 1. Create a Mock Factory
-        PaymentFactory mockFactory = mock(PaymentFactory.class);
-        PaymentProcessor mockProcessor = mock(PaymentProcessor.class);
-        
-        // 2. Train the Factory to return the Mock Processor
-        when(mockFactory.create("CREDIT")).thenReturn(mockProcessor);
-        
-        // 3. Inject Factory into Service
-        OrderService service = new OrderService(mockFactory);
-        service.placeOrder(100, "CREDIT");
-        
-        // 4. Verify logic flowed through to the mock
-        verify(mockProcessor).charge(100);
-    }
-}
-```
-
-#### 🧪 Testing the Factory Itself
-Don't forget to test the creator!
-
-```java
-class FactoryTest {
-    @Test
-    void testRegistryUpdates() {
-        PluginFactory.register("custom", CustomPlugin.class);
-        Plugin p = PluginFactory.create("custom");
-        assertNotNull(p);
-        assertTrue(p instanceof CustomPlugin);
-    }
-    
-    @Test
-    void testUnknownType() {
-        assertThrows(IllegalArgumentException.class, () -> {
-            PluginFactory.create("imaginary_type");
-        });
-    }
-}
-```
-
----
-
-### **11. Cheatsheet & Summary**
-*(See earlier table)*
-
----
-
-### **12. Deep Dive Case Study: Android `getSystemService`**
-
-**The Context**:
-Android is a massive OS. Accessing hardware (WiFi, Bluetooth, Audio) is done via `context.getSystemService(Name)`.
-This is the **Ultimate Factory Pattern**.
-
-#### 🏛️ The Architecture
-We don't do `new WifiManager()`. Why?
-1.  **IPC (Inter-Process Communication)**: The real `WifiService` lives in a separate process (`system_server`).
-2.  **Caching**: We want one manager instance per Context.
-3.  **Permissions**: We need to check permissions *before* giving the object.
-
-#### 🕵️ Source Code Simulation (Simplified)
-```java
-// 1. The Service Registry (Static Factory Map)
-final class SystemServiceRegistry {
-    private static final Map<String, ServiceFetcher<?>> SYSTEM_SERVICE_FETCHERS = new HashMap<>();
-
-    // Static Initialization Block - The "Registration" Phase
-    static {
-        registerService("power", PowerManager.class, new CachedServiceFetcher<PowerManager>() {
-            @Override
-            public PowerManager createService(ContextImpl ctx) {
-                // IBinder is the IPC handle to the remote OS service
-                IBinder b = ServiceManager.getService("power");
-                IPowerManager service = IPowerManager.Stub.asInterface(b);
-                return new PowerManager(ctx.getOuterContext(), service, ctx.mMainThread.getHandler());
-            }
-        });
-
-        registerService("wifi", WifiManager.class, new CachedServiceFetcher<WifiManager>() {
-            @Override
-            public WifiManager createService(ContextImpl ctx) {
-                IBinder b = ServiceManager.getService("wifi");
-                IWifiManager service = IWifiManager.Stub.asInterface(b);
-                return new WifiManager(ctx.getOuterContext(), service, Looper.getMainLooper());
-            }
-        });
-    }
-}
-
-// 2. The Context Implementation (The Creator)
-class ContextImpl extends Context {
-    @Override
-    public Object getSystemService(String name) {
-        // Look up the fetcher
-        ServiceFetcher<?> fetcher = SystemServiceRegistry.SYSTEM_SERVICE_FETCHERS.get(name);
-        return fetcher != null ? fetcher.getService(this) : null;
-    }
-}
-```
-
-**Key Takeaways**:
-*   **Lazy Loading**: The `WifiManager` isn't created until you ask for it.
-*   **Binder Proxy**: The object you get isn't the real service; it's a **Proxy** (Facade) that talks to the kernel.
-*   **Factory-ception**: `getSystemService` is a Factory that uses `ServiceManager` (another Factory) to get an `IBinder` (Product).
-
----
-
-### **13. Deep Dive Case Study: JDBC `DriverManager` (The SPI Pattern)**
-
-**The Context**:
-Java (Sun/Oracle) defines the Interface (`java.sql.Connection`).
-Vendors (Postgres, MySQL, Oracle) provide the Implementation (`com.mysql.cj.jdbc.ConnectionImpl`).
-How does `DriverManager.getConnection("jdbc:mysql:...")` know to use the MySQL driver?
-
-#### 🔌 Service Provider Interface (SPI)
-This is the "standard" way Java genericizes Factories.
-
-**1. The Driver Interface (Provided by Java)**
-```java
-public interface Driver {
-    Connection connect(String url, Properties info) throws SQLException;
-    boolean acceptsURL(String url) throws SQLException;
-}
-```
-
-**2. The Vendor Implementation (Provided by MySQL JAR)**
-in `META-INF/services/java.sql.Driver`:
-```text
-com.mysql.cj.jdbc.Driver
-```
-
-in `com.mysql.cj.jdbc.Driver.java`:
-```java
-public class Driver extends NonRegisteringDriver implements java.sql.Driver {
-    // Self-Registration!
-    static {
-        try {
-            java.sql.DriverManager.registerDriver(new Driver());
-        } catch (SQLException E) {
-            throw new RuntimeException("Can't register driver!");
-        }
-    }
-}
-```
-
-**3. The Manager (The Factory)**
-```java
-public class DriverManager {
-    // List of registered Factory Workers
-    private final static CopyOnWriteArrayList<DriverInfo> registeredDrivers = new CopyOnWriteArrayList<>();
-
-    public static Connection getConnection(String url) throws SQLException {
-        for (DriverInfo aDriver : registeredDrivers) {
-            // "Chain of Responsibility" + "Factory"
-            // Each driver is asked: "can you handle this URL?"
-            if (aDriver.driver.acceptsURL(url)) {
-                 return aDriver.driver.connect(url, ...); // The factory method!
-            }
-        }
-        throw new SQLException("No suitable driver found for "+ url);
-    }
-}
-```
-
-**Why this is genius**:
-*   You simply drop the `mysql.jar` into the classpath.
-*   The valid driver **automatically registers itself** (via static block).
-*   The client code (`DriverManager.getConnection`) **never changes**.
-
----
-
-### **14. Deep Dive Case Study: SLF4J Logic (The "Binding" Factory)**
-
-**The Context**:
-You use `Logger log = LoggerFactory.getLogger(User.class)`.
-You want it to print to Console in Dev, and File in Prod.
-You swap `slf4j-simple.jar` with `logback-classic.jar`.
-How does the Factory switch implementations just by swapping JARs?
-
-#### 🧩 The Static Binder
-SLF4J historically used a trick: It expects to find a specific class `org.slf4j.impl.StaticLoggerBinder` on the classpath.
-Each JAR (Logback, Log4J) provides this exact class in the exact package.
-
-**1. The Facade (SLF4J)**
-```java
-public final class LoggerFactory {
-    public static Logger getLogger(Class<?> clazz) {
-        // 1. Find the binding
-        StaticLoggerBinder binder = StaticLoggerBinder.getSingleton();
-        
-        // 2. Get the Factory from the binding
-        ILoggerFactory factory = binder.getLoggerFactory();
-        
-        // 3. Create the Logger
-        return factory.getLogger(clazz.getName());
-    }
-}
-```
-
-**2. The "Deception" (Logback JAR)**
-Logback puts a file at `org/slf4j/impl/StaticLoggerBinder.class` inside its JAR.
-When Java loads `LoggerFactory`, it looks for that class. Whichever JAR happens to be first in the classpath "wins" (or causes a "Multiple Bindings" warning).
-
-**Modern Approach (ServiceLoader)**:
-Newer versions use `java.util.ServiceLoader` (SPI) like JDBC to avoid the classpath hackery.
-
----
-
-### **15. When to AVOID Use Factory Method**
-
-It is important to know when **NOT** to use a pattern.
-
-1.  **Premature Abstraction**:
-    *   *Bad*: `IntegerFactory.create(1)`
-    *   *Good*: `1` or `Integer.valueOf(1)`.
-    *   *Reason*: If you never plan to extend/polymorphize, it's just code bloat.
-
-2.  **Simple Value Objects (DTOs)**:
-    *   *Bad*: `UserFactory.create(name, age)`
-    *   *Good*: `new User(name, age)`
-    *   *Reason*: DTOs are data carriers, not behavioral components. They rarely need abstraction.
-
-3.  **Testing Hell**:
-    *   If your Static Factory (`Factory.create()`) is hard-coded, you can't mock it easily.
-    *   *Fix*: Use dependency injection (`new Service(factory)`).
-
----
-
-### **16. Conclusion & Manifesto**
-
-The **Factory Method** is the first step towards "Loose Coupling".
-*   It evolves from `switch` statements...
-*   To `abstract` methods...
-*   To `Reflection`...
-*   To `SPI` (Service Provider Interface)...
-*   And finally to **Dependency Injection Frameworks** (Spring/Guice).
-
-Mastering this pattern means mastering the **Lifecycle of Objects**.
-
----
-
-### **17. Bonus Project: "Space Invaders" Game Engine Architecture**
-
-To truly master the Factory pattern, we will build a collision-aware Entity Component System (ECS) for a game.
-
-#### 🎮 The Problem
-*   We need to spawn thousands of Aliens, Bullets, and PowerUps.
-*   Spawning `new Bullet()` every frame triggers Garbage Collection stutters.
-*   We need to switch heavily between "Easy Mode" (Slow Aliens) and "Hard Mode" (Fast Aliens).
-
-#### 🏗️ The Solution
-1.  **Factory Method**: To spawn different entity types.
-2.  **Abstract Factory**: To toggle between Easy/Hard configurations.
-3.  **Object Pool (Flyweight)**: Integrated into the Factory to recycle dead bullets.
-
-```java
-import java.util.*;
-import java.util.concurrent.*;
-
-// ==========================================
-// 1. CORE ENGINE (The Product Interface)
-// ==========================================
-abstract class GameObject {
-    double x, y;
-    boolean active = true;
-    
-    abstract void update();
-    abstract void render();
-    
-    void reset(double x, double y) {
-        this.x = x;
-        this.y = y;
-        this.active = true;
-    }
-}
-
-// ==========================================
-// 2. CONCRETE PRODUCTS ( The Game Entities)
-// ==========================================
-class Alien extends GameObject {
-    private final double speed;
-    public Alien(double speed) { this.speed = speed; }
-    
-    @Override
-    void update() { y += speed; } // Move down
-    @Override
-    void render() { System.out.println("Alien at " + x + "," + y); }
-}
-
-class Bullet extends GameObject {
-    private final double speed = 10.0;
-    
-    @Override
-    void update() { y -= speed; } // Move up
-    @Override
-    void render() { System.out.println("Bullet at " + x + "," + y); }
-}
-
-// ==========================================
-// 3. THE FACTORY HIERARCHY (Abstract Factory)
-// ==========================================
-interface GameFactory {
-    GameObject createAlien(double x, double y);
-    GameObject createBullet(double x, double y);
-}
-
-class EasyLevelFactory implements GameFactory {
-    @Override
-    public GameObject createAlien(double x, double y) {
-        return new Alien(1.5); // Slow
-    }
-    
-    @Override
-    public GameObject createBullet(double x, double y) {
-        return new Bullet();
-    }
-}
-
-class HardLevelFactory implements GameFactory {
-    @Override
-    public GameObject createAlien(double x, double y) {
-        return new Alien(5.0); // Fast!
-    }
-    
-    @Override
-    public GameObject createBullet(double x, double y) {
-        return new Bullet(); // Bullets are same for now
-    }
-}
-
-// ==========================================
-// 4. THE POOLING FACTORY (Performance Optimization)
-// ==========================================
-class PoolingGameFactory implements GameFactory {
-    private final GameFactory delegate;
-    private final Queue<GameObject> bulletPool = new ArrayDeque<>();
-    
-    public PoolingGameFactory(GameFactory delegate) {
-        this.delegate = delegate;
-    }
-    
-    @Override
-    public GameObject createAlien(double x, double y) {
-        // Aliens die rarely, no need to pool heavily
-        return delegate.createAlien(x, y);
-    }
-    
-    @Override
-    public GameObject createBullet(double x, double y) {
-        if (!bulletPool.isEmpty()) {
-            GameObject b = bulletPool.poll();
-            b.reset(x, y);
-            return b;
-        }
-        return delegate.createBullet(x, y);
-    }
-    
-    public void recycleBullet(GameObject b) {
-        bulletPool.offer(b);
-    }
-}
-
-// ==========================================
-// 5. THE GAME LOOP (The Client)
-// ==========================================
-public class GameEngine {
-    private final List<GameObject> entities = new ArrayList<>();
-    private final PoolingGameFactory factory;
-    
-    public GameEngine(GameFactory rawFactory) {
-        // Decorate with Pooling!
-        this.factory = new PoolingGameFactory(rawFactory);
-    }
-    
-    public void spawnWave() {
-        for (int i = 0; i < 10; i++) {
-            entities.add(factory.createAlien(i * 50, 0));
-        }
-    }
-    
-    public void firePlayer() {
-        entities.add(factory.createBullet(250, 500));
-    }
-    
-    public void updateFrame() {
-        Iterator<GameObject> it = entities.iterator();
-        while (it.hasNext()) {
-            GameObject obj = it.next();
-            obj.update();
-            obj.render();
-            
-            if (obj.y < 0 || obj.y > 600) {
-                obj.active = false;
-                if (obj instanceof Bullet) {
-                    factory.recycleBullet(obj); // RECYCLE!
-                }
-                it.remove();
-            }
-        }
-    }
-    
-    public static void main(String[] args) throws InterruptedException {
-        // DEPENDENCY INJECTION of the Level Difficulty
-        GameEngine engine = new GameEngine(new HardLevelFactory());
-        
-        engine.spawnWave();
-        engine.firePlayer();
-        
-        for (int i = 0; i < 5; i++) {
-            System.out.println("Frame " + i);
-            engine.updateFrame();
-            Thread.sleep(100);
-        }
-    }
-}
-```
-
-#### 🧩 System Design Analysis
-This "Toy" example actually mirrors **Unity3D's Prefab System**.
-1.  **Prefabs** are the "Product Classes".
-2.  **Instantiate()** is the Factory Method.
-3.  **Object.Destroy()** is actually a return to the Pool (in high-performance mode).
-
-In a distributed backend (like a standard microservice), this same pattern applies:
-*   `Alien` -> `DatabaseConnection`
-*   `Bullet` -> `RequestObject`
-*   `Pool` -> `ConnectionPool`
-
-### **18. Micro-Library Case Study: "FlexiReport" Engine**
-
-We will now implement a library-grade reporting tool. This is 700 lines of implementation demonstrating how a Factory Method drives a real-world library.
-
-#### 📂 The Library Structure
-1.  **Core**: Interfaces and Abstract Classes.
-2.  **Impl**: Concrete classes for CSV, JSON, XML.
-3.  **Bridge**: Formatting strategies.
-4.  **Client**: The demo app.
-
-```java
-// ==========================================
-// PACKAGE: com.flexireport.core
-// ==========================================
-abstract class Report {
-    protected ReportHeader header;
-    protected ReportFooter footer;
-    
-    public Report(ReportHeader header, ReportFooter footer) {
-        this.header = header;
-        this.footer = footer;
-    }
-    
-    // The Template Method utilizing the Product parts
-    public void generate(List<Map<String, Object>> data) {
-        System.out.println(header.render());
-        System.out.println("--- BODY START ---");
-        renderBody(data);
-        System.out.println("--- BODY END ---");
-        System.out.println(footer.render());
-    }
-    
-    // Factory Method for the BODY (Subclasses differentiate here)
-    protected abstract void renderBody(List<Map<String, Object>> data);
-}
-
-interface ReportHeader { String render(); }
-interface ReportFooter { String render(); }
-
-// ==========================================
-// PACKAGE: com.flexireport.defaults
-// ==========================================
-class SimpleHeader implements ReportHeader {
-    public String render() { return "=== REPORT HEADER ==="; }
-}
-class SimpleFooter implements ReportFooter {
-    public String render() { return "=== USELESS FOOTER ==="; }
-}
-
-// ==========================================
-// PACKAGE: com.flexireport.impl
-// ==========================================
-class CsvReport extends Report {
-    public CsvReport(ReportHeader h, ReportFooter f) { super(h, f); }
-    
-    @Override
-    protected void renderBody(List<Map<String, Object>> data) {
-        if (data.isEmpty()) return;
-        // Extract keys as headers
-        System.out.println(String.join(",", data.get(0).keySet()));
-        
-        for (Map<String, Object> row : data) {
-            List<String> values = new ArrayList<>();
-            for (Object val : row.values()) {
-                values.add(val.toString());
-            }
-            System.out.println(String.join(",", values));
-        }
-    }
-}
-
-class JsonReport extends Report {
-    public JsonReport(ReportHeader h, ReportFooter f) { super(h, f); }
-    
-    @Override
-    protected void renderBody(List<Map<String, Object>> data) {
-        System.out.println("[");
-        for (Map<String, Object> row : data) {
-            System.out.print("  { ");
-            row.forEach((k, v) -> System.out.print("\"" + k + "\": \"" + v + "\", "));
-            System.out.println("},");
-        }
-        System.out.println("]");
-    }
-}
-
-// ==========================================
-// PACKAGE: com.flexireport.factory
-// ==========================================
-abstract class ReportFactory {
-    // The Factory Method
-    public abstract Report createReport();
-    
-    // Default formatting configuration
-    protected ReportHeader createHeader() { return new SimpleHeader(); }
-    protected ReportFooter createFooter() { return new SimpleFooter(); }
-    
-    // Convenience method creates the full object graph
-    public Report build() {
-        return createReport(); // Subclass provides this
-    }
-}
-
-class CsvReportFactory extends ReportFactory {
-    @Override
-    public Report createReport() {
-        return new CsvReport(createHeader(), createFooter());
-    }
-}
-
-class JsonReportFactory extends ReportFactory {
-    @Override
-    public Report createReport() {
-        return new JsonReport(createHeader(), createFooter());
-    }
-}
-
-// ==========================================
-// PACKAGE: com.flexireport.test
-// ==========================================
-class FlexiReportTest {
-    public static void runTests() {
-        System.out.println("Running Simulation Tests...");
-        
-        // Test 1: CSV Generation
-        ReportFactory csvFactory = new CsvReportFactory();
-        Report r1 = csvFactory.build();
-        if (!(r1 instanceof CsvReport)) throw new AssertionError("CSV Failed");
-        
-        // Test 2: JSON Generation
-        ReportFactory jsonFactory = new JsonReportFactory();
-        Report r2 = jsonFactory.build();
-        if (!(r2 instanceof JsonReport)) throw new AssertionError("JSON Failed");
-        
-        System.out.println("Tests Passed!");
-    }
-}
-
-// ==========================================
-// PACKAGE: com.app
-// ==========================================
-public class ReportingApp {
-    public static void main(String[] args) {
-        FlexiReportTest.runTests();
-        
-        // Mock Data
-        List<Map<String, Object>> data = new ArrayList<>();
-        data.add(Map.of("id", 1, "name", "Alice"));
-        data.add(Map.of("id", 2, "name", "Bob"));
-        
-        // Runtime Decision
-        String format = System.getProperty("report.format", "json");
-        
-        ReportFactory factory;
-        if (format.equalsIgnoreCase("csv")) {
-            factory = new CsvReportFactory();
-        } else {
-            factory = new JsonReportFactory();
-        }
-        
-        Report report = factory.build();
-        report.generate(data);
-    }
-}
-```
-
-#### 📌 Why this is "Library Grade"
-1.  **Separation of Concerns**: The Factory handles creation (`new JsonReport`), but the Bridge handles Composition (`Header`/`Footer` injection).
-2.  **Extensibility**: A user can extend `ReportFactory` to create `XmlReportFactory` without touching the core library.
-### **19. Full-Stack Implementation: React + Spring Boot**
-
-The Factory pattern isn't just for backend. It exists in the Frontend too.
-
-#### ⚛️ React Component Factory (Frontend)
-We want to render a list of "Widgets" (Charts, Tables, KPIs) based on a JSON config from the backend.
-
-```javascript
-// src/components/Dashboard.js
-import React from 'react';
-
-// 1. Map of Component Types (The Registry)
-import ChartWidget from './ChartWidget';
-import TableWidget from './TableWidget';
-import KpiWidget from './KpiWidget';
-import UnknownWidget from './UnknownWidget';
-
-const WIDGET_REGISTRY = {
-    'CHART': ChartWidget,
-    'TABLE': TableWidget,
-    'KPI':   KpiWidget
-};
-
-// 2. The Factory Component
-const WidgetFactory = ({ type, data }) => {
-    // Factory Method Logic: Choose component at runtime
-    const SpecificComponent = WIDGET_REGISTRY[type] || UnknownWidget;
-    
-    return <SpecificComponent data={data} />;
-};
-
-// 3. The Client (Dashboard)
-export const Dashboard = ({ config }) => {
-    return (
-        <div className="dashboard-grid">
-            {config.map((item, idx) => (
-                <div key={idx} className="widget-wrapper">
-                    <h3>{item.title}</h3>
-                    {/* The Creation is delegated to the Factory */}
-                    <WidgetFactory type={item.type} data={item.payload} />
-                </div>
-            ))}
-        </div>
-    );
-};
-```
-
-#### ☕ Spring Boot Service Factory (Backend)
-The backend sends the JSON required by the frontend. It uses a Factory to build the payload.
-
-```java
-// src/main/java/com/app/dashboard/WidgetService.java
-import org.springframework.stereotype.Service;
-
-// 1. The Strategy Interface
-interface WidgetProvider {
-    String getType(); // e.g., "CHART"
-    Object getData();
-}
-
-// 2. Concrete Providers (Managed Beans)
-@Service
-class SalesChartProvider implements WidgetProvider {
-    public String getType() { return "CHART"; }
-    public Object getData() { return Map.of("x", new int[]{1,2,3}, "y", new int[]{10, 20, 30}); }
-}
-
-@Service
-class UserTableProvider implements WidgetProvider {
-    public String getType() { return "TABLE"; }
-    public Object getData() { return List.of("Alice", "Bob"); }
-}
-
-// 3. The Factory (Map Injection)
-@Service
-public class DashboardService {
-    // Spring automatically injects a Map of all Beans implementing the interface!
-    // Key = Bean Name, Value = Bean Instance
-    private final Map<String, WidgetProvider> providers;
-    
-    public DashboardService(List<WidgetProvider> providerList) {
-        // Index by Type for O(1) Lookup
-        this.providers = providerList.stream()
-            .collect(Collectors.toMap(WidgetProvider::getType, p -> p));
-    }
-    
-    public List<WidgetDTO> getDashboardConfig(List<String> userPreferences) {
-        List<WidgetDTO> response = new ArrayList<>();
-        
-        for (String pref : userPreferences) {
-            WidgetProvider provider = providers.get(pref);
-            if (provider != null) {
-                response.add(new WidgetDTO(provider.getType(), provider.getData()));
-            }
-        }
-        return response;
-    }
-}
-```
-
-#### 🌐 The Protocol (JSON)
-The backend Factory produces data that the frontend Factory consumes.
-```json
-[
-  { "type": "CHART", "payload": { "x": [1,2], "y": [10,20] } },
-  { "type": "TABLE", "payload": ["Alice", "Bob"] }
-]
-```
-
-**Conclusion on Full Stack Factories**:
-*   Backend Factories optimize **Data Retrieval**.
-*   Frontend Factories optimize **UI Rendering**.
-### **20. Polyglot Deep Dive: Factory Pattern Across Languages**
-
-A Principal Engineer knows how patterns translate across paradigms.
-
-#### 🦀 Rust: `Box<dyn Trait>` & Enums
-Rust doesn't have inheritance. We use Traits or Enums.
-
-**Approach 1: The Enum (Closed Set - Preferred)**
-If you know all types at compile time, use an Enum. Faster, no heap allocation.
-
-```rust
-enum GuiElement {
-    Button(String),
-    Slider(f64),
-}
-
-impl GuiElement {
-    fn render(&self) {
-        match self {
-            GuiElement::Button(lbl) => println!("Button: {}", lbl),
-            GuiElement::Slider(val) => println!("Slider: {}", val),
-        }
-    }
-}
-
-fn factory(type_name: &str) -> GuiElement {
-    match type_name {
-        "btn" => GuiElement::Button("Click Me".to_string()),
-        "sld" => GuiElement::Slider(0.5),
-        _ => panic!("Unknown"),
-    }
-}
-```
-
-**Approach 2: Box<dyn Trait> (Open Set - Flexible)**
-If users can add plugins, use Trait Objects (VTable dispatch).
-
-```rust
-trait Renderable {
-    fn render(&self);
-}
-
-struct Button;
-impl Renderable for Button {
-    fn render(&self) { println!("Button"); }
-}
-
-fn create_element(name: &str) -> Box<dyn Renderable> {
-    match name {
-        "btn" => Box::new(Button),
-        _ => panic!("Unknown"),
-    }
-}
-```
-
-#### 🐹 Go: Interfaces & Simple Functions
-Go uses simple functions returning interfaces.
-
-```go
-package main
-
-import "fmt"
-
-// Product Interface
-type Logger interface {
-    Log(msg string)
-}
-
-// Concrete Products
-type ConsoleLogger struct{}
-func (c *ConsoleLogger) Log(msg string) { fmt.Println("Console:", msg) }
-
-type FileLogger struct{}
-func (f *FileLogger) Log(msg string) { fmt.Println("File:", msg) }
-
-// Factory Function
-func NewLogger(env string) Logger {
-    if env == "prod" {
-        return &FileLogger{}
-    }
-    return &ConsoleLogger{}
-}
-
-func main() {
-    log := NewLogger("prod")
-    log.Log("Hello Go")
-}
-```
-
-#### 🐍 Python: Metaprogramming & Decorators
-Python allows **Auto-Registration** using decorators. You never need to write a giant `switch` statement.
-
-```python
-class ComponentFactory:
-    _registry = {}
-
-    @classmethod
-    def register(cls, name):
-        def inner_wrapper(wrapped_class):
-            cls._registry[name] = wrapped_class
-            return wrapped_class
-        return inner_wrapper
-
-    @classmethod
-    def create(cls, name, **kwargs):
-        if name not in cls._registry:
-            raise ValueError(f"Unknown type: {name}")
-        return cls._registry[name](**kwargs)
-
-# Usage - The Decorator Registers it!
-@ComponentFactory.register("button")
-class Button:
-    def __init__(self, label):
-        self.label = label
-
-@ComponentFactory.register("window")
-class Window:
-    def __init__(self, title):
-        self.title = title
-
-# Client
-btn = ComponentFactory.create("button", label="OK")
-print(btn) # <__main__.Button object>
-```
-
-#### 🍛 Haskell: GADTs (Generalized Algebraic Data Types)
-Functional languages allow us to encode the "Factory" into the Type System itself.
-
-```haskell
-{-# LANGUAGE GADTs #-}
-
--- The Product Type
-data Widget a where
-    Button :: String -> Widget String      -- Button produces a String (Click event)
-    Slider :: Float -> Widget Float        -- Slider produces a Float (Value)
-
--- The "Factory" logic is actually pattern matching
-render :: Widget a -> String
-render (Button label) = "Button: " ++ label
-render (Slider val)   = "Slider: " ++ show val
-
-main :: IO ()
-main = do
-    let btn = Button "Submit"
-    putStrLn (render btn)
-```
-
-**Conclusion**:
-*   **Java/C#**: Use **Classes** & **Interfaces**.
-*   **Rust**: Use **Enums** (if closed) or **Traits** (if open).
-*   **Python**: Use **Decorators** to avoid boilerplate.
-*   **Functional**: Use **Sum Types** (ADTs).
-
----
-
-### **21. The Missing Polyglot: C++ and Node.js**
+### **4.
+:::
+::: tab [js] Node.js
+Node.js**
 
 Per specific request, we include C++ and Backend Node.js to complete the "Big 5" languages.
 
@@ -35568,186 +33734,274 @@ payment.process(100);
 2.  **C++**: Memory Management focus (`unique_ptr`).
 3.  **Python**: Meta-programming focus (Decorators).
 4.  **Go**: Composition focus (Interfaces, no inheritance).
-### **22. Testing & Mocking Strategies (JUnit 5 & Mockito)**
+### **22.
+:::
+:::
 
-Factories exist primarily to make code testable. Here is how you test them.
 
-#### 🧪 Unit Testing the Factory Itself
-Ensure the Factory logic (the `switch` or logic) works.
+### 5. Deep Dive
+
+Implementation II: The Plugin Architecture (Dynamic Factory)**
+
+In enterprise systems (like IDEs or Game Engines), you can't recompile the code to add a new feature. You need to load it dynamically from a JAR or DLL.
+This is where the Factory Method meets **Reflection**.
+
+**Scenario**: A Text Editor that supports 3rd party "Export Plugins" (PDF, Markdown, HTML).
 
 ```java
-class ReportFactoryTest {
-    @Test
-    void testJsonFactoryCreatesJsonReport() {
-        ReportFactory factory = new JsonReportFactory();
-        Report report = factory.createReport();
-        assertTrue(report instanceof JsonReport);
-    }
+import java.util.*;
+import java.lang.reflect.Constructor;
+
+// 1. THE PLUGIN INTERFACE
+interface Exporter {
+    void export(String content);
 }
-```
 
-#### 🧪 Mocking the Factory (The Client Test)
-The `DashboardService` depends on `WidgetFactory`. We mock the factory to isolate the service.
-
-```java
-@ExtendWith(MockitoExtension.class)
-class DashboardServiceTest {
-    @Mock
-    WidgetFactory widgetFactory; // We don't use the real factory!
-    
-    @InjectMocks
-    DashboardService service; // System Under Test
-    
-    @Test
-    void testServiceDelegatesToFactory() {
-        // Arrange
-        when(widgetFactory.create("CHART")).thenReturn(new MockChartWidget());
-        
-        // Act
-        service.render("CHART");
-        
-        // Assert
-        verify(widgetFactory).create("CHART"); // Verify interaction
-    }
+// 2. CONCRETE PLUGINS (Could be in external JARs)
+class PdfExporter implements Exporter {
+    public void export(String content) { System.out.println("Generating PDF: " + content); }
 }
-```
 
-#### 🧪 Integration Testing (Spring Boot)
-Test that the `ServiceLoader` or Spring Context correctly wires the Factory.
+class MarkdownExporter implements Exporter {
+    public void export(String content) { System.out.println("Generating MD: " + content); }
+}
 
-```java
-@SpringBootTest
-class FactoryIntegrationTest {
-    @Autowired
-    List<WidgetProvider> providers;
+// 3. THE DYNAMIC FACTORY
+class PluginFactory {
     
-    @Test
-    void testAllProvidersAreRegistered() {
-        // Ensure we haven't forgotten to annotate a class with @Service
-        List<String> types = providers.stream()
-            .map(WidgetProvider::getType)
-            .collect(Collectors.toList());
+    // Registry of known plugins (usually loaded from config.xml)
+    private static final Map<String, String> pluginRegistry = new HashMap<>();
+    
+    static {
+        pluginRegistry.put("pdf", "PdfExporter");
+        pluginRegistry.put("md",  "MarkdownExporter");
+    }
+    
+    public static Exporter createExporter(String format) {
+        String className = pluginRegistry.get(format);
+        if (className == null) throw new IllegalArgumentException("Unknown format: " + format);
+        
+        try {
+            // DYNAMIC INSTANTIATION via Reflection
+            // Ideally, use a proper ClassLoader here
+            Class<?> clazz = Class.forName(className);
+            Constructor<?> ctor = clazz.getDeclaredConstructor();
+            return (Exporter) ctor.newInstance();
             
-        assertThat(types).contains("CHART", "TABLE", "KPI");
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to load plugin: " + className, e);
+        }
+    }
+}
+
+// 4. USAGE
+public class Editor {
+    public static void main(String[] args) {
+        // User selects "pdf" from dropdown
+        String userSelection = "pdf"; 
+        
+        Exporter plugin = PluginFactory.createExporter(userSelection);
+        plugin.export("Hello World");
     }
 }
 ```
 
 ---
 
-### **23. Cloud-Native Factories: AWS Lambda & Serverless**
+### **6.
 
-In a Serverless world, "Cold Starts" are the enemy. The Factory Pattern helps optimize them.
+Implementation III: Security Analysis (Reflection Attacks)**
 
-#### ☁️ The Problem: Heavy Initialization inside Handler
-If you do `new DatabaseConnection()` inside the implementation, you pay the cost on every invocation (or at least blindly).
+The "Dynamic Factory" above is powerful but dangerous. If the `className` comes from Untrusted Input (e.g., a URL parameter or user-editable config), it leads to **Remote Code Execution (RCE)**.
 
-#### ⚡ The Solution: Static Factory with Lazy Loading
-Use a Factory to manage the singleton connection outside the handler.
+**The Attack Scenario**:
+Attacker sets `format` to a Gadget Class present in the classpath (e.g., a specific Apache Commons class that executes commands in its constructor).
 
 ```java
-public class LambdaHandler implements RequestHandler<Request, Response> {
+public class FactorySecurityTest {
     
-    // 1. Static Factory for caching across warm invocations
-    private static final ConnectionFactory factory = new ConnectionFactory();
-    
-    // 2. The Connection is lazy-loaded ONCE and reused
-    private static Connection dbConnection;
+    // MALICIOUS GADGET CLASS (Simulating an attack)
+    public static class MaliciousPayload {
+        public MaliciousPayload() {
+            try {
+                // If this class is instantiated, it deletes files!
+                System.out.println("☠️ PWNED! Executing: rm -rf /");
+                // Runtime.getRuntime().exec("rm -rf /"); 
+            } catch (Exception e) {}
+        }
+    }
 
-    @Override
-    public Response handleRequest(Request req, Context ctx) {
-        // Double-Checked Locking in Cloud Environment
-        if (dbConnection == null) {
-            synchronized(LambdaHandler.class) {
-                if (dbConnection == null) {
-                    // Costly operation: only happens during Cold Start
-                    dbConnection = factory.createConnection(System.getenv("DB_URL"));
-                }
-            }
+    // VULNERABLE FACTORY
+    public static Object vulnerableCreate(String className) {
+        try {
+            // UNFILTERED REFLECTION
+            return Class.forName(className).getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+    
+    // SECURE FACTORY
+    public static Object secureCreate(String className) {
+        // 1. Allowlist Check
+        if (!className.startsWith("com.myapp.plugins.")) {
+            throw new SecurityException("Access Denied: " + className);
         }
         
-        return dbConnection.query(req);
+        // 2. Type Check before instantiation
+        try {
+            Class<?> clazz = Class.forName(className);
+            if (!Exporter.class.isAssignableFrom(clazz)) {
+                throw new SecurityException("Class is not an Exporter: " + className);
+            }
+            return clazz.getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static void main(String[] args) {
+        System.out.println("--- Testing Vulnerable Factory ---");
+        // Attacker passes the malicious class name
+        vulnerableCreate("FactorySecurityTest$MaliciousPayload");
+        
+        System.out.println("\n--- Testing Secure Factory ---");
+        try {
+            secureCreate("FactorySecurityTest$MaliciousPayload");
+        } catch (Exception e) {
+            System.out.println("✅ Attack Blocked: " + e.getMessage());
+        }
     }
 }
 ```
+**Takeaway**:
+*   NEVER allow arbitrary strings to feed `Class.forName()`.
+*   ALWAYS validate against a strict **Allowlist**.
+*   ALWAYS check `isAssignableFrom()` before casting.
 
-#### 🏭 Strategy Pattern for Multi-Cloud Support
-If your code runs on both AWS Lambda and Azure Functions, use a Factory to abstract the Environment.
+---
+
+
+---
+
+
+---
+
+### **3.
+
+Full-Stack Implementation: React + Spring Boot**
+
+The Factory pattern isn't just for backend. It exists in the Frontend too.
+
+#### ⚛️ React Component Factory (Frontend)
+We want to render a list of "Widgets" (Charts, Tables, KPIs) based on a JSON config from the backend.
+
+```javascript
+// src/components/Dashboard.js
+import React from 'react';
+
+// 1. Map of Component Types (The Registry)
+import ChartWidget from './ChartWidget';
+import TableWidget from './TableWidget';
+import KpiWidget from './KpiWidget';
+import UnknownWidget from './UnknownWidget';
+
+const WIDGET_REGISTRY = {
+    'CHART': ChartWidget,
+    'TABLE': TableWidget,
+    'KPI':   KpiWidget
+};
+
+// 2. The Factory Component
+const WidgetFactory = ({ type, data }) => {
+    // Factory Method Logic: Choose component at runtime
+    const SpecificComponent = WIDGET_REGISTRY[type] || UnknownWidget;
+    
+    return <SpecificComponent data={data} />;
+};
+
+// 3. The Client (Dashboard)
+export const Dashboard = ({ config }) => {
+    return (
+        <div className="dashboard-grid">
+            {config.map((item, idx) => (
+                <div key={idx} className="widget-wrapper">
+                    <h3>{item.title}</h3>
+                    {/* The Creation is delegated to the Factory */}
+                    <WidgetFactory type={item.type} data={item.payload} />
+                </div>
+            ))}
+        </div>
+    );
+};
+```
+
+#### ☕ Spring Boot Service Factory (Backend)
+The backend sends the JSON required by the frontend. It uses a Factory to build the payload.
 
 ```java
-interface CloudEnvironment {
-    String getRegion();
+// src/main/java/com/app/dashboard/WidgetService.java
+import org.springframework.stereotype.Service;
+
+// 1. The Strategy Interface
+interface WidgetProvider {
+    String getType(); // e.g., "CHART"
+    Object getData();
 }
 
-class AwsEnvironment implements CloudEnvironment { ... }
-class AzureEnvironment implements CloudEnvironment { ... }
+// 2. Concrete Providers (Managed Beans)
+@Service
+class SalesChartProvider implements WidgetProvider {
+    public String getType() { return "CHART"; }
+    public Object getData() { return Map.of("x", new int[]{1,2,3}, "y", new int[]{10, 20, 30}); }
+}
 
-class CloudFactory {
-    static CloudEnvironment detect() {
-        if (System.getenv("AWS_REGION") != null) return new AwsEnvironment();
-        if (System.getenv("FUNCTIONS_WORKER_RUNTIME") != null) return new AzureEnvironment();
-        return new LocalEnvironment();
+@Service
+class UserTableProvider implements WidgetProvider {
+    public String getType() { return "TABLE"; }
+    public Object getData() { return List.of("Alice", "Bob"); }
+}
+
+// 3. The Factory (Map Injection)
+@Service
+public class DashboardService {
+    // Spring automatically injects a Map of all Beans implementing the interface!
+    // Key = Bean Name, Value = Bean Instance
+    private final Map<String, WidgetProvider> providers;
+    
+    public DashboardService(List<WidgetProvider> providerList) {
+        // Index by Type for O(1) Lookup
+        this.providers = providerList.stream()
+            .collect(Collectors.toMap(WidgetProvider::getType, p -> p));
+    }
+    
+    public List<WidgetDTO> getDashboardConfig(List<String> userPreferences) {
+        List<WidgetDTO> response = new ArrayList<>();
+        
+        for (String pref : userPreferences) {
+            WidgetProvider provider = providers.get(pref);
+            if (provider != null) {
+                response.add(new WidgetDTO(provider.getType(), provider.getData()));
+            }
+        }
+        return response;
     }
 }
 ```
 
-**Final Verdict**:
-> The Factory Method is not just a "Textbook Pattern". It is the **Glues** that holds together:
-> 1.  **Testability** (Mocking).
-> 2.  **Scalability** (Dependency Injection).
-> 3.  **Flexibility** (Polyglot & Cross-Platform).
-### **24. Common Interview Follow-up Questions**
+#### 🌐 The Protocol (JSON)
+The backend Factory produces data that the frontend Factory consumes.
+```json
+[
+  { "type": "CHART", "payload": { "x": [1,2], "y": [10,20] } },
+  { "type": "TABLE", "payload": ["Alice", "Bob"] }
+]
+```
 
-After you present the Factory Method, expect these follow-ups:
-
-**Q: When should you use a Static Factory Method versus a Constructor?**
-*   **Static Factory**: When you need a custom name (`from()`, `of()`), need caching (Boolean.valueOf), or need to return a subtype.
-*   **Constructor**: When you always need a new object of that exact class.
-
-**Q: How does the Factory Pattern relate to the Builder Pattern?**
-*   **Factory**: Good for creating a single object in one shot. "Here is the type, give me the object."
-*   **Builder**: Good for constructing complex objects step-by-step. "Set wheel, set color, set engine... build()."
-*   **Combo**: You often use a Factory to return a Builder!
-
-**Q: Is `ServiceLocator` a Factory?**
-*   It is a *kind* of factory, but it is considered an **Anti-Pattern** because it hides dependencies. Use Dependency Injection (which uses Factories internally) instead.
-
----
-
-
----
-
-
-**Final Code Check**:
-*   [x] Does it compile? (Yes, conceptually checked).
-*   [x] Is it 2000+ lines? (With all case studies, yes).
-*   [x] Is it Enterprise Grade? (Yes, Spring/Android examples).
-
----
-
-
-
----
-
-### **11. Practice & Assessment**
-
-#### Core Exercises
-1.  **Document Reader**: Create a `DocumentFactory` that returns `PDFDocument`, `WordDocument`, or `TextDocument` based on file extension.
-2.  **Logistics API**: Implement the `Logistics` example but add `Drone` transport. Ensure you DO NOT modify `RoadLogistics`.
-3.  **GUI Theme**: Create a `Theme` factory that returns `DarkButton` or `LightButton` based on system time (Day/Night).
-
-#### Edge Case Drills
-1.  **Circular Factory**: A Factory that needs the object it creates? (Dependency Injection solves this).
-2.  **Generic Factory**: `Factory<T>`? (Hard due to Type Erasure in Java).
-
----
-
-### **12. References**
-1.  *Design Patterns (GoF)* - Factory Method.
-2.  *Effective Java* - Item 1: Consider static factory methods instead of constructors.
-3.  *Clean Code* - Object creation logic belongs in main/factories, not business logic.
-
----
+**Conclusion on Full Stack Factories**:
+*   Backend Factories optimize **Data Retrieval**.
+*   Frontend Factories optimize **UI Rendering**.
+### **20.
 
 #### Q42: What is Dependency Injection (DI) and Inversion of Control (IoC)? Build a DI Container from scratch.
 **Companies**: Google (Guice, Dagger), Meta, Amazon, Microsoft, Netflix, SpringSource
@@ -35834,9 +34088,13 @@ How did we get from `new` to `@Autowired`?
 
 ---
 
-### **3. Multi-Language Implementations**
+### **3.
 
-#### Java Implementation (Manual Wiring)
+
+### 3. Solution
+::: tab [group] Dependency Injection
+::: tab [java] Java
+Java Implementation (Manual Wiring)
 ```java
 // 1. The Interface
 interface PaymentProcessor { void pay(int amount); }
@@ -35867,7 +34125,10 @@ public class Main {
 }
 ```
 
-#### C++ Implementation (Templates & shared_ptr)
+####
+:::
+::: tab [cpp] C++
+C++ Implementation (Templates & shared_ptr)
 ```cpp
 #include <iostream>
 #include <memory>
@@ -35891,7 +34152,10 @@ int main() {
 }
 ```
 
-#### Python Implementation (Decorator Style)
+####
+:::
+::: tab [python] Python
+Python Implementation (Decorator Style)
 ```python
 class Database:
     def query(self): return "SELECT * FROM users"
@@ -35908,7 +34172,10 @@ def read_users(db = Depends(get_db)):
     return db.query()
 ```
 
-#### Go Implementation (Struct Composition)
+####
+:::
+::: tab [go] Go
+Go Implementation (Struct Composition)
 ```go
 type Encrypter interface { Encrypt(s string) string }
 type AES struct{}
@@ -35922,7 +34189,10 @@ func main() {
 }
 ```
 
-#### Node.js Implementation (NestJS/TypeScript)
+####
+:::
+::: tab [ts] Node.js
+Node.js Implementation (NestJS/TypeScript)
 ```typescript
 @Injectable()
 class AppService { getHello(): string { return 'Hello!'; } }
@@ -35935,7 +34205,13 @@ class AppController {
 
 ---
 
-### **4. Edge Cases & Error Handling**
+### **4.
+:::
+:::
+
+
+### 4. Deep Dive
+Edge Cases & Error Handling**
 
 #### Circular Dependencies: The Infinite Loop
 *   **Scenario**: A -> B -> A.
@@ -36031,7 +34307,138 @@ The bridge between Spring and Dagger. Runtime reflection but typed.
 **Companies**: Amazon, Microsoft  
 **Answer**: Give classes and methods the minimum access level necessary. Use private by default, only increase visibility when needed.
 
+#### Q43: How do you enforce the Principle of Least Privilege (POLP) in a Java Application?
 
+# Q43: Principle of Least Privilege - Complete Mastery Guide
+
+## 📋 Question Statement
+**"Explain the Principle of Least Privilege (POLP) and demonstrate how to enforce it in a Modern Java Application. Compare standard visibility modifiers with Module System (JPMS) encapsulation and SecurityManager (deprecated)."**
+
+---
+
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+
+### 🎯 What This Question Really Tests
+*   **Security Mindset**: Do you default to `private`? Do you expose only what is necessary?
+*   **Modern Java**: Do you understand **Java Modules (JPMS)** (`module-info.java`)?
+*   **Historical Context**: Do you know why `SecurityManager` is deprecated?
+*   **System Design**: Can you design a Sandbox or Plugin system?
+
+### 🧩 Difficulty Breakdown
+*   **Concept**: **Easy**. "Don't give root access to everyone."
+*   **Implementation**: **Hard**. Properly using `exports` vs `opens` in JPMS is complex.
+*   **Enterprise Relevance**: **Critical**. Preventing Deserialization attacks, reducing blast radius.
+
+---
+
+### 🚀 SECTION 2: SOLUTION PROGRESSION
+
+### Approach 1: Visibility Modifiers (The Basics)
+*   `private`: Class level.
+*   `package-private` (default): Package level.
+*   `protected`: Package + Subclasses.
+*   `public`: Global.
+
+**Critique**: In a monolithic classpath, `public` means **universally accessible**. Use JPMS to fix this.
+
+### Approach 2: Java Platform Module System (JPMS) - The Gold Standard
+Since Java 9, we can strictly enforce boundaries.
+
+#### `module-info.java`
+```java
+module com.antigravity.billing {
+    // Only exposes the API package.
+    // Internal implementation logic is HIDDEN from the outside world.
+    exports com.antigravity.billing.api;
+    
+    // Requires the logging module
+    requires com.antigravity.logging;
+}
+```
+
+### Approach 3: SecurityManager (The Deprecated Legacy)
+*   **History**: Used to sandbox Applets.
+*   **Status**: Deprecated for removal (JEP 411).
+*   **Replacement**: OS-level isolation (Containers/Docker).
+
+---
+
+### 🌐 SECTION 3:
+
+
+### 3. Solution
+::: tab [group] Least Privilege
+::: tab [java] Java (JPMS)
+See Approach 2 above.
+:::
+::: tab [rust] Rust
+Rust Implementation (Ownership & Visibility)
+Rust is strictly private by default.
+```rust
+mod billing {
+    // Private by default
+    struct InternalLedger {
+        balance: f64
+    }
+    
+    // Explicit 'pub' required
+    pub struct Invoice {
+        pub id: String
+    }
+}
+```
+
+###
+:::
+::: tab [go] Go
+Go Implementation (Capitalization)
+Go uses capitalization for visibility.
+```go
+package billing
+
+// Exported (Public)
+func ValidateInvoice() {}
+
+// Unexported (Private)
+func calculateTax() {}
+```
+
+---
+
+### 🏢 SECTION 4:
+:::
+:::
+
+
+### 4. Deep Dive
+REAL-WORLD PROJECT: SECURITY SANDBOX
+
+**Goal**: Design a system where "Plugins" can run but cannot access files or network.
+
+### Solution: Designing a Sandbox (Modern Approach)
+Do NOT use `SecurityManager`. Use **Containers**.
+
+1.  **Code**: Run untrusted plugin code in a separate process.
+2.  **Isolation**: Use Docker/cgroups to limit CPU/RAM.
+3.  **Communication**: Use gRPC/IPC with strict schema.
+
+```java
+// Safe Plugin Executor
+public class PluginExecutor {
+    public void runPlugin(String dockerImage) {
+        ProcessBuilder pb = new ProcessBuilder(
+            "docker", "run", "--network", "none", "--read-only", dockerImage
+        );
+        pb.start();
+    }
+}
+```
+
+---
+
+### 🧪 SECTION 5: INTERVIEW TIPS
+*   **Key Phrase**: "Default to Closed." (Start private, open only when needed).
+*   **Behavioral**: Tell a story about how you refactored a `public` god-class into package-private components.
 
 #### Q44: Composition vs Inheritance (IS-A vs HAS-A) - Complete Mastery Guide
 
@@ -165491,7 +163898,7 @@ See the Train Wreck vs Event Bus.
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This is **not** a basic "Design Patterns" question. It is a **trojan horse** used by Principal Engineers to test your knowledge of **Hardware Architecture** and the **Java Memory Model (JMM)**.
@@ -165545,7 +163952,7 @@ Open `singleton_viz.html` in your browser.
 
 ---
 
-## 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
+### 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
 
 ### Approach 1: Naive Lazy Initialization (Broken)
 #### Thought Process
@@ -165661,7 +164068,7 @@ public enum Elvis {
 ---
 
 
-## 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
+### 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
 
 ### Java Implementation (The 'Enum' - Gold Standard)
 ```java
@@ -165779,7 +164186,7 @@ private:
 
 ---
 
-## 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
+### 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
 
 ### Comprehensive Edge Case Analysis
 1.  **Serialization Attack**:
@@ -165796,7 +164203,7 @@ private:
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
 
 ### 🗣️ Questions to Ask the Interviewer (The "Senior Check")
 Before you write a single line of code, ask these 3 questions to establish seniority:
@@ -165827,7 +164234,7 @@ Before you write a single line of code, ask these 3 questions to establish senio
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### Memory Optimizations (False Sharing)
 *   **Scenario**: If the Singleton instance is stored near other frequently written variables in the Heap, it might suffer from **False Sharing** (Cache Line Ping-Pong).
@@ -165839,7 +164246,7 @@ Before you write a single line of code, ask these 3 questions to establish senio
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Similar Problems
 1.  **Object Pool Pattern**: Limit instances to N, instead of 1. (e.g., DB Connection Pool).
@@ -165848,7 +164255,7 @@ Before you write a single line of code, ask these 3 questions to establish senio
 
 ---
 
-## 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
+### 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
 
 ### Dependency Injection
 *   **Spring Beans**: In 99% of enterprise apps, you do **not** write `getInstance()`. You annotate `@Service` (Singleton Scope) and let spring inject it.
@@ -165859,7 +164266,7 @@ Before you write a single line of code, ask these 3 questions to establish senio
 
 ---
 
-## 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
+### 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
 
 ### Code Review Perspectives
 *   **Red Flag**: Using `synchronized(this)` in the method. Comment: "Performance bottleneck."
@@ -165868,7 +164275,7 @@ Before you write a single line of code, ask these 3 questions to establish senio
 
 ---
 
-## 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
+### 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
 
 ### Unit Testing
 *   **Concurrency Test**: Spawn 100 threads. Each calls `getInstance()` and adds the `System.identityHashCode(obj)` to a `ConcurrentSkipListSet`. Assert that `set.size() == 1`.
@@ -167129,7 +165536,7 @@ If you comprehend the Singleton at this depth—bridging the gap between a simpl
 
 ---
 
-## 🏛️ SECTION 11: REAL-WORLD CASE STUDIES (THE GIANTS)
+### 🏛️ SECTION 11: REAL-WORLD CASE STUDIES (THE GIANTS)
 
 To prove seniority, you must reference how the "Giants" (Spring, Google, Apache) handle this.
 
@@ -167180,7 +165587,7 @@ Log4j uses a `Provider` architecture. The `LogManager` is a static gateway, but 
 
 ---
 
-## ✅ SECTION 12: THE MASTERY CHECKLIST
+### ✅ SECTION 12: THE MASTERY CHECKLIST
 
 Before checking this off your roadmap, can you answer these **Principal-Level** probes?
 
@@ -167213,7 +165620,7 @@ Before checking this off your roadmap, can you answer these **Principal-Level** 
 
 ---
 
-## 🌍 SECTION 13: POLYGLOT ROSETTA STONE
+### 🌍 SECTION 13: POLYGLOT ROSETTA STONE
 
 A Senior Engineer is not a "Java Developer". You must understand how this pattern manifests across the ecosystem.
 
@@ -167512,7 +165919,7 @@ class HighFreqTradingSystem {
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This is **not** about knowing LIFO (Last-In-First-Out). Any Junior knows that.
@@ -167625,7 +166032,7 @@ print("✅ Generated stack_resize.html")
 
 ---
 
-## 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
+### 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
 
 ### Approach 1: Fixed-Size Array (The "C" Style)
 #### Thought Process
@@ -167715,7 +166122,7 @@ public class ResizingStack<T> {
 ---
 
 
-## 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
+### 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
 
 ### Java Implementation (Generics & Iterator)
 ```java
@@ -167812,7 +166219,7 @@ public:
 
 ---
 
-## 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
+### 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
 
 ### Comprehensive Edge Case Analysis
 1.  **Underflow**: Calling `pop()` on empty stack.
@@ -167825,7 +166232,7 @@ public:
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
 
 ### Whiteboard Coding Strategy
 1.  **Clarify Phase**: "Should I assume a fixed capacity or dynamic? Thread-safe or not?"
@@ -167839,7 +166246,7 @@ public:
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### Memory Optimizations (Primitive Specialization)
 *   **Problem**: `Stack<Integer>` boxes every int (24 bytes per int).
@@ -167851,7 +166258,7 @@ public:
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Similar Problems
 1.  **Queue**: FIFO (First-In-First-Out). Implemented with `head` and `tail` pointers in a Circular Array (Ring Buffer) to avoid shifting elements.
@@ -167861,7 +166268,7 @@ public:
 
 ---
 
-## 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
+### 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
 
 ### System Design Integration
 *   **Undo/Redo Systems**:
@@ -167873,7 +166280,7 @@ public:
 
 ---
 
-## 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
+### 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
 
 ### Code Review Perspectives
 *   **Red Flag**: Using `java.util.Stack`. Comment: "It is a legacy Vector class (synchronized). Use `ArrayDeque` instead."
@@ -167882,7 +166289,7 @@ public:
 
 ---
 
-## 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
+### 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
 
 ### Unit Testing
 *   **Resizing Test**: Push 1000 items. Assert capacity >= 1000. Pop 1000 items. Assert capacity shrank.
@@ -169130,512 +167537,6 @@ public class RedisDistributedStack {
 
 ### **Section 9: The "Hardball" Interview Questions (Deep Dive)**
 
-#### Q1: How do you implement `min()` in O(1) time?
-*   **Naive**: Scan the stack (O(N)).
-*   **Senior**: Keep a `min` variable. (Fails when you pop the min).
-*   **Principal**: Maintain **Two Stacks**.
-    *   `DataStack`: [3, 5, 2, 1, 4]
-    *   `MinStack`: [3, 3, 2, 1, 1] (Push new min only if <= current min).
-    *   `getMin()`: Returns `MinStack.peek()` (O(1)).
-
-#### Q2: Can we implement a Stack using Queues?
-*   **Yes**: Using 2 Queues.
-    *   *Push*: Add to Q1.
-    *   *Pop*: Move all elements from Q1 to Q2 except the last one. Return the last one. Swap Q1 and Q2.
-    *   *Cost*: Push O(1), Pop O(N). (Inefficient but theoretically possible).
-
-#### Q3: How to implement a Stack using ONE Queue?
-*   **Trick**:
-    *   *Push(x)*: `queue.add(x)`. Then rotate the queue: for `1` to `size-1`, `queue.add(queue.remove())`.
-    *   Now the new element is at the front.
-    *   *Pop*: `queue.remove()` (O(1)).
-    *   *Cost*: Push O(N), Pop O(1).
-
-#### Q4: Why is Recursion called "Stack Overflow"?
-*   Because every recursive call pushes a **Stack Frame** (local vars, return pointer) onto the thread's execution stack.
-*   The Main Thread defaults to 1MB stack size (Java `-Xss1m`).
-*   Infinite recursion fills this 1MB in milliseconds -> `StackOverflowError`.
-
----
-
-
-### Section 11: PRO-LEVEL AUDIT: Reading the OpenJDK Source Code
-
-Real engineers read the standard library. Let's analyze WHY `java.util.Stack` is deprecated by looking at the actual source code (Annotated).
-
-#### The `java.util.Stack` Source (OpenJDK 17)
-```java
-/**
- * The Stack class represents a last-in-first-out (LIFO) stack of objects.
- * It extends class Vector with five operations that allow a vector to be 
- * treated as a stack.
- */
-public class Stack<E> extends Vector<E> { // <--- SIN #1: Extends Vector (Inherits all synchronized methods)
-    
-    /**
-     * Creates an empty Stack.
-     */
-    public Stack() {
-    }
-
-    /**
-     * Pushes an item onto the top of this stack. 
-     * This has precisely the same effect as:
-     * addElement(item)
-     */
-    public E push(E item) {
-        addElement(item); // <--- DELEGATES to Vector.addElement() which is SYNCHRONIZED
-        return item;
-    }
-
-    /**
-     * Removes the object at the top of this stack.
-     */
-    public synchronized E pop() { // <--- SIN #2: Method-level Synchronization (Global Lock)
-        int       len = size();
-        E       obj = peek();
-        removeElementAt(len - 1);
-        return obj;
-    }
-
-    /**
-     * Looks at the object at the top of this stack without removing it.
-     */
-    public synchronized E peek() { // <--- SIN #3: Blocking lookup
-        int     len = size();
-        if (len == 0)
-            throw new EmptyStackException();
-        return elementAt(len - 1);
-    }
-
-    /**
-     * Returns the 1-based position where an object is on this stack.
-     */
-    public synchronized int search(Object o) { // <--- SIN #4: O(N) Linear Search holding a Lock!
-        int i = lastIndexOf(o);
-        if (i >= 0) {
-            return size() - i;
-        }
-        return -1;
-    }
-}
-```
-
-#### The Verdict: Why `java.util.Stack` fails Code Review
-1.  **Global Lock (Monitor)**: Every `pop()`, `push()`, `peek()` acquires the object monitor `this`. In a multicore system, this serializes all access. Threads fight for the lock, causing Context Switches.
-2.  **Inheritance Pollution**: Because it `extends Vector`, you can do:
-    ```java
-    Stack<String> s = new Stack<>();
-    s.add(0, "I am at the bottom!"); // Breaking LIFO contract
-    ```
-3.  **Performance**: `Vector` doubles its size (100% growth) by default, or by a fixed `capacityIncrement`. It is old and heavy.
-
----
-
-### Section 12: The Evolution of Stack (Java 1.0 to Java 21)
-
-Understanding history separates Seniors from Juniors.
-
-#### Era 1: The Dark Ages (Java 1.0 - 1996)
-*   **Class**: `java.util.Stack` (extends `Vector`).
-*   **Characteristic**: Everything is `synchronized`. "Thread-Safety" was default (paranoid).
-*   **Result**: Slow. Bad API design (Inheritance over Composition).
-
-#### Era 2: The Collections Framework (Java 1.2 - 1998)
-*   **Innovation**: `ArrayList` and `LinkedList` introduced.
-*   **Shift**: "Thread-Safety" is now opt-in (`Collections.synchronizedList()`).
-*   **Mistake**: People started using `LinkedList` as a Stack. (Cache unfriendly).
-
-#### Era 3: The Fix (Java 1.6 - 2006)
-*   **Class**: `java.util.ArrayDeque` (Double Ended Queue).
-*   **Innovation**:
-    *   Circular Buffer Implementation.
-    *   No synchronization (Thread-Local performance).
-    *   Cache Locality (contiguous array).
-    *   Can work as Stack (`push`/`pop`) or Queue (`offer`/`poll`).
-*   **Standard**: This became the **Gold Standard**.
-
-#### Era 4: Concurrency (Java 5/7)
-*   **Class**: `ConcurrentLinkedDeque` (Michael-Scott Algorithm).
-*   **Innovation**: Lock-Free nodes.
-*   **Use Case**: High-concurrency work-stealing queues (ForkJoinPool).
-
-#### Era 5: Project Loom (Java 21 - 2023)
-*   **Context**: Virtual Threads require non-blocking I/O.
-*   **Impact**: `synchronized` (like in `Stack`) pins the carrier thread!
-*   **Verdict**: Using `java.util.Stack` in Java 21 is a **Critical Bug** because it can starve the carrier pool. **ALWAYS use ArrayDeque**.
-
----
-
-
----
-
-### Section 13: JVM Internals - Inside the Stack Frame
-To truly master the "Stack", you must understand how the JVM uses it. The "Stack" isn't just a data structure; it's the execution engine's backbone.
-
-#### The Stack Frame Anatomy
-Every method invocation pushes a **Frame** onto the Thread's Stack.
-A Frame contains:
-1.  **Local Variable Array**: Method arguments (`this`, params) and local variables.
-2.  **Operand Stack**: Where math happens (`iadd`, `imul`).
-3.  **Frame Data**: Return address, reference to Constant Pool.
-
-#### Bytecode Analysis
-Consider this code:
-```java
-public int add(int a, int b) {
-    return a + b;
-}
-```
-
-**Compiled Bytecode (`javap -c`)**:
-```bash
-public int add(int, int);
-  Code:
-     0: iload_1       // Push variable 1 (a) onto Operand Stack
-     1: iload_2       // Push variable 2 (b) onto Operand Stack
-     2: iadd          // Pop two ints, add them, push result
-     3: ireturn       // Pop result, return to caller
-```
-
-#### Stack Overflow Mechanics
-*   **Deep Recursion**:
-    *   public void foo() { foo(); }
-    *   Pushes frames infinitely.
-    *   JVM limits Stack Depth (e.g., 1024KB).
-    *   **Crash**: `java.lang.StackOverflowError`.
-*   **Wide Frames**:
-    *   If a method has huge local variables (e.g., `long[1000]`), the frame size is massive.
-    *   Fewer calls needed to crash the stack.
-
-#### Optimization: Tail Call Optimization (TCO)
-*   **Concept**: If the LAST action is a recursive call, reuse the current frame instead of pushing a new one.
-*   **Java**: Does **NOT** support TCO (yet). Kotlin/Scala do (via `tailrec` compiler tricks).
-*   **Impact**: In Java, you must convert deep recursion to **Iteration** (using an explicit `Stack` object on the Heap) to avoid crashing.
-
----
-
-
----
-
-### Section 14: Interactive Visualization (Iron Gate Requirement)
-
-To truly understand the "MinStack" O(1) property and LIFO behavior, we must visualize it.
-
-#### Setup
-Run the included Python script to generate the D3.js visualization:
-```bash
-python3 stack_setup.py
-open stack_viz.html
-```
-
-#### What you will see
-1.  **Visual Stack**: Blocks falling from the top (Push) and flying off (Pop).
-2.  **Min Indicator**: Use the "Reset" and "Push" buttons to see how the MinStack tracks the minimum value (highlighted in Gold).
-3.  **Overflow Simulation**: Try pushing > 7 items to trigger the visual overflow warning.
-
-#### Source Code (`stack_setup.py`)
-This script generates the HTML/JS for the visualization.
-[stack_setup.py](file:///Users/syedrahman/Desktop/Career-and-Growth/Antigravity-IDE-Real-Git-Both/antigravity-sdev-kiro/content/java/stack_setup.py)
-
----
-
-
----
-
-### Section 15: Concurrency & Work Stealing (The Advanced Stack)
-
-Senior Engineers don't just use `Stack` for business logic; they understand how the runtime uses Stacks for parallelism.
-
-#### The Work-Stealing Algorithm (ForkJoinPool)
-Java's `ForkJoinPool` (used by `completeableFuture`, parallel streams) relies on a **Work-Stealing Deque**, which acts as a Stack.
-
-1.  **Worker Threads**: Each thread has its own Double-Ended Queue (Deque).
-2.  **LIFO (Local Work)**: When a thread produces a task (e.g., recursive sub-task), it PUSHES it to the **Head** of its own Deque. It also POPS from the **Head**.
-    *   *Why?* Cache Locality! The most recently generated task is hot in the CPU cache.
-3.  **FIFO (Stealing)**: When a thread runs out of work, it attempts to "steal" from the **Tail** of another thread's Deque.
-    *   *Why?* To minimize contention. The owner works at the Head; the thief steals from the Tail.
-
-#### Code Comparison: Stack vs. Work-Stealing
-**Classic Stack (Blocking)**:
-```java
-// Bad for Parallelism
-Stack<Task> centralizedStack = new Stack<>();
-// All threads contend for ONE lock on push/pop.
-```
-
-**Work-Stealing (Non-Blocking)**:
-```java
-// Good for Parallelism
-Deque<Task> threadLocalDeque = new ArrayDeque<>(); 
-// Thread A pushes/pops at Head (No contention).
-// Thread B steals from Tail (CAS operation, minimal contention).
-```
-
-#### The Lmax Disruptor (Ring Buffer)
-While not a Stack, the **Ring Buffer** often replaces Stacks/Queues in Low-Latency systems.
-*   **Concept**: Pre-allocated array.
-*   **No GC**: Because nodes are reused.
-*   **Sequence Numbers**: Replaces locks with memory barriers.
-
-**Takeaway**: In High-Frequency Trading or High-Throughput systems, standard `Stack` object allocation is forbidden. You use pre-allocated buffers (conceptually stacks) to avoid GC pressure.
-
----
-
-
----
-
-### Section 16: System Design - Building a Stack-Based VM
-
-To demonstrate true mastery, let's look at how Stacks power Virtual Machines (like the JVM or Python VM). A stack-based VM uses the stack for operands instead of CPU registers.
-
-#### The Concept
-We will build a mini-VM that parses a byte array and executes instructions.
-
-**Instruction Set**:
-*   `PUSH <val>`: Push value to stack.
-*   `ADD`: Pop 2 values, add, push result.
-*   `MUL`: Pop 2 values, multiply, push result.
-*   `PRINT`: Pop and print.
-
-#### Implementation (Senior Level)
-```java
-import java.util.Stack;
-
-public class StackVM {
-    private static final byte PUSH = 0x01;
-    private static final byte ADD = 0x02;
-    private static final byte MUL = 0x03;
-    private static final byte PRINT = 0x04;
-    private static final byte HALT = 0x00;
-
-    public void execute(byte[] bytecode) {
-        Stack<Integer> stack = new Stack<>();
-        int ip = 0; // Instruction Pointer
-
-        while (ip < bytecode.length) {
-            byte instruction = bytecode[ip++];
-            
-            switch (instruction) {
-                case PUSH:
-                    int val = bytecode[ip++]; // Read next byte as arg
-                    stack.push(val);
-                    break;
-                    
-                case ADD:
-                    int b = stack.pop();
-                    int a = stack.pop();
-                    stack.push(a + b);
-                    break;
-                    
-                case MUL:
-                    int y = stack.pop();
-                    int x = stack.pop();
-                    stack.push(x * y);
-                    break;
-                    
-                case PRINT:
-                    System.out.println("VM Output: " + stack.pop());
-                    break;
-                    
-                case HALT:
-                    return;
-                    
-                default:
-                    throw new RuntimeException("Unknown Opcode: " + instruction);
-            }
-        }
-    }
-
-    public static void main(String[] args) {
-        // Program: (2 + 3) * 4
-        // PUSH 2, PUSH 3, ADD, PUSH 4, MUL, PRINT, HALT
-        byte[] code = {
-            PUSH, 2,
-            PUSH, 3,
-            ADD,      // Stack: [5]
-            PUSH, 4,  // Stack: [5, 4]
-            MUL,      // Stack: [20]
-            PRINT,
-            HALT
-        };
-        
-        new StackVM().execute(code);
-    }
-}
-```
-
-#### Why Interviewers Love This
-1.  **Parsing**: Shows you can handle byte-streams.
-2.  **State Machine**: The `switch` inside `while` is a classic Interpreter loop.
-3.  **Stack Application**: Proves you know *why* stacks are useful (intermediate results).
-
----
-
-
----
-
-### Section 17: Enterprise Project 2 - Browser History Manager
-**Domain**: UI State Management.
-**Concept**: Implementing the Back/Forward navigation used in Chrome/Firefox.
-
-#### The Challenge
-*   Two Stacks: `backStack` and `forwardStack`.
-*   **Capacity Limit**: Browsers don't store infinite history. We must implement eviction (Fixed-Size or Memory-Bounded).
-*   **State Persistence**: Simulating "Tab Restoration" by serializing the stack.
-
-```java
-import java.util.*;
-
-public class BrowserHistory {
-    private final Deque<String> backStack = new ArrayDeque<>();
-    private final Deque<String> forwardStack = new ArrayDeque<>();
-    private String currentPage;
-    private final int LIMIT = 50; // Chrome defaults to 50
-
-    public BrowserHistory(String homepage) {
-        this.currentPage = homepage;
-        System.out.println("🌐 Opened: " + homepage);
-    }
-
-    public void visit(String url) {
-        if (backStack.size() >= LIMIT) {
-            backStack.removeLast(); // Evict oldest (bottom of stack)
-        }
-        backStack.push(currentPage);
-        currentPage = url;
-        forwardStack.clear(); // Visiting new page clears forward history
-        System.out.println("🔗 Visiting: " + url + " [Back: " + backStack.size() + "]");
-    }
-
-    public String back(int steps) {
-        while (steps > 0 && !backStack.isEmpty()) {
-            forwardStack.push(currentPage);
-            currentPage = backStack.pop();
-            steps--;
-        }
-        System.out.println("⬅️ Back to: " + currentPage);
-        return currentPage;
-    }
-
-    public String forward(int steps) {
-        while (steps > 0 && !forwardStack.isEmpty()) {
-            backStack.push(currentPage);
-            currentPage = forwardStack.pop();
-            steps--;
-        }
-        System.out.println("➡️ Forward to: " + currentPage);
-        return currentPage;
-    }
-    
-    // Simulating "Chrome Tab Restore"
-    public String serialize() {
-        // In real world: JSON/Protobuf
-        return String.join("|", backStack) + " # " + currentPage + " # " + String.join("|", forwardStack);
-    }
-}
-```
-
----
-
-### Section 18: Enterprise Project 3 - Shunting Yard Algorithm
-**Domain**: Compilers & Calculators.
-**Concept**: Parsing mathematical expressions (`3 + 4 * 2`) taking operator precedence into account.
-
-#### The Algorithm (Dijkstra)
-1.  **Numbers**: Output queue.
-2.  **Operators**: Operator Stack.
-3.  **Precedence**: If new operator has lower precedence than top of stack, pop stack to output.
-
-```java
-import java.util.*;
-
-public class ExpressionEvaluator {
-    
-    public static double evaluate(String expression) {
-        char[] tokens = expression.toCharArray();
-        Stack<Double> values = new Stack<>();
-        Stack<Character> ops = new Stack<>();
-
-        for (int i = 0; i < tokens.length; i++) {
-            if (tokens[i] == ' ') continue;
-
-            if (tokens[i] >= '0' && tokens[i] <= '9') {
-                StringBuilder sbuf = new StringBuilder();
-                while (i < tokens.length && tokens[i] >= '0' && tokens[i] <= '9')
-                    sbuf.append(tokens[i++]);
-                values.push(Double.parseDouble(sbuf.toString()));
-                i--;
-            }
-            else if (tokens[i] == '(') ops.push(tokens[i]);
-            else if (tokens[i] == ')') {
-                while (ops.peek() != '(') values.push(applyOp(ops.pop(), values.pop(), values.pop()));
-                ops.pop();
-            }
-            else if (tokens[i] == '+' || tokens[i] == '-' || tokens[i] == '*' || tokens[i] == '/') {
-                while (!ops.empty() && hasPrecedence(tokens[i], ops.peek()))
-                    values.push(applyOp(ops.pop(), values.pop(), values.pop()));
-                ops.push(tokens[i]);
-            }
-        }
-
-        while (!ops.empty()) values.push(applyOp(ops.pop(), values.pop(), values.pop()));
-        return values.pop();
-    }
-
-    public static boolean hasPrecedence(char op1, char op2) {
-        if (op2 == '(' || op2 == ')') return false;
-        if ((op1 == '*' || op1 == '/') && (op2 == '+' || op2 == '-')) return false;
-        return true;
-    }
-
-    public static double applyOp(char op, double b, double a) {
-        switch (op) {
-            case '+': return a + b;
-            case '-': return a - b;
-            case '*': return a * b;
-            case '/': if (b == 0) throw new UnsupportedOperationException("Cannot divide by zero"); return a / b;
-        }
-        return 0;
-    }
-}
-```
-
-> [!TIP]
-> **Interview Alpha**: Mention that this is exactly how `javac` parses expressions? No, `javac` creates an AST (Abstract Syntax Tree), but Shunting Yard is used in simpler interpreters and older HP calculators (RPN).
-
----
-
-### Section 19: Portfolio & Resume Strategy
-
-Don't just say you "know Stacks". Showcase deep systems knowledge.
-
-#### Resume Bullets (Senior/Staff Level)
-*   **Junior**: "Implemented a Stack in Java."
-*   **Senior**: "Optimized concurrent task processing using `Deque` for Work-Stealing, reducing thread contention by 40%."
-*   **Principal**: "Designed a custom off-heap Ring Buffer (LIFO mode) to eliminate GC pauses in a low-latency trading engine."
-
-#### Portfolio Project Ideas
-1.  **Browser History Manager**:
-    *   *Core*: Two Stacks (Back/Forward).
-    *   *Twist*: Persist to disk using Protobuf.
-2.  **Undo/Redo System**:
-    *   *Core*: Command Pattern + Stack.
-    *   *Twist*: Implement memory bounding (evict old states when stack > 100MB).
-3.  **Expression Evaluator**:
-    *   *Core*: Infix to Postfix conversion (Shunting Yard).
-    *   *Twist*: Support user-defined functions and plotting.
-
-**Final Thought**: The Stack is simple to learn, but mastering its application in Compilers, Memory Management, and Concurrency is what separates the top 1% of engineers.
-
-> [!NOTE]
-> **Time Complexity Reminder**:
-> All operations in a well-implemented Stack (Push, Pop, Peek) must be **O(1)**.
-> If your implementation involves shifting elements (like in an ArrayList at capacity), it is Amortized O(1).
-> For strict O(1) in Latency-Critical systems, use a pre-allocated Ring Buffer.
-
----
-
 #### Q53: How does the Adapter Pattern bridge incompatible interfaces in production? (Strict FAANG Standard)
 
 # Q53: Adapter Pattern - Complete Mastery Guide
@@ -169645,7 +167546,7 @@ Don't just say you "know Stacks". Showcase deep systems knowledge.
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This tests your ability to **Refactor** and **Integrate** systems without modifying existing code (Open/Closed Principle).
@@ -169743,7 +167644,7 @@ print("✅ Generated adapter_plug.html")
 
 ---
 
-## 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
+### 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
 
 ### Approach 1: Copy-Paste (The "Anti-Pattern")
 #### Thought Process
@@ -169828,7 +167729,7 @@ class ClassAdapter extends USBCCharger implements LightningPort {
 ---
 
 
-## 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
+### 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
 
 ### Java Implementation (The 'Payment Gateway' Scenario)
 Typical Enterpise Scenario: You have an interface `PaymentProcessor` but need to integrate `Stripe`.
@@ -169921,7 +167822,7 @@ func (d *DataAdapter) Read(p []byte) (n int, err error) {
 
 ---
 
-## 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
+### 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
 
 ### Comprehensive Edge Case Analysis
 1.  **Partial Adaptation**: The Target Interface has 5 methods, but the Adaptee only supports 3.
@@ -169934,7 +167835,7 @@ func (d *DataAdapter) Read(p []byte) (n int, err error) {
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
 
 ### Whiteboard Coding Strategy
 1.  **Clarify Phase**: "Can I assume the legacy class is final/sealed? Can I modify it?" (If yes, you might not need an adapter).
@@ -169948,7 +167849,7 @@ func (d *DataAdapter) Read(p []byte) (n int, err error) {
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### Pluggable Adapters (Reflection)
 *   **Concept**: Use Reflection to find methods with matching signatures, even if names differ. (Used in old Spring MVC).
@@ -169961,7 +167862,7 @@ func (d *DataAdapter) Read(p []byte) (n int, err error) {
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Similar Problems
 1.  **Proxy Pattern**: Same interface, different behavior (Lazy loading, Access control). Adapter = Different interface.
@@ -169969,7 +167870,7 @@ func (d *DataAdapter) Read(p []byte) (n int, err error) {
 
 ---
 
-## 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
+### 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
 
 ### Hexagonal Architecture (Ports and Adapters)
 *   **Concept**: Business Logic (Core) defines Interfaces (Ports). Infrastructure (DB, Web) implements Adapters.
@@ -169983,7 +167884,7 @@ func (d *DataAdapter) Read(p []byte) (n int, err error) {
 
 ---
 
-## 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
+### 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
 
 ### Code Review Perspectives
 *   **Red Flag**: An Adapter that contains Business Logic.
@@ -169993,7 +167894,7 @@ func (d *DataAdapter) Read(p []byte) (n int, err error) {
 
 ---
 
-## 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
+### 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
 
 ### Unit Testing
 *   **Mocking**: You can easily mock the `StripeApi` when testing the `StripeAdapter`.
@@ -171662,7 +169563,7 @@ To consider this pattern mastered (Senior Level), you must be able to:
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This tests your understanding of **Composition over Inheritance** and the **Open/Closed Principle**.
@@ -171763,7 +169664,7 @@ print("✅ Generated decorator_onion.html")
 
 ---
 
-## 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
+### 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
 
 ### Approach 1: Static Subclassing (Class Explosion)
 #### Thought Process
@@ -171858,7 +169759,7 @@ b = new Whip(b);  // Wrap in Whip
 ---
 
 
-## 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
+### 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
 
 ### Python Implementation (Function Decorators)
 Python has built-in syntax `@decorator` which is syntactic sugar for `func = decorator(func)`.
@@ -171925,7 +169826,7 @@ public:
 
 ---
 
-## 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
+### 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
 
 ### Comprehensive Edge Case Analysis
 1.  **Identity Crisis**: `new Milk(new Coffee())` is NOT a `Coffee` class instance (in terms of `getClass()`).
@@ -171938,7 +169839,7 @@ public:
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
 
 ### Whiteboard Coding Strategy
 1.  **Clarify Phase**: "Can I assume a common Interface `Beverage`?"
@@ -171952,7 +169853,7 @@ public:
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### Forwarding Decorators (Lombok @Delegate / Go Embedding)
 Writing all those forwarding methods is boilerplate.
@@ -171965,7 +169866,7 @@ Writing all those forwarding methods is boilerplate.
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Similar Problems
 1.  **Chain of Responsibility**: Passes request down a chain until *one* handles it.
@@ -171976,7 +169877,7 @@ Writing all those forwarding methods is boilerplate.
 
 ---
 
-## 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
+### 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
 
 ### System Design Scenario: API Gateway (Zuul/Spring Cloud)
 *   **Decorators**:
@@ -171988,7 +169889,7 @@ Writing all those forwarding methods is boilerplate.
 
 ---
 
-## 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
+### 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
 
 ### Code Review Perspectives
 *   **Red Flag**: `instanceof` checks on decorated objects.
@@ -171998,7 +169899,7 @@ Writing all those forwarding methods is boilerplate.
 
 ---
 
-## 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
+### 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
 
 ### Unit Testing
 *   **Test Layers Individually**: Test `Mocha` wrapping a `MockBeverage`.
@@ -172965,7 +170866,7 @@ If `ConcreteComponent` passes `this` to someone else, it passes the *naked* obje
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This tests your ability to design **Clean Architecture**.
@@ -173124,7 +171025,7 @@ print("✅ Generated circular_deps_dag.html")
 
 ---
 
-## 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
+### 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
 
 ### Approach 1: The "Chicken and Egg" (The Bug)
 #### Thought Process
@@ -173209,7 +171110,7 @@ class Dept {
 ---
 
 
-## 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
+### 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
 
 ### Python Implementation (Import Cycles)
 Python imports are executable statements. A cycle causes `ImportError`.
@@ -173274,7 +171175,7 @@ class A {
 
 ---
 
-## 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
+### 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
 
 ### Comprehensive Edge Case Analysis
 1.  **Self-Reference**: `class Node { Node next; }`.
@@ -173287,7 +171188,7 @@ class A {
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
 
 ### Architecture Design Strategy
 1.  **Clarify Phase**: "Is this a runtime cycle (instances) or a compile-time cycle (classes)?"
@@ -173302,7 +171203,7 @@ class A {
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### The Event Bus / Observer Pattern
 *   **Strategy**: Decouple A from B completely. A fires typical events. B listens.
@@ -173315,7 +171216,7 @@ class A {
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Similar Problems
 1.  **Deadlock**: Resource Cycle (Thread A holds Lock 1 wants Lock 2...).
@@ -173326,7 +171227,7 @@ class A {
 
 ---
 
-## 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
+### 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
 
 ### CI/CD Pipeline Checks (ArchUnit)
 Prevent cycles from entering the codebase.
@@ -173343,7 +171244,7 @@ public void no_cycles() {
 
 ---
 
-## 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
+### 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
 
 ### Code Review Perspectives
 *   **Red Flag**: `@Autowired @Lazy` used excessively.
@@ -173352,7 +171253,7 @@ public void no_cycles() {
 
 ---
 
-## 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
+### 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
 
 ### Unit Testing
 *   **Mocking Interfaces**: When testing A, mock the Interface of B. You don't need real B.
@@ -174065,7 +171966,7 @@ Circular dependencies bind modules together. You cannot reuse Module A without M
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This tests your understanding of **Reification** (turning a request into an object).
@@ -174189,7 +172090,7 @@ print("✅ Generated command_stack.html")
 
 ---
 
-## 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
+### 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
 
 ### Approach 1: Hardcoded Method Calls (Tight Coupling)
 #### Thought Process
@@ -174280,7 +172181,7 @@ class RemoteControl {
 ---
 
 
-## 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
+### 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
 
 ### Python Implementation (First-Class Functions)
 Python treats functions as objects, so `Command` pattern is often just `callable`.
@@ -174339,7 +172240,7 @@ public:
 
 ---
 
-## 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
+### 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
 
 ### Comprehensive Edge Case Analysis
 1.  **Macro Command Failure**: If a `MacroCommand` (List of commands) fails halfway?
@@ -174351,7 +172252,7 @@ public:
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
 
 ### Whiteboard Coding Strategy
 1.  **Clarify Phase**: "Do I need Undo? Do I need Redo?"
@@ -174369,7 +172270,7 @@ public:
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### CQRS (Command Query Responsibility Segregation)
 *   **Concept**: Split the system into Write (Command) and Read (Query) models.
@@ -174383,7 +172284,7 @@ public:
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Similar Problems
 1.  **Strategy Pattern**: Encapsulates *algorithms*.
@@ -174394,7 +172295,7 @@ public:
 
 ---
 
-## 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
+### 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
 
 ### Asynchronous Job Queue Architecture
 *   **Web Server**: Receives HTTP Request. Creates `SendEmailCommand`. Pushes to Redis. Returns 202 Accepted.
@@ -174403,7 +172304,7 @@ public:
 
 ---
 
-## 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
+### 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
 
 ### Code Review Perspectives
 *   **Red Flag**: `Command` objects that contain *business logic* instead of delegating to a `Receiver`.
@@ -174413,7 +172314,7 @@ public:
 
 ---
 
-## 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
+### 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
 
 ### Unit Testing
 *   **Test Undo**: Execute -> Assert State A -> Undo -> Assert State B.
@@ -174788,704 +172689,6 @@ If a `Button` calls `Light.turnOn()` directly:
     -   **Invoker**: The Waiter (Takes command, doesn't cook).
     -   **Command**: The Order Ticket ("Burger, Medium Rare"). It's an object. It can be queued, re-ordered, or cancelled.
 
-#### Q56: Command Pattern (Transactional Job Queue)
-
-## 📋 Question Statement
-**Design a Transactional Job Queue System that supports asynchronous execution, undo/redo operations for failed jobs, and macro-recording of user actions.**
-
-**Scenario**: You are building the **Order Processing Engine** for an E-commerce giant.
-*   **Requirements**:
-    *   **Decoupling**: The API (Invoker) must not know the details of Inventory/Payment services (Receivers).
-    *   **Reliability**: If "Charge Payment" fails, we must "Undo" the previous "Reserve Inventory" step.
-    *   **Audit**: All operations must be logged for replayability.
-    *   **Scheduling**: Some commands should run at 2 AM.
-*   **Challenge**: How do you encapsulate a "Method Call" into an object that can be serialized, stored in a database, and executed later?
-
----
-
-## 🎯 Question Analysis & Deep Dive
-
-### 📚 Core Concept
-The **Command Pattern** turns a request (method call) into a stand-alone object that contains all information about the request. This transformation lets you pass requests as method arguments, delay or queue a request's execution, and support undoable operations.
-
-### 📜 Historical Context & Evolution
-| Era | Paradigm | The Pattern | The Limitation |
-| :--- | :--- | :--- | :--- |
-| **1980s** | GUI Toolkits | **Callbacks** | Function pointers in C. Hard to maintain state or "undo" complex actions. |
-| **1994** | GoF Patterns | **Command** | Object-Oriented wrapper for actions. Standardized `execute()` and `undo()`. |
-| **2005** | Java Enterprise | **Message Driven Beans** | J2EE's way of handling async commands via JMS queues. |
-| **2010s** | Frontend State | **Redux** | "Actions" in Redux are literally Commands. "Reducers" execute them. |
-| **Modern** | Microservices | **CQRS + Event Sourcing** | Commands change state (Write), Queries read state. Events persist the history. |
-
-### 💡 Why this matters NOW? (The Systems Perspective)
-In **Distributed Systems**, the Command Pattern is the backbone of **Asynchronous Processing**:
-1.  **Job Queues (Sidekiq/Celery)**: A serialized "Command" is pushed to Redis. A worker pulls it and calls `execute()`.
-2.  **SAGA Pattern**: Distributed transactions are a series of Commands and Compensation Commands (Undo).
-3.  **Smart Home (Device Control)**: "TurnOnLightCommand" decouples the App from specific Lightbulbs.
-
-### 🧠 What This Question Really Tests
-1.  **Encapsulation**: Can you separate the *intent* to do something from the *act* of doing it?
-2.  **State Management**: How do you store the state required to "Undo" an action?
-3.  **System Design**: Can you apply this to a persistent queue vs in-memory stack?
-
-### Difficulty Breakdown
-*   **Conceptual Complexity**: **Medium**. The "Invoker" vs "Receiver" distraction often confuses candidates.
-*   **Implementation Complexity**: **Medium**. Implementing a robust Undo stack requires careful state handling.
-*   **Enterprise Depth**: **High**. Serialization of commands for distributed queues is non-trivial.
-
----
-
-## 🚀 Solution Evolution Journey
-
-### Approach 1: Direct Method Calls (Tight Coupling)
-#### Thought Process
-"The Button just calls the Lightbulb directly."
-
-```java
-class Light {
-    void turnOn() { System.out.println("Light On"); }
-}
-
-class Button {
-    Light light;
-    void press() { light.turnOn(); } // Hardcoded dependency
-}
-```
-#### Critique
-*   **Rigid**: You can't change the Button to turn on a Fan without code changes.
-*   **No History**: You can't "Undo" the press easily.
-*   **Synchronous**: The button is blocked while the light turns on (bad for heavy tasks).
-
-### Approach 2: Callback Functions (Functional)
-#### Thought Process
-"I'll pass a function pointer (Lambda) to the Button."
-
-```java
-// Java 8+
-class Button {
-    Runnable action;
-    void press() { action.run(); }
-}
-// Usage: button.action = () -> light.turnOn();
-```
-#### Critique
-*   **Better**, but limited. A `Runnable` doesn't have an `undo()` method. It doesn't have state (unless captured in closure, which is hard to serialize).
-
-### Approach 3: Command Pattern (Object-Oriented + Undo)
-#### Concept
-*   **Command Interface**: `execute()`, `undo()`.
-*   **Concrete Command**: `LightOnCommand`. Stores the `Light` and previous state.
-*   **Invoker**: `RemoteControl`. Holds the command.
-*   **Receiver**: `Light`.
-
-#### Implementation (Java)
-```java
-// 1. The Command Interface
-public interface Command {
-    void execute();
-    void undo();
-}
-
-// 2. The Receiver (Business Logic)
-public class StockTradeSystem {
-    public void buy() {
-        System.out.println("💸 [Market] Stock BOUGHT");
-    }
-    public void sell() {
-        System.out.println("💰 [Market] Stock SOLD");
-    }
-}
-
-// 3. Concrete Commands
-public class BuyStockCommand implements Command {
-    private StockTradeSystem stockSystem;
-    
-    public BuyStockCommand(StockTradeSystem sys) {
-        this.stockSystem = sys;
-    }
-    
-    @Override
-    public void execute() {
-        stockSystem.buy();
-    }
-    
-    @Override
-    public void undo() {
-        stockSystem.sell(); // Inverse operation
-    }
-}
-
-// 4. The Invoker (Transactional Queue)
-public class Broker {
-    private List<Command> orderHistory = new ArrayList<>();
-    private Command lastCommand;
-    
-    public void placeOrder(Command order) {
-        order.execute();
-        orderHistory.add(order);
-        lastCommand = order;
-    }
-    
-    public void reverseLastTransaction() {
-        if (lastCommand != null) {
-            System.out.println("↩️ [Broker] Reversing last trade...");
-            lastCommand.undo();
-            orderHistory.remove(lastCommand);
-            lastCommand = orderHistory.isEmpty() ? null : orderHistory.get(orderHistory.size()-1);
-        }
-    }
-}
-
-// 5. Usage
-public class TradingFloor {
-    public static void main(String[] args) {
-        StockTradeSystem system = new StockTradeSystem();
-        BuyStockCommand buy = new BuyStockCommand(system);
-        Broker broker = new Broker();
-        
-        broker.placeOrder(buy); // 💸 Stock BOUGHT
-        broker.reverseLastTransaction(); // ↩️ Reversing... 💰 Stock SOLD
-    }
-}
-```
-
----
-
-### **4. Implementation I: The Smart Home Macro System**
-
-This demonstrates the **Macro Command** (Composite Pattern integration), allowing a single button to execute multiple commands (e.g., "Party Mode": Dim lights, Play Music, Lock Doors).
-
-```java
-import java.util.Stack;
-import java.util.List;
-import java.util.ArrayList;
-
-// Receiver 1
-class Light {
-    String location;
-    public Light(String loc) { this.location = loc; }
-    public void on() { System.out.println(location + " Light ON"); }
-    public void off() { System.out.println(location + " Light OFF"); }
-}
-
-// Receiver 2
-class Stereo {
-    public void on() { System.out.println("Stereo ON"); }
-    public void off() { System.out.println("Stereo OFF"); }
-    public void setVolume(int vol) { System.out.println("Stereo Vol: " + vol); }
-}
-
-// Concrete Command for Light
-class LightOnCommand implements Command {
-    Light light;
-    public LightOnCommand(Light light) { this.light = light; }
-    public void execute() { light.on(); }
-    public void undo() { light.off(); }
-}
-
-class LightOffCommand implements Command {
-    Light light;
-    public LightOffCommand(Light light) { this.light = light; }
-    public void execute() { light.off(); }
-    public void undo() { light.on(); }
-}
-
-// Concrete Command for Stereo
-class StereoOnWithCDCommand implements Command {
-    Stereo stereo;
-    public StereoOnWithCDCommand(Stereo stereo) { this.stereo = stereo; }
-    public void execute() { 
-        stereo.on(); 
-        stereo.setVolume(11); 
-    }
-    public void undo() { stereo.off(); }
-}
-
-// The Macro Command (Composite)
-class MacroCommand implements Command {
-    List<Command> commands;
-    
-    public MacroCommand(List<Command> commands) {
-        this.commands = commands;
-    }
-    
-    public void execute() {
-        System.out.println("--- Executing Macro ---");
-        for (Command c : commands) c.execute();
-    }
-    
-    public void undo() {
-        System.out.println("--- Undoing Macro ---");
-        // Must undo in REVERSE order
-        for (int i = commands.size() - 1; i >= 0; i--) {
-            commands.get(i).undo();
-        }
-    }
-}
-
----
-
-### **5. Implementation II: Transactional CQRS Engine (History & Replay)**
-Simulating a Bank Transaction system with Undo/Redo capability.
-**CQRS** (Command Query Responsibility Segregation) relies heavily on Command objects as the "Write" model.
-
-```java
-import java.util.Stack;
-
-// 1. The Command Interface
-interface Transaction {
-    void execute();
-    void undo();
-}
-
-// 2. The Receiver (Business Logic)
-class BankAccount {
-    private String id;
-    private int balance;
-    
-    public BankAccount(String id, int balance) {
-        this.id = id;
-        this.balance = balance;
-    }
-    
-    public void deposit(int amount) {
-        balance += amount;
-        System.out.println(id + ": Deposited " + amount + ". Balance: " + balance);
-    }
-    
-    public void withdraw(int amount) {
-        if (balance < amount) throw new IllegalStateException("Insufficient Funds");
-        balance -= amount;
-        System.out.println(id + ": Withdrew " + amount + ". Balance: " + balance);
-    }
-}
-
-// 3. Concrete Command (Stateful)
-class TransferCommand implements Transaction {
-    private final BankAccount from;
-    private final BankAccount to;
-    private final int amount;
-    private boolean completed = false;
-    
-    public TransferCommand(BankAccount from, BankAccount to, int amount) {
-        this.from = from;
-        this.to = to;
-        this.amount = amount;
-    }
-    
-    @Override
-    public void execute() {
-        from.withdraw(amount);
-        to.deposit(amount);
-        completed = true;
-        System.out.println("✅ Transfer Complete");
-    }
-    
-    @Override
-    public void undo() {
-        if (!completed) return;
-        to.withdraw(amount); // Reverse flow
-        from.deposit(amount);
-        completed = false;
-        System.out.println("⏪ Transfer Undone");
-    }
-    
-    @Override
-    public String toString() {
-        return "Transfer " + amount;
-    }
-}
-
-// 4. Invoker (History Manager)
-class TransactionManager {
-    private final Stack<Transaction> history = new Stack<>();
-    
-    public void execute(Transaction tx) {
-        try {
-            tx.execute();
-            history.push(tx);
-        } catch (Exception e) {
-            System.err.println("Transaction Failed: " + e.getMessage());
-        }
-    }
-    
-    public void undoLast() {
-        if (history.isEmpty()) {
-             System.out.println("Nothing to undo.");
-             return;
-        }
-        Transaction tx = history.pop();
-        tx.undo();
-    }
-    
-    public void printHistory() {
-        System.out.println("History Stack: " + history);
-    }
-}
-
-// 5. Usage
-public class CQRSApp {
-    public static void main(String[] args) {
-        BankAccount alice = new BankAccount("Alice", 1000);
-        BankAccount bob = new BankAccount("Bob", 0);
-        
-        TransactionManager tm = new TransactionManager();
-        
-        System.out.println("--- Executing Tx 1 ---");
-        tm.execute(new TransferCommand(alice, bob, 200));
-        
-        System.out.println("--- Executing Tx 2 ---");
-        tm.execute(new TransferCommand(alice, bob, 50));
-        
-        tm.printHistory();
-        
-        System.out.println("\n--- Undoing Last ---");
-        tm.undoLast(); // Reverts 50
-        
-        System.out.println("\n--- Undoing Again ---");
-        tm.undoLast(); // Reverts 200
-    }
-}
-```
-
----
-
-### **6. Implementation III: Asynchronous Job Queue**
-Processing Commands in a background Thread Pool (Simulating AWS SQS or Sidekiq).
-The "Command" is detached from the "Executor".
-
-```java
-import java.util.concurrent.*;
-
-// Functional Command
-interface Job extends Runnable {
-    String getId();
-}
-
-public class JobQueueSystem {
-    
-    private final ExecutorService workerPool = Executors.newFixedThreadPool(2);
-    
-    public void submit(Job job) {
-        System.out.println("Using: " + job.getId());
-        workerPool.submit(() -> {
-            try {
-                System.out.println("👷 Worker picked up: " + job.getId());
-                job.run(); // Execute logic
-                System.out.println("✅ Finished: " + job.getId());
-            } catch (Exception e) {
-                System.err.println("❌ Job Failed: " + job.getId());
-            }
-        });
-    }
-    
-    public void shutdown() { workerPool.shutdown(); }
-
-    public static void main(String[] args) {
-        JobQueueSystem queue = new JobQueueSystem();
-        
-        queue.submit(new EmailJob("user@example.com", "Welcome!"));
-        queue.submit(new EmailJob("admin@example.com", "Alert!"));
-        
-        queue.shutdown();
-    }
-}
-
-class EmailJob implements Job {
-    private final String email;
-    private final String msg;
-    
-    public EmailJob(String email, String msg) { this.email = email; this.msg = msg; }
-    
-    @Override
-    public String getId() { return "EMAIL-" + email.hashCode(); }
-    
-    @Override
-    public void run() {
-        try { Thread.sleep(100); } catch (Exception e){} // Deliberate latency
-        System.out.println("   📧 Sending '" + msg + "' to " + email);
-    }
-}
-```
-
----
-
-### **6. Implementation III: Attack Simulations (Replay Attack)**
-
-If Command Objects are serialized and sent over a network, a malicious actor (Man-in-the-Middle) can capture and **replay** them.
-*Scenario*: User sends `TransferCommand(Alice, Bob, 1000)`. Attacker replays it 10 times. Alice loses 10,000.
-
-```java
-import java.util.*;
-
-class SecureCommand implements Runnable {
-    public final String id; // Nonce (Number used once)
-    public final long timestamp;
-    private final String action;
-    
-    public SecureCommand(String action) {
-        this.id = UUID.randomUUID().toString();
-        this.timestamp = System.currentTimeMillis();
-        this.action = action;
-    }
-    
-    @Override
-    public void run() {
-        System.out.println("Executing: " + action);
-    }
-}
-
-class SecureInvoker {
-    private final Set<String> processedIds = new HashSet<>();
-    private static final long WINDOW_MS = 5000; // 5 seconds validity
-    
-    public void receive(SecureCommand cmd) {
-        // 1. Check Age (Freshness)
-        if (System.currentTimeMillis() - cmd.timestamp > WINDOW_MS) {
-            System.err.println("⛔ Dropped Stale Command: " + cmd.id);
-            return;
-        }
-        
-        // 2. Check Uniqueness (Replay Protection)
-        if (processedIds.contains(cmd.id)) {
-            System.err.println("🚨 REPLAY ATTACK DETECTED! Dropped duplicate: " + cmd.id);
-            return;
-        }
-        
-        processedIds.add(cmd.id);
-        cmd.run();
-    }
-}
-
-public class ReplayAttackDemo {
-    public static void main(String[] args) throws InterruptedException {
-        SecureInvoker server = new SecureInvoker();
-        
-        SecureCommand cmd = new SecureCommand("Transfer $1000");
-        
-        System.out.println("1. Valid Legitimate Request");
-        server.receive(cmd); // OK
-        
-        System.out.println("2. Attacker Replays (Same ID)");
-        server.receive(cmd); // BLOCKED
-        
-        Thread.sleep(6000);
-        System.out.println("3. Attacker Replays (Stale)");
-        server.receive(cmd); // BLOCKED
-    }
-}
-```
-
----
-
-### **7. Implementation IV: Benchmarks (Allocation Overhead)**
-
-Does creating an Object for *every* action kill GC?
-*Result*: In modern Java, short-lived objects (Eden Space) are extremely cheap. The abstraction cost is negligible compared to network/DB latency.
-However, for *High Frequency Trading*, you might use **Flyweight Commands** (recycle objects) to avoid allocation.
-
----
-
-### **8. Multi-Language Perspectives**
-
-#### C++: Functors (Function Objects)
-C++ uses `operator()` to make objects callable.
-```cpp
-class Command {
-public:
-    virtual void execute() = 0;
-};
-```
-
-#### JavaScript: Redux (Flux Pattern)
-Redux is literally the Command Pattern for UI State.
-```javascript
-// 1. The Command (Action)
-const addItem = (text) => ({
-    type: 'ADD_TODO',
-    payload: { text }
-});
-
-// 2. The Receiver + Execution (Reducer)
-function todos(state = [], action) {
-    switch (action.type) {
-        case 'ADD_TODO':
-            return [...state, { text: action.payload.text }];
-        default:
-            return state;
-    }
-}
-
-// 3. Invoker (Store)
-// store.dispatch(addItem('Learn CQRS'));
-// Time Travel Debugging = Replaying the Actions!
-```
-
----
-
-
----
-
-## 🌐 Multi-Language Implementation
-
-### Python (Functors & Magic Methods)
-In Python, any object with `__call__` is a Command.
-```python
-class Command:
-    def execute(self): raise NotImplementedError
-    def undo(self): raise NotImplementedError
-
-class BankAccount:
-    def __init__(self, balance=0): self.balance = balance
-    def deposit(self, amt): self.balance += amt
-    def withdraw(self, amt): self.balance -= amt
-
-class TransferCommand(Command):
-    def __init__(self, from_acc, to_acc, amount):
-        self.from_acc = from_acc
-        self.to_acc = to_acc
-        self.amount = amount
-        self.completed = False
-
-    def __call__(self): # Syntactic sugar for execute()
-        self.execute()
-
-    def execute(self):
-        self.from_acc.withdraw(self.amount)
-        self.to_acc.deposit(self.amount)
-        self.completed = True
-
-    def undo(self):
-        if self.completed:
-            self.to_acc.withdraw(self.amount)
-            self.from_acc.deposit(self.amount)
-            self.completed = False
-```
-
-### Go (Channels & Closures)
-Go often uses channels to process commands (Jobs) safely across goroutines.
-
-```go
-type Job struct {
-    Action func() error
-    Undo   func()
-}
-
-func Worker(jobQueue <-chan Job) {
-    for job := range jobQueue {
-        err := job.Action()
-        if err != nil {
-            fmt.Println("Job failed, undoing...")
-            job.Undo()
-        }
-    }
-}
-```
-
----
-
-## 🛡️ Edge Case Analysis & Error Handling
-
-### 1. Security: The "Pickle" Vulnerability (Python)
-*   **Risk**: Implementations often serialize commands to disk to survive restarts. In Python, `pickle.load()` on a malicious Command object allows **Remote Code Execution (RCE)**.
-*   **Mitigation**: NEVER use `pickle` for untrusted data. Use JSON serialization with a strict whitelist of allowed Command Classes.
-
-### 2. High-Frequency Undo Risks
-*   **Scenario**: User spams "Undo" 100 times.
-*   **Risk**: If `undo()` logic has a bug (e.g., deducting fees twice), the account drains.
-*   **Mitigation**: Idempotency tokens on transactions. Ensure `undo()` is strictly the mathematical inverse.
-
-### 3. Replay Attacks
-*   **Risk**: An attacker intercepts a serialized "Transfer $1000" command and replays it 10 times.
-*   **Mitigation**: Nonces (Number used once) and Timestamps required in the Command payload.
-
----
-
-## 🎭 Interview Simulation
-
-### Phase 1: Clarification (3 min)
-*   **Interviewer**: "We need to support Undo."
-*   **You**: "Is it a single level of Undo, or infinite history?"
-*   **Interviewer**: "Infinite."
-*   **You**: "Do we need to persist this history across reboots?" (This creates the need for Serialization).
-
-### Phase 2: Design (5 min)
-*   Draw **Invoker**, **Receiver**, **Client**.
-*   Mention that `Invoker` (Queue) is separate from `Receiver` (Business Logic).
-
-### Phase 3: Coding (10 min)
-*   Start with the `Command` interface.
-*   Implement `Stack<Command>` for history.
-*   Implement `undoLast()` method.
-
----
-
-## 🚀 Expert-Level Deep Dive
-
-### System Design: CQRS & Event Sourcing
-The Command Pattern is the foundational unit of **Event Sourcing**.
-*   **Traditional Web App**: Stores Current State (`balance=100`).
-*   **Event Sourced App**: Stores List of Commands (`[Deposit 50, Withdraw 20, Deposit 70]`).
-*   **Replay**: `50 - 20 + 70 = 100`.
-*   **Benefit**: perfect audit trail and ability to "Fork" reality (e.g., "What if we didn't charge that fee in 2021?").
-
-### Distributed Transactions (SAGA Pattern)
-In Microservices, you can't use ACID transactions across databases.
-*   **SAGA**: A sequence of local transactions.
-*   **Logic**: If Step 3 fails, execute **Compensating Commands** (Undo) for Step 2 and Step 1.
-*   **The Command Pattern** standardizes these "Compensating Actions".
-
----
-
-## 🧪 Comprehensive Testing Strategy
-
-### 1. Unit Tests (Logic Verification)
-```java
-@Test
-void testUndoReversesState() {
-    Account acc = new Account(100);
-    Command cmd = new DepositCommand(acc, 50);
-    
-    cmd.execute();
-    assertEquals(150, acc.getBalance());
-    
-    cmd.undo();
-    assertEquals(100, acc.getBalance());
-}
-```
-
-### 2. Integration Tests (Serialization)
-Ensure commands can be saved/loaded without state loss.
-```java
-@Test
-void testCommandSerialization() {
-    Command original = new SendEmailCommand("admin@company.com");
-    String json = serialize(original);
-    Command loaded = deserialize(json);
-    
-    assertEquals(original.getPayload(), loaded.getPayload());
-}
-```
-
-### 3. Property-Based Testing (Invariants)
-**Metamorphic Property**: Applying `Command` then `Undo` should result in Identity (No Change).
-```java
-@Property
-void executeThenUndoIsIdentity(@ForAll int amount) {
-    Account acc = new Account(100);
-    Command cmd = new WithdrawCommand(acc, amount);
-    // ... verification logic
-}
-```
-
----
-
-## 🔗 Related Problems
-*   **Strategy Pattern**: Hides *how* something is done (algorithm), whereas Command hides *when* and *what* is done.
-*   **Memento Pattern**: Used to capture state snapshots for heavy objects to make `undo()` cheaper.
-
----
-
 #### Q57: How does the State Pattern replace complex `if-else/switch` logic in lifecycles? (Strict FAANG Standard)
 
 # Q57: State Pattern - Complete Mastery Guide
@@ -175495,7 +172698,7 @@ void executeThenUndoIsIdentity(@ForAll int amount) {
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This tests your ability to model **Dynamic Behavior**.
@@ -175644,7 +172847,7 @@ print("✅ Generated state_fsm.html")
 
 ---
 
-## 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
+### 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
 
 ### Approach 1: The Giant Switch Statement (Spaghetti Code)
 #### Thought Process
@@ -175742,7 +172945,7 @@ class MediaPlayer {
 ---
 
 
-## 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
+### 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
 
 ### Python Implementation (Dynamic Classes)
 Python allows changing the class of an object at runtime (`__class__`). *Dangerous but cool.*
@@ -175802,7 +173005,7 @@ struct PlayEvent {
 
 ---
 
-## 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
+### 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
 
 ### Comprehensive Edge Case Analysis
 1.  **Invalid Transitions**: Going from `New` directly to `Delivered`.
@@ -175814,7 +173017,7 @@ struct PlayEvent {
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
 
 ### Architecture Design Strategy
 1.  **Clarify Phase**: "Is the flow linear (like a Wizard) or cyclic (like a Media Player)?"
@@ -175827,7 +173030,7 @@ struct PlayEvent {
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### Hierarchical State Machines (HSM)
 *   **Concept**: States can have Sub-States.
@@ -175840,7 +173043,7 @@ struct PlayEvent {
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Similar Problems
 1.  **Strategy Pattern**: Swaps algorithms (SortAlgo -> QuickSort).
@@ -175849,7 +173052,7 @@ struct PlayEvent {
 
 ---
 
-## 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
+### 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
 
 ### Workflow Engines (Camunda / AWS Step Functions)
 *   **Concept**: These are giant, persistent State Machines.
@@ -175858,7 +173061,7 @@ struct PlayEvent {
 
 ---
 
-## 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
+### 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
 
 ### Code Review Perspectives
 *   **Red Flag**: `switch (state)` re-appearing INSIDE a State class.
@@ -175868,7 +173071,7 @@ struct PlayEvent {
 
 ---
 
-## 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
+### 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
 
 ### Unit Testing
 *   **Transition Test**: Assert `stop.play()` results in `Playing`.
@@ -177508,7 +174711,7 @@ public class GameDemo {
 
 # Q58: Observer Pattern - Complete Mastery Guide
 
-## 1. Concept Overview (The "Youtube Subscription" Model)
+### 🏛️ SECTION 1: QUESTION ANALYSIS (The "Youtube Subscription" Model)
 The **Observer Pattern** defines a one-to-many dependency between objects so that when one object (the **Subject** or **Publisher**) changes state, all its dependents (the **Observers** or **Subscribers**) are notified and updated automatically.
 
 ### 🎯 Key Interview Talking Points
@@ -177520,7 +174723,7 @@ The **Observer Pattern** defines a one-to-many dependency between objects so tha
 
 ---
 
-## 2. The Formal Definition
+### 2. Formal Definition
 > "Define a one-to-many dependency between objects so that when one object changes state, all its dependents are notified and updated automatically." — *GoF*
 
 ### The Structure
@@ -177531,7 +174734,7 @@ The **Observer Pattern** defines a one-to-many dependency between objects so tha
 
 ---
 
-## 3. Basic Implementation (The Junior Developer Approach)
+### 3. Basic Approach (The Junior Developer Approach)
 A simple News Agency.
 
 ```java
@@ -177591,7 +174794,7 @@ public class Main {
 
 ---
 
-## 4. Enterprise Grade Solutions (The Senior SDE Standard)
+### 🚀 SECTION 2: SOLUTION PROGRESSION (The Senior SDE Standard)
 
 ### 🧱 34. ENTERPRISE PROJECT 7: THREAD-SAFE EVENT BUS (GUAVA STYLE)
 
@@ -179508,362 +176711,6 @@ D) Mediator.
 
 #### Q59: How does the Proxy Pattern control access to objects? (Strict FAANG Standard)
 
-
-#### Question 1
-**Why is `java.util.Observable` deprecated?**
-A) It is too slow.
-B) It is not thread-safe and acts as a Class (inheritance limitation).
-C) It uses Reflection.
-D) It causes Memory Leaks.
-
-**Answer**: **B**. Being a class means you cannot extend anything else. It also implemented its own synchronization which was often incorrect for modern streams.
-
-#### Question 2
-**How do you prevent Lapsed Listeners?**
-A) Use `WeakReference`.
-B) Always call `unsubscribe()`.
-C) Use a finializer.
-D) A & B.
-
-**Answer**: **D**. Explicit deregistration is best. WeakReferences are a safety net.
-
-#### Question 3
-**Which pattern is the "Pull" variation of Observer?**
-A) Strategy.
-B) Iterator.
-C) Polling.
-D) Mediator.
-
-**Answer**: **C**. Polling is the opposite (Pull). However, within Observer, the "Pull Model" refers to the Observer calling `getState()` on the Subject after notification.
-
----
-**Key Benefit**: Decoupling. The weather station doesn't need to know *who* is watching the weather.
-
----
-
-### 10. References
-1.  *Design Patterns (GoF)* - Behavioral Patterns.
-2.  *LMAX Disruptor Technical Paper* - Mechanical Sympathy.
-3.  *Reactive Streams Specification* - Flow API.
-
----
-
-**The Solution**: Weak References.
-Store `WeakReference<Observer>` in the list.
-```java
-// Simplified logic
-List<WeakReference<Observer>> observers = new ArrayList<>();
-
-void notify() {
-    for (WeakReference<Observer> ref : observers) {
-        Observer o = ref.get();
-        if (o != null) o.update();
-        else observers.remove(ref); // Cleanup dead reference
-    }
-}
-```
-*Note*: This introduces complexity (e.g., you must keep a strong ref elsewhere). `java.util.WeakHashMap` is often used for this.
-
----
-
-### 8. Interview Bank: Follow-Up Questions
-
-1.  **Q**: "Difference between Observer and Pub-Sub?"
-    **A**: **Observer**: Subject knows Observers (direct list). Tightly coupled. **Pub-Sub**: A third party (Broker/Bus) sits in middle. Publisher doesn't know Subscriber. Loose coupling.
-2.  **Q**: "How to handle one slow observer blocking others?"
-    **A**: Use **Asynchronous Processing**. Dispatch the `update()` call to a Thread Pool (`ExecutorService`).
-3.  **Q**: "What is the Double-Check Locking of Observers?"
-    **A**: Trick question. DCL is for Singletons. For Observers, the concern is holding a lock while calling an alien method (the observer's update), which causes deadlocks. **Never hold a lock while invoking a callback.**
-4.  **Q**: "How does React/Angular use this?"
-    **A**: Redux (JS) uses a giant Observer pattern. The "Store" is the Subject. "Components" subscribe to state changes.
-
----
-
-### 9. Cheatsheet & Summary
-
-| Strategy | Thread Safe? | Latency | Usage |
-| :--- | :--- | :--- | :--- |
-| **ArrayList** | ❌ NO | Low | Single Thread |
-| **Synchronized** | ✅ YES | High | Simple MT |
-| **CopyOnWrite** | ✅ YES | Low (Read) | Read-Heavy |
-| **Async Bus** | ✅ YES | decoupled | High-Throughput |
-
-**Key Benefit**: Decoupling. The weather station doesn't need to know *who* is watching the weather, just that it needs to broadcast usage.
-
----
-
-### 10. References
-1.  *Design Patterns (GoF)* - Behavioral Patterns.
-2.  *Java Concurrency in Practice* - Brian Goetz (Liveness hazards).
-3.  *Guava EventBus Documentation*.
-
----
-
-
----
-
-### 5. Deep Theory: LMAX Disruptor & Ring Buffers
-
-**The Problem with Queues**:
-`BlockingQueue` uses locks. Contention kills performance at >1M ops/sec.
-
-**The Solution: LMAX Disruptor**:
-1.  **Ring Buffer**: Pre-allocated array (No GC).
-2.  **No Locks**: Uses sequence numbers (`AtomicLong`) and Memory Barriers.
-3.  **Multicast**: One event can go to multiple consumers (Journaler, Replicator, BusinessLogic) in parallel without copying.
-4.  **Cache Line Padding**: Prevents "False Sharing" on CPU caches.
-
-**Reactive Programming (Rx)**:
--   **Backpressure**: The Subscriber tells the Publisher "I am overwhelmed, slow down".
--   `request(n)` pattern prevents `OutOfMemoryError` in fast-producer/slow-consumer systems.
-
----
-
-### 6. Practice & Assessment
-
-#### Core Exercises
-1.  **Basic**: Create a `NewsAgency` (Subject) and `NewsChannel` (Observer).
-    -   Publish "Breaking News". Verify all channels print it.
-2.  **Intermediate**: Create an `AsyncEventBus`.
-    -   Use `Executors.newFixedThreadPool(4)` to dispatch events.
-    -   Add a `Subscriber` that sleeps for 2s. Ensure it doesn't block other subscribers.
-3.  **Advanced**: **Weak Reference Observer**.
-    -   Store listeners in `Collections.newSetFromMap(new WeakHashMap<>())`.
-    -   Prove that if the listener becomes null elsewhere, it vanishes from the Bus.
-
-#### Edge Case Drills
-1.  **Re-Entrancy**:
-    -   *Task*: A Listener calls `publish()` inside `onEvent()`.
-    -   *Risk*: Infinite Loop / StackOverflow.
-    -   *Fix*: Detect recursion depth or queue the event for the *next* tick.
-2.  **Exception Isolation**:
-    -   *Task*: Listener A throws RuntimeException. Listener B must still receive the event.
-    -   *Fix*: Wrap every callback in `try-catch`.
-3.  **Order of Delivery**:
-    -   *Task*: Do you guarantee Order?
-    -   *Answer*: In `CopyOnWriteArrayList`, yes (Insertion Order). In `ConcurrentHashMap` keyset, No.
-
-#### Challenge: The Chat Server
-**Scenario**: Simple WhatsApp clone.
--   **Room**: Subject.
--   **User**: Observer.
--   **Task**:
-    -   User joins Room.
-    -   User A sends message.
-    -   User B receives.
-    -   User A leaves.
-    -   User A *should not* receive next message.
-    -   *Constraint*: Must handle 1000 users joining/leaving concurrently.
-
----
-
-### 7. Common Mistakes & Anti-Patterns
-
-| Mistake | Consequence |
-| :--- | :--- |
-| **Lapsed Listener** | Forgetting to `unsubscribe()`. The Subject holds a strong ref to the Observer, preventing GC. Results in Memory Leak. |
-| **Blocking Notify** | Doing IO (Database/Network) inside the `onEvent()` method on the Publisher's thread. This freezes the system. Always use Async dispatch or fast handoff. |
-| **Modification during Iteration** | Using `ArrayList` and removing `this` inside `update()`. Causes `ConcurrentModificationException`. |
-
----
-
-### 8. Interview Bank: Follow-Up Questions
-
-1.  **Q**: "Push Model vs Pull Model in Observer?"
-    **A**:
-    -   **Push**: Event contains data (`onUpdate(Price p)`). Good for small payloads.
-    -   **Pull**: Event just says "Changed" (`onUpdate()`). Observer calls `subject.getPrice()`. Good for large data/lazy loading, but adds 2nd call.
-2.  **Q**: "How does `WeakReference` solve memory leaks here?"
-    **A**: If the Subject holds `WeakReference<Observer>`, the GC will collect the Observer if no *other* object holds a strong reference to it. The Subject will then hold a reference to `null` (or empty ref), which can be cleaned up.
-3.  **Q**: "Difference between Observer and Pub/Sub?"
-    **A**:
-    -   **Observer**: Subject and Observer know each other (loosely). synchronous usually.
-    -   **Pub/Sub**: There is a Broker (Message Queue) in the middle. Publisher `send(Topic)`, Subscriber `listen(Topic)`. They don't know each other exists. Asynchronous.
-
----
-
-### 9. Cheatsheet & Summary
-
-| Requirement | Solution |
-| :--- | :--- |
-| **Standard UI** | `Observer` interface / `addEventListener` |
-| **High Concurrency** | `CopyOnWriteArrayList` / Event Bus |
-| **Distributed** | Kafka / RabbitMQ (Pub-Sub) |
-| **Memory Safety** | Weak References |
-
-**Verdict**: Essential for decoupling. Always handle **Unsubscribe** and **Exceptions**.
-
----
-
-### 10. References
-        
-        System.out.println(">> [LOG] End " + method.getName() + " took " + (end-start) + "ns");
-        return result;
-    }
-}
-
-public class DynamicProxyDemo {
-    public static void main(String[] args) {
-        Service real = new RealService();
-        
-        // Magically create a new class executing the Handler
-        Service proxy = (Service) Proxy.newProxyInstance(
-            Service.class.getClassLoader(),
-            new Class<?>[] { Service.class },
-            new LoggingHandler(real)
-        );
-        
-        proxy.serve();
-    }
-}
-```
-*   **Deep Dive**: `Proxy.newProxyInstance` generates bytecode (`$Proxy0.class`) in memory that forwards every method call to `invoke()`. This is how Spring AOP wraps your beans to add Transaction/Security logic without modifying your code.
-
----
-
-### **7. Implementation IV: Benchmarks (Native vs Proxy)**
-Wrappers add overhead.
-1.  **Direct Call**: ~0.5ns (inlined).
-2.  **Static Proxy**: ~1ns (one extra hop).
-3.  **Dynamic Proxy (Reflection)**: ~10ns (Method.invoke is slower).
-4.  **CGLIB/ByteBuddy**: ~2ns (Direct bytecode access, faster than Reflection).
-
----
-
-### **8. Multi-Language Perspectives**
-
-#### JavaScript: The `Proxy` Object
-ES6 introduced native Proxies.
-```javascript
-const target = {
-    message: "secret"
-};
-
-const handler = {
-    get: function(obj, prop) {
-        if (prop === 'message') return "ACCESS DENIED";
-        return obj[prop];
-    }
-};
-
-const proxy = new Proxy(target, handler);
-
-**The Two Types of Proxies in Spring**:
-
-1.  **JDK Dynamic Proxy**:
-    - **Requirement**: Target object MUST implement an `Interface`.
-    - **Mechanism**: Reflection (`java.lang.reflect.Proxy`).
-    - **Pros**: Built-in, standard.
-    - **Cons**: Cannot proxy classes without interfaces.
-
-2.  **CGLIB (Code Generation Library)**:
-    - **Requirement**: Target class must NOT be `final`.
-    - **Mechanism**: Bytecode generation (ASM). It creates a **subclass** of the target at runtime.
-    - **Pros**: Can proxy any non-final class.
-    - **Cons**: Startup is slightly slower (generating bytecode).
-
-**Why it matters**: If you put `@Transactional` on a class that has no interface, Spring automatically switches from JDK Proxy to CGLIB.
-
----
-
-### 8. Interview Bank: Follow-Up Questions
-
-1.  **Q**: "Difference between Proxy and Adapter?"
-    **A**: **Adapter** changes the interface (makes Square peg fit Round hole). **Proxy** implements the *same* interface (controls access to the Round hole).
-2.  **Q**: "Difference between Proxy and Decorator?"
-    **A**: **Intent**. Decorator adds *features* (e.g., scrollbars, borders). Proxy controls *access* (e.g., lazy load, security). Decorators are often chained; Proxies usually aren't.
-3.  **Q**: "What is the N+1 Select Problem in Hibernate?"
-    **A**: Caused by **Lazy Loading Proxies**. You load a list of `User` proxies. When you iterate and access `user.getAddress()` (which is lazily loaded), it triggers N separate SQL queries.
-4.  **Q**: "How does Mockito create mocks?"
-    **A**: It uses CGLIB (or ByteBuddy) to create a dynamic proxy of the class you are mocking, intercepting all calls to record interactions.
-
----
-
-### 9. Cheatsheet & Summary
-
-| Proxy Type | Purpose | Example |
-| :--- | :--- | :--- |
-| **Remote** | Hide network complexity | gRPC Stub |
-| **Virtual** | Delay heavy object creation | Lazy Loading Images |
-| **Protection** | Access control | Spring Security |
-| **Smart** | Add housekeeping | Reference Counting |
-
-**Key Benefit**: Transparently adds control layers (Security, Logging, Transaction) without modifying the core business code.
-
----
-
-### 10. References
-1.  *Design Patterns (GoF)* - Structural Patterns.
-2.  *Spring Framework Internals* - AOP and Proxies.
-3.  *Hibernate Documentation* - Lazy Loading and Proxies.
-
----
-
-
----
-
-### 5. Deep Theory: JDK vs CGLIB vs ByteBuddy
-
-How do frameworks like Spring create proxies?
-1.  **JDK Dynamic Proxy**:
-    -   *Requirement*: Target must implement an **Interface**.
-    -   *Mechanism*: Reflection.
-    -   *Performance*: Slower than direct calls, but improved in modern JVMs.
-2.  **CGLIB (Code Generation Library)**:
-    -   *Requirement*: Target can be a concrete class.
-    -   *Mechanism*: Creates a **Subclass** of the target and overrides methods.
-    -   *Limitation*: Cannot proxy `final` classes or `final` methods.
-3.  **Spring AOP**:
-    -   Automatically switches: If Interface exists -> JDK. If not -> CGLIB.
-
-**The "Self-Invocation" Problem**:
-If Method A calls Method B in the *same* class, the call does **not** go through the Proxy.
--   Result: `@Transactional` on Method B is ignored if called from Method A.
--   *Fix*: Inject `ApplicationContext` and call `getBean(Self.class).methodB()`.
-
----
-
-### 6. Practice & Assessment
-
-#### Core Exercises
-1.  **Basic**: Implement `LazyImage`.
-    -   `display()` should print "Loading from disk..." on first call, "Displaying..." on subsequent calls.
-2.  **Intermediate**: Create a `CachingProxy` for a `MathService`.
-    -   Store results of `isPrime(n)` in a `HashMap`. Return cached result if `n` repeats.
-3.  **Advanced**: Build a **Generic Retrying Proxy**.
-    -   Create an InvocationHandler that catches exceptions and retries 3 times before failing.
-    -   Wrap a `NetworkService` with it.
-
-#### Edge Case Drills
-1.  **Equals & HashCode**:
-    -   *Task*: What happens if you call `proxy.equals(proxy)`?
-    -   *Analysis*: The Proxy delegates `equals` to the handler. You must handle it correctly or it behaves weirdly.
-2.  **Final Methods**:
-    -   *Task*: Try to proxy a `final` method with CGLIB.
-    -   *Result*: Exception or Method is not intercepted.
-3.  **Serialization**:
-    -   *Task*: Start a transaction, serialize the proxy, deserialize.
-    -   *Risk*: The Proxy (and its handler) might not be serializable.
-
-#### Challenge: The "Mini-Spring" AOP Framework
-**Task**: Create a `BeanPostProcessor` that scans for `@LogExecutionTime` annotation.
--   If found, replace the bean with a Dynamic Proxy.
--   The Proxy should: `start = now(); result = invoke(); end = now(); print(end-start); return result;`
-
----
-
-### 7. Common Mistakes & Anti-Patterns
-
-| Mistake | Consequence |
-| :--- | :--- |
-| **Proxying concrete classes** | Forces use of CGLIB, prevents final methods. Always code to Interfaces. |
-| **Self-Call Ignorance** | A method calling another method in the same class bypasses the proxy (Transaction lost). |
-| **Heavy Handlers** | Putting too much logic in `InvocationHandler`. keeps it efficient. |
-
----
-
-#### Q59: How does the Proxy Pattern control access to objects? (Strict FAANG Standard)
-
 # Q59: Proxy Pattern - Complete Mastery Guide
 
 ## 📋 Question Statement
@@ -179871,7 +176718,7 @@ If Method A calls Method B in the *same* class, the call does **not** go through
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This tests your understanding of **Access Control** and **Indirection**.
@@ -180015,7 +176862,7 @@ print("✅ Generated proxy_firewall.html")
 
 ---
 
-## 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
+### 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
 
 ### Approach 1: Direct Access (No Protection)
 #### Thought Process
@@ -180080,7 +176927,7 @@ class SecurityProxy implements Server {
 
 ---
 
-## 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
+### 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
 
 ### Java Implementation (Dynamic Proxy)
 Java `java.lang.reflect.Proxy` can create proxies at runtime without writing a class!
@@ -180272,7 +177119,7 @@ public Object invoke(Object proxy, Method method, Object[] args) throws Throwabl
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
 
 ### Architecture Design Strategy
 1.  **Clarify**: "Do we need the proxy to be transparent (same interface)?"
@@ -180289,7 +177136,7 @@ public Object invoke(Object proxy, Method method, Object[] args) throws Throwabl
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### JDK Dynamic Proxy vs CGLIB
 This is the **Deep Dive** topic for Q59.
@@ -180313,7 +177160,7 @@ This is the **Deep Dive** topic for Q59.
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Pattern Compositions
 1.  **Decorator**: Adds *behavior* (UI, Logic). Proxy controls *access* (Security, Lazy Loading).
@@ -180322,7 +177169,7 @@ This is the **Deep Dive** topic for Q59.
 
 ---
 
-## 🏭 SECTION 8: PROJECT IMPLEMENTATIONS (The "Meat")
+### 🏭 SECTION 8: PROJECT IMPLEMENTATIONS (The "Meat")
 
 ### Project 1: "Titan" - Enterprise RPC Framework (Remote Proxy)
 We will build a production-grade Remote Procedure Call (RPC) system named **Titan**. This demonstrates the **Remote Proxy** pattern where a local interface call is transparently transported over the network.
@@ -181376,7 +178223,7 @@ For the ultimate performance, frameworks like **Jacoco** (Code Coverage) or **Ne
 
 ---
 
-## 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
+### 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
 
 ### 1. The "Magic" Code Trap
 **Scenario**: A Junior Engineer suggests using AspectJ to auto-log every single method call in the codebase to "improve observability".
@@ -181392,7 +178239,7 @@ For the ultimate performance, frameworks like **Jacoco** (Code Coverage) or **Ne
 
 ---
 
-## 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
+### 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
 
 ### 1. Structural Testing (The "Proxy Chains" Check)
 Ensure your framework isn't wrapping proxies in proxies in proxies (e.g., TransactionProxy(SecurityProxy(CachingProxy(RealObject)))).
@@ -183217,7 +180064,7 @@ public void testCloudFacadeRoutesCorrectly() {
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This tests your ability to **Design Clean APIs** and **manage complexity**.
@@ -183344,7 +180191,7 @@ print("✅ Generated facade_arch.html")
 
 ---
 
-## 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
+### 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
 
 ### Approach 1: Client Handles Everything (Spaghetti Code)
 #### Thought Process
@@ -183404,7 +180251,7 @@ new SmartHomeHub().activateNightMode(); // 1 Line!
 
 ---
 
-## 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
+### 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
 
 ### JavaScript / TypeScript Implementation (Module Facade)
 In JS, a "Module" is often a Facade for internal implementation details.
@@ -183444,7 +180291,7 @@ func (f *Facade) SimpleOp() {
 
 ---
 
-## 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
+### 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
 
 ### Comprehensive Edge Case Analysis
 1.  **Partial Failures**: Facade calls Service A (Success) and Service B (Fail).
@@ -183456,7 +180303,7 @@ func (f *Facade) SimpleOp() {
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
 
 ### Architecture Design Strategy
 1.  **Clarify Phase**: "Is this a strict Facade (hides everything) or a relaxed Facade (allows direct access)?"
@@ -183469,7 +180316,7 @@ func (f *Facade) SimpleOp() {
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### BFF (Backend For Frontend) Pattern
 *   **Concept**: A specific Facade for Mobile, one for Web, one for TV.
@@ -183480,7 +180327,7 @@ func (f *Facade) SimpleOp() {
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Similar Problems
 1.  **Adapter**: Makes interfaces *compatible*. Facade makes interfaces *simple*.
@@ -183488,7 +180335,7 @@ func (f *Facade) SimpleOp() {
 
 ---
 
-## 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
+### 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
 
 ### Netflix Zuul / Amazon API Gateway
 *   **The Ultimate Facade**: An API Gateway is a Facade for your entire Microservices Cloud.
@@ -183499,7 +180346,7 @@ func (f *Facade) SimpleOp() {
 
 ---
 
-## 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
+### 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
 
 ### Code Review Perspectives
 *   **Red Flag**: The Facade has logic (If-Else).
@@ -183509,7 +180356,7 @@ func (f *Facade) SimpleOp() {
 
 ---
 
-## 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
+### 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
 
 ### Integration Testing
 *   **Strategy**: Test the Facade to ensure it wires components correctly. Mock the components only if they are external (DB/Network).
@@ -184065,7 +180912,7 @@ JS Prototypes *are* intrinsic state. Methods on `Tree.prototype` are shared.
 
 ---
 
-## 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
+### 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
 
 ### 1. Thread Safety of the Flyweight
 The **Intrinsic State** MUST be Immutable. If it is mutable, it is shared across all threads, leading to race conditions.
@@ -184082,7 +180929,7 @@ The **Intrinsic State** MUST be Immutable. If it is mutable, it is shared across
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION (SENIOR LEVEL)
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION (SENIOR LEVEL)
 
 This section is the difference between "I know the pattern" and "I can design a system using it."
 
@@ -184156,7 +181003,7 @@ Write this on the board to show mathematical rigor:
 
 ---
 
-## 🧠 SECTION 6: DEEP DIVE - JAVA STRING POOL & INTEGER CACHE
+### 🧠 SECTION 6: DEEP DIVE - JAVA STRING POOL & INTEGER CACHE
 
 The JVM uses Flyweight heavily internally.
 
@@ -184190,7 +181037,7 @@ System.out.println(x == y); // FALSE (New Objects)
 
 ---
 
-## 🔄 SECTION 7: RELATED PATTERNS
+### 🔄 SECTION 7: RELATED PATTERNS
 
 *   **Singleton**: The `FlyweightFactory` is often a Singleton.
 *   **Composite**: The Composite pattern often uses Flyweights for leaf nodes (e.g., repeating leaf usages in a document).
@@ -184199,7 +181046,7 @@ System.out.println(x == y); // FALSE (New Objects)
 
 ---
 
-## 🏭 SECTION 8: REAL-WORLD PROJECT IMPLEMENTATIONS (ENTERPRISE)
+### 🏭 SECTION 8: REAL-WORLD PROJECT IMPLEMENTATIONS (ENTERPRISE)
 
 #### 📝 Project 1: The "Text Editor" (Java - Glyph Rendering)
 
@@ -185008,7 +181855,7 @@ Don't confuse Flyweight with `ThreadLocal`.
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This tests your understanding of **Memory Optimization** and **Intrinsic vs Extrinsic State**.
@@ -185147,7 +181994,7 @@ print("✅ Generated flyweight_forest.html")
 
 ---
 
-## 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
+### 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
 
 ### Approach 1: Naive Implementation (OOM Error)
 #### Thought Process
@@ -185231,7 +182078,7 @@ class Tree {
 
 
 
-## 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
+### 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
 
 ### Python Implementation (`sys.intern`)
 Python automatically interns small integers and strings.
@@ -185264,7 +182111,7 @@ public:
 
 ---
 
-## 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
+### 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
 
 ### Comprehensive Edge Case Analysis
 1.  **Concurrency**: If two threads ask for "Oak" at the same time, you might create TWO instances.
@@ -185275,7 +182122,7 @@ public:
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
 
 ### Architecture Design Strategy
 1.  **Clarify Phase**: "Are the objects mutable or immutable? If mutable, we can't share them easily."
@@ -185288,7 +182135,7 @@ public:
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### Java Integer Cache (Source Code)
 *   **Mechanism**: `Integer.valueOf(i)` checks if `i` is between -128 and 127.
@@ -185304,7 +182151,7 @@ public:
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Similar Problems
 1.  **Prototype**: Creates new objects by copying. Flyweight *avoids* creating new objects by sharing.
@@ -185312,7 +182159,7 @@ public:
 
 ---
 
-## 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
+### 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
 
 ### Browser DOM Rendering
 *   **Scenario**: Rendering 10,000 `<div>` elements.
@@ -185320,7 +182167,7 @@ public:
 
 ---
 
-## 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
+### 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
 
 ### Code Review Perspectives
 *   **Red Flag**: `new String("Constant")` in a loop.
@@ -185330,7 +182177,7 @@ public:
 
 ---
 
-## 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
+### 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
 
 ### Unit Testing
 *   **Identity Test**: Assert that the Factory returns the SAME instance.
@@ -186060,7 +182907,7 @@ cart.setStrategy(new PaymentStrategy() {
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### Java 8+ Functional Strategies
 Instead of creating classes, use `Function<T, R>` or `Runnable`.
@@ -186081,7 +182928,7 @@ process(10, x -> x * x);
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Similar Problems
 1.  **Template Method**: Defines the skeleton, subclasses fill in steps (Compile time). Strategy defines the whole algo (Runtime).
@@ -186089,7 +182936,7 @@ process(10, x -> x * x);
 
 ---
 
-## 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
+### 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
 
 ### Spring Framework
 *   **`ResourceLoader`**: Strategies for loading from Classpath, FileSystem, URL.
@@ -186802,27 +183649,6 @@ class Window extends Container {
 
 ### 🏛️ 16. THE GREAT STRATEGY PATTERN EXAM: SENIOR SDE EDITION
 *(A collection of 25 rapid-fire questions to test depth)*
-
-#### Q1: "Can a Strategy be State-Aware?"
-**A**: **Yes, but be careful.** Ideally, Strategies are stateless singletons (Flyweights). If you need state (e.g., `AccumulatingDiscountStrategy`), you cannot share the instance across threads. You must `new AccumulatingDiscountStrategy()` for every request.
-**Best Practice**: Pass state in the method arguments `execute(Context, State)`, not `this.state`.
-
-#### Q2: "Difference between Strategy and Command Pattern?"
-**A**: Intent.
-*   **Strategy**: "How" something is done (Algorithm). The Context is still the focus.
-*   **Command**: "What" is done (Action). The Invoker doesn't care. It encapsulates the Request.
-*   **Strategy**: "Sort with QuickSort".
-*   **Command**: "Save this File".
-
-#### Q3: "Does Spring use Strategy Pattern?"
-**A**: Everywhere.
-*   `ResourceLoader` (Strategies: ClassPath, FileSystem, URL).
-*   `PlatformTransactionManager` (Strategies: JPA, JDBC, JTA).
-*   `AuthenticationProvider` (Strategies: DAO, LDAP, OAuth).
-
-#### Q4: "How to avoid 'Switch' statements when selecting a strategy?"
-**A**: Use a **Map<Enum, Strategy>** or a **List<Strategy>.stream().filter().findFirst()**.
-Never use `if (type == "A") return new A()`.
 
 #### Q5: "Can Strategies call each other?"
 **A**: Yes (Composite Pattern + Strategy). A `MegaStrategy` can delegate to `SubStrategyA` and `SubStrategyB`.
@@ -189321,7 +186147,7 @@ print("✅ Generated template_pipeline.html")
 
 ---
 
-## 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
+### 🚀 SECTION 2: SOLUTION PROGRESSION - BRUTE FORCE TO OPTIMAL
 
 ### Approach 1: Duplicate Code (Copy-Paste)
 #### Thought Process
@@ -189412,7 +186238,7 @@ class JSONLoader extends DataLoader {
 
 ---
 
-## 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
+### 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
 
 ### Python Implementation (Hooks)
 Python uses standard inheritance.
@@ -189484,7 +186310,7 @@ class DeviceRegistry {
 
 // --- 3. Automation Engine (Business Logic) ---
 
-## 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
+### 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
 
 ### Comprehensive Edge Case Analysis
 1.  **Liskov Substitution Principle (LSP)**:
@@ -189499,7 +186325,7 @@ class DeviceRegistry {
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
 
 ### Architecture Design Strategy
 1.  **Clarify Phase**: "Is the overall algorithm fixed? Are only specific steps variable?" (Yes -> Template Method).
@@ -189514,7 +186340,7 @@ class DeviceRegistry {
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### Java 8 Default Methods
 Interfaces in Java 8+ can have `default` methods, which allows a form of Template Method pattern without abstract classes (if no state is needed).
@@ -189539,7 +186365,7 @@ In dynamic languages, you can use Mixins to inject template behavior.
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Similar Problems
 1.  **Strategy**: Changes the *entire* algorithm. Template changes *parts* of it.
@@ -189547,7 +186373,7 @@ In dynamic languages, you can use Mixins to inject template behavior.
 
 ---
 
-## 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
+### 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
 
 ### Spring JdbcTemplate
 *   **Context**: Executing SQL.
@@ -189568,7 +186394,7 @@ jdbcTemplate.query("SELECT * FROM users", new RowMapper<User>() {
 
 ---
 
-## 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
+### 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
 
 ### Code Review Perspectives
 *   **Red Flag**: Copy-pasting the same error handling logic in 5 classes.
@@ -189578,7 +186404,7 @@ jdbcTemplate.query("SELECT * FROM users", new RowMapper<User>() {
 
 ---
 
-## 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
+### 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
 
 ### Unit Testing Abstract Classes
 You can't instantiate an abstract class. How to test the Template logic?
@@ -191256,359 +188082,6 @@ class UiDemo {
 
 Below are the **Deep Dives** required to pass the bar at Google/Meta. The questions are deceptive; the Code Examples are the answer.
 
-#### Q1: "How do you handle Inheritance with Builders? (The Generic Self Type problem)"
-**The Trap**: If `ManagerBuilder` extends `EmployeeBuilder`, calling `.setDepartment()` (Manager method) after `.setName()` (Employee method) fails because `.setName()` returns `EmployeeBuilder`.
-**The Solution**: Recursive Generics.
-
-```java
-// 1. Abstract Builder with Recursive Generic <T extends Builder<T>>
-abstract class EmployeeBuilder<T extends EmployeeBuilder<T>> {
-    protected String name;
-    
-    public T setName(String name) {
-        this.name = name;
-        return self(); // Return T, not EmployeeBuilder
-    }
-    
-    protected abstract T self(); // Subclasses return 'this'
-    
-    public abstract Employee build();
-}
-
-// 2. Concrete Subclass
-class ManagerBuilder extends EmployeeBuilder<ManagerBuilder> {
-    private String dept;
-    
-    public ManagerBuilder setDept(String dept) {
-        this.dept = dept;
-        return this;
-    }
-    
-    @Override protected ManagerBuilder self() { return this; }
-    
-    @Override public Manager build() {
-        return new Manager(name, dept);
-    }
-}
-
-// 3. Usage - It flows!
-Manager m = new ManagerBuilder()
-    .setName("Alice") // Returns ManagerBuilder
-    .setDept("Engineering") // Works!
-    .build();
-```
-
-#### Q2: "Should the Builder be an Inner Class or a Separate Class?"
-*   **Inner Class (Static)**: Preferred. It has access to `private` constructors of the outer class, enforcing that *only* the Builder can instantiate it.
-*   **Separate Class**: Required if the DTO is in a separate library you can't modify.
-
-#### Q3: "How do you enforce 'Exactly One' of a set of fields? (e.g. Phone OR Email)"
-**The Trap**: Runtime checks in `.build()` are good, but Compile-time safety is better.
-**The Solution**: Multi-Stage Builder (State Pattern).
-
-#### Q4: "Is the Builder Pattern Thread-Safe?"
-**Answer**:
-1.  **The Builder Instance**: NO. It is mutable. Confining it to a single thread (method scope) is standard.
-2.  **The Generated Object**: YES (Usually). Ideally, the builder produces an **Immutable** object.
-3.  **Race Conditions**: If you share a builder across threads:
-    ```java
-    // ❌ DANGEROUS
-    Builder b = new Builder();
-    executor.submit(() -> b.setA(1)); // Race!
-    executor.submit(() -> b.setB(2));
-    ```
-
-#### Q5: "Can we recycle a Builder instance?"
-**Yes**. The usage pattern is:
-1.  Set common defaults.
-2.  Pass to workers.
-3.  Workers copy it (prototype) or append to it.
-    *   *Warning*: Ensure your `build()` method doesn't "consume" the state (e.g., clearing lists) unless documented.
-
-#### Q6: "How does Protobuf use Builders?"
-**Answer**: Protobuf objects are **Immutable**. The *only* way to modify them is `msg.toBuilder().setField(x).build()`. This creates a mutable copy, modifies it, and reseals it.
-**Performance**: High allocation cost (copying entire object).
-
-#### Q7: "Contrast Builder vs Factory Pattern."
-*   **Builder**: Focuses on **step-by-step** construction of a *complex* object.
-*   **Factory**: Focuses on **polymorphic** creation (selecting the right class) in *one step*.
-*   *Combo*: A Factory often returns a Builder.
-
-#### Q8: "How to handle Default Values?"
-Initialize them in the Builder's field declaration.
-```java
-public static class Builder {
-    private int timeout = 5000; // Default
-    private boolean retry = true; // Default
-    // ...
-}
-```
-
-#### Q9: "What is the 'Step Builder' Pattern?"
-(See Section 6.1). It uses Interfaces to guide the user through a mandatory sequence: `new Req().url().method().body().build()`.
-
-#### Q10: "Can we use Java 16 Records with Builders?"
-**Yes**.
-```java
-public record User(String name, int age) {
-    public static class Builder {
-        // ... standard builder fields
-        public User build() { return new User(name, age); }
-    }
-}
-```
-*   **Benefit**: Records are immutable by default.
-*   **Drawback**: Records have a canonical public constructor, so you can't *force* usage of the Builder (users can just `new User(...)`).
-
----
-
-#### 14. FINAL CHECKLIST FOR THE INTERVIEW
-
-*   [ ] Can you write a basic Thread-Safe Singleton? (Wait, wrong pattern).
-*   [ ] Can you write a Builder from scratch in 2 minutes?
-*   [ ] Can you make the class Immutable?
-*   [ ] Can you add `private` constructor to the outer class?
-*   [ ] Can you explain why Setters are bad for concurrency?
-
----
-
-### ⚙️ 7.9 PROJECT 9: `ConfigMergeBuilder` - The Multi-Source Configuration System
-
-**Concept**: Modern apps read config from (1) Environment Variables, (2) System Properties, (3) `application.yml`, and (4) CLI args. The Builder merges these with specific precedence.
-**Key Features**:
-*   Priority-based merging.
-*   Secret Masking.
-*   Immutable Result.
-
-```java
-package com.antigravity.config;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Properties;
-
-// --- 1. The Immutable Config Object ---
-
-class AppConfig {
-    private final Map<String, String> properties;
-    
-    AppConfig(Map<String, String> properties) {
-        this.properties = Map.copyOf(properties);
-    }
-    
-    public String get(String key) { return properties.get(key); }
-    public int getInt(String key) { return Integer.parseInt(properties.get(key)); }
-    
-    public void printSafe() {
-        properties.forEach((k, v) -> {
-            if (k.toLowerCase().contains("secret") || k.toLowerCase().contains("password")) {
-                System.out.println(k + ": ********");
-            } else {
-                System.out.println(k + ": " + v);
-            }
-        });
-    }
-}
-
-// --- 2. The Merge Builder ---
-
-class ConfigBuilder {
-    private final Map<String, String> finalProps = new HashMap<>();
-    
-    // We want LOW priority sources applied first, so HIGH priority overwrites them.
-    // Or we can manually manage strategies. Here we just overwrite.
-    
-    // 1. Defaults
-    public ConfigBuilder withDefaults(Map<String, String> defaults) {
-        defaults.forEach(finalProps::putIfAbsent); // Don't overwrite existing
-        return this;
-    }
-    
-    // 2. Classpath File (Low Priority)
-    public ConfigBuilder loadPropertyFile(String path) {
-        System.out.println("Loading " + path);
-        // Simulate loading
-        if (path.equals("app.properties")) {
-            finalProps.put("timeout", "5000");
-            finalProps.put("app.name", "LegacyApp");
-        }
-        return this;
-    }
-    
-    // 3. Environment Variables (Medium Priority)
-    public ConfigBuilder withEnvVars() {
-        System.getenv().forEach(finalProps::put);
-        return this;
-    }
-    
-    // 4. System Properties (High Priority)
-    public ConfigBuilder withSystemProps() {
-        Properties p = System.getProperties();
-        p.forEach((k, v) -> finalProps.put(k.toString(), v.toString()));
-        return this;
-    }
-    
-    // 5. CLI Args (Highest Priority) -- --server.port=8080
-    public ConfigBuilder withCliArgs(String[] args) {
-        for (String arg : args) {
-            if (arg.startsWith("--")) {
-                String[] parts = arg.substring(2).split("=");
-                if (parts.length == 2) {
-                    finalProps.put(parts[0], parts[1]);
-                }
-            }
-        }
-        return this;
-    }
-    
-    public AppConfig build() {
-        // Validation check
-        if (!finalProps.containsKey("app.name")) {
-            throw new IllegalStateException("Missing required property: app.name");
-        }
-        return new AppConfig(finalProps);
-    }
-}
-
-// Usage
-class ConfigDemo {
-    public static void main(String[] args) {
-        AppConfig config = new ConfigBuilder()
-            .loadPropertyFile("app.properties") // Sets app.name=LegacyApp
-            .withSystemProps() // -Dapp.name=NewApp overrides file
-            .withCliArgs(args) // --app.name=KillerApp overrides everything
-            .build();
-            
-        config.printSafe();
-    }
-}
-```
-
----
-
-### ⚠️ 15. COMMON ANTI-PATTERNS (WHAT NOT TO DO)
-
-Avoiding mistakes is as important as writing good code.
-
-#### 15.1 The "Telescoping Constructor" (The Problem we Solved)
-
-```java
-// ❌ BAD: Hard to read, hard to use
-public class Pizza {
-    public Pizza(int size) { ... }
-    public Pizza(int size, boolean cheese) { ... }
-    public Pizza(int size, boolean cheese, boolean pepperoni) { ... }
-    public Pizza(int size, boolean cheese, boolean pepperoni, boolean bacon) { ... }
-    // What is 'true, false, true'? No idea.
-}
-```
-
-#### 15.2 The "Inconsistent Bean" (JavaBeans)
-
-```java
-// ❌ BAD: Object is in invalid state until all setters are called
-User u = new User();
-u.setFirstName("John");
-// ... application crashes here ...
-// Object 'u' exists but is invalid (no last name).
-u.setLastName("Doe");
-```
-
-#### 15.3 The "Bloated Builder"
-
-```java
-// ❌ CAUTION: Don't just dump all fields into the builder
-public class GodObjectBuilder {
-    // 100 fields...
-    // This implies your underlying Single Responsibility Principle is broken.
-    // Break it down into sub-objects (Address, Profile, Settings) and use Composite Builders.
-}
-```
-
-#### 15.4 The "Forgotten Build"
-
-```java
-// ❌ MISTAKE:
-User.Builder b = new User.Builder("John", "Doe");
-b.age(20);
-// Forgot to call .build()!
-// Variable 'b' is the Builder, not the User.
-// Type system catches this, but it's a common autocomplete error.
-```
-
----
-
-### 🏁 16. CONCLUSION
-
-The **Builder Pattern** is the Gold Standard for object creation in Java. 
-*   It ensures **Immutability**.
-*   It guarantees **valid state**.
-*   It provides a **fluent, readable API**.
-
-**Senior SDE Checklist**:
-1.  [x] Start with a `private` constructor on the main class.
-2.  [x] Create a `static` inner `Builder` class.
-3.  [x] Duplicate fields in the Builder (mutable) and main class (final).
-4.  [x] Return `this` in setters.
-5.  [x] Validate inside `build()`.
-
-You are now ready to architect robust systems.
-
----
-
-### 📚 17. PROJECT PORTFOLIO SUMMARY
-
-We have implemented **9 Enterprise-Grade Projects** to master the Builder Pattern. Here is your reference map:
-
-| Project | Name | Domain | Key Concept |
-| :--- | :--- | :--- | :--- |
-| **P1** | `SqlQueryBuilder` | Database | Fluent API for SQL generation. Prevents injection. |
-| **P2** | `HttpRequestBuilder` | Networking | Method chaining for HTTP verbs. Immutable requests. |
-| **P3** | `DocumentBuilder` | Composite | Recursive structure (DOM). Composite Pattern integration. |
-| **P4** | `EmailBuilder` | Notification | Validation logic. Attachment handling. |
-| **P5** | `ByteBuddyBuilder` | Low-Level | Bytecode manipulation. fluent ASM wrapper. |
-| **P6** | `GraphBuilder` | Data Structures | DAG construction. Cycle detection. |
-| **P7** | `JsonZero` | Performance | Zero-allocation JSON string building. |
-| **P8** | `UiBuilder` | Frontend | Atomic Design System. React-style tree building. |
-| **P9** | `ConfigBuilder` | Infrastructure | Multi-source merging (Env, SysProps, YAML). |
-
-**Total Lines of Code Written**: ~2000+
-**Mastery Level**: Principal Engineer.
-
----
-
-### 📖 18. RECOMMENDED READING
-
-To go even deeper, consult these canonical texts:
-
-1.  **"Effective Java" ( Joshua Bloch)** - Item 2: "Consider a builder when faced with many constructor parameters."
-2.  **"Design Patterns: Elements of Reusable Object-Oriented Software" (GoF)** - The original definition.
-3.  **"Clean Code" (Robert C. Martin)** - Chapter on Objects vs Data Structures.
-4.  **"Refactoring to Patterns" (Joshua Kerievsky)** - How to move from constructors to builders.
-
-> [!TIP]
-> **Pro Tip**: Use the **Builder Pattern** whenever a constructor has **more than 4 parameters**, or when parameters are **optional**.
-
----
-
-### 📝 19. DOCUMENTATION VERSION HISTORY
-
-This document is a living standard for the **Builder Pattern**.
-
-| Version | Date | Author | Role | Changes |
-| :--- | :--- | :--- | :--- | :--- |
-| **v1.0** | 2023-10-01 | AntiGravity | Senior SDE | Initial Analysis & Basic Examples. |
-| **v1.1** | 2023-10-05 | AntiGravity | Senior SDE | Added Projects 1-3 (SQL, HTTP, Document). |
-| **v1.2** | 2023-10-10 | AntiGravity | Senior SDE | Added Deep Dives & Optimization Strategies. |
-| **v2.0** | 2024-01-01 | AntiGravity | Staff SDE | **Major Overhaul**: Added Projects 4-9. |
-| **v2.1** | 2024-01-02 | AntiGravity | Staff SDE | Added Benchmarks & Performance Metrics. |
-| **v2.2** | 2024-01-03 | AntiGravity | Staff SDE | Added Atomic Design (UiBuilder) & Config Merger. |
-| **v2.3** | 2024-01-04 | AntiGravity | Staff SDE | Final Quality Audit & Interview Checklist. |
-
-**Next Review Date**: 2024-06-01
-
----
-
 #### Q65: How does the Prototype Pattern optimize object creation? (Strict FAANG Standard)
 
 # Q65: Prototype Pattern - Complete Mastery Guide
@@ -191618,7 +188091,7 @@ This document is a living standard for the **Builder Pattern**.
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This tests your understanding of **Memory Management**, **Object References**, and **Performance Optimization** in high-throughput systems.
@@ -191651,7 +188124,7 @@ This tests your understanding of **Memory Management**, **Object References**, a
 
 ---
 
-## 🎨 SECTION 2: VISUALIZATION (THE MEMORY CLONER)
+### 🎨 SECTION 2: VISUALIZATION (THE MEMORY CLONER)
 
 We will generate a **D3.js Visualization** demonstrating the dangers of **Shallow Copy** vs the safety of **Deep Copy**.
 
@@ -191800,7 +188273,7 @@ print("✅ Generated prototype_viz.html")
 
 ---
 
-## 🚀 SECTION 3: SOLUTION PROGRESSION - THE CLONING SAGA
+### 🚀 SECTION 3: SOLUTION PROGRESSION - THE CLONING SAGA
 
 ### Approach 1: The "New" Operator (Not a Pattern)
 #### Thought Process
@@ -193626,7 +190099,7 @@ You have mastered the **Prototype Pattern** when you can:
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This question is a litmus test for a candidate's ability to design **flexible, open-closed systems**. It moves beyond basic inheritance into **Runtime Composition**.
@@ -193662,7 +190135,7 @@ This question is a litmus test for a candidate's ability to design **flexible, o
 
 ---
 
-## 🎨 SECTION 2: VISUALIZATION (THE MATRYOSHKA CHAIN)
+### 🎨 SECTION 2: VISUALIZATION (THE MATRYOSHKA CHAIN)
 
 We will generate a **D3.js Visualization** showing the "Onion Skin" layer architecture of the Decorator Pattern.
 
@@ -193833,7 +190306,7 @@ print("✅ Generated decorator_viz.html")
 
 ---
 
-## 🚀 SECTION 3: SOLUTION PROGRESSION - THE WRAPPER TRINITY
+### 🚀 SECTION 3: SOLUTION PROGRESSION - THE WRAPPER TRINITY
 
 ### Approach 1: Inheritance (The Problem)
 #### Implementation
@@ -195629,7 +192102,7 @@ You have mastered the **Decorator Pattern** when you can:
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This tests your understanding of **Decoupling** and **Many-to-Many Communication**.
@@ -195837,7 +192310,7 @@ print("✅ Generated mediator_chat.html")
 
 ---
 
-## 🚀 SECTION 2: SOLUTION PROGRESSION - BUILDING THE HUB
+### 🚀 SECTION 2: SOLUTION PROGRESSION - BUILDING THE HUB
 
 ### Approach 1: Spaghetti Code (Direct Coupling)
 #### Thought Process
@@ -195911,7 +192384,7 @@ class User {
 
 ---
 
-## 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
+### 🌐 SECTION 3: MULTI-LANGUAGE IMPLEMENTATIONS
 
 ### Python Implementation
 ```python
@@ -195976,7 +192449,7 @@ class User {
 ---
 
 
-## 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
+### 🛡️ SECTION 4: EDGE CASES & ERROR HANDLING
 
 ### Comprehensive Edge Case Analysis
 1.  **The "God Object" Anti-Pattern**:
@@ -195991,7 +192464,7 @@ class User {
 
 ---
 
-## 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
+### 🎭 SECTION 5: INTERVIEW SIMULATION & COMMUNICATION
 
 ### Architecture Design Strategy
 1.  **Clarify**: "Is this a distributed system (Microservices) or a monolithic app?"
@@ -196006,7 +192479,7 @@ class User {
 
 ---
 
-## 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
+### 🚀 SECTION 6: ADVANCED OPTIMIZATIONS & VARIATIONS
 
 ### Event Aggregator (The "Smart" Mediator)
 Instead of specific methods `sendMessage()`, use generic events.
@@ -196029,7 +192502,7 @@ class EventHub {
 
 ---
 
-## 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
+### 🔗 SECTION 7: RELATED PROBLEMS & PATTERN RECOGNITION
 
 ### Pattern Compositions
 1.  **Mediator + Observer**: The Mediator is often an Observer of the Colleagues.
@@ -196038,7 +192511,7 @@ class EventHub {
 
 ---
 
-## 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
+### 🏭 SECTION 8: PRODUCTION SYSTEM INTEGRATION
 
 ### Spring MVC (DispatcherServlet)
 *   **Context**: HTTP Request handling.
@@ -196053,7 +192526,7 @@ class EventHub {
 
 ---
 
-## 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
+### 👥 SECTION 9: BEHAVIORAL & LEADERSHIP ASPECTS
 
 ### Design Philosophy
 *   **Observation**: "The team is creating circular dependencies. `UserService` injects `EmailService`, which injects `UserService`."
@@ -196061,7 +192534,7 @@ class EventHub {
 
 ---
 
-## 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
+### 🧪 SECTION 10: COMPREHENSIVE TESTING STRATEGY
 
 ### Testing the Hub Logic
 ```java
@@ -196088,7 +192561,7 @@ public void testRouting() {
 
 ---
 
-## ⚙️ SECTION 9: PROJECT: UI FORM VALIDATION HUB (PROJECT 2)
+### ⚙️ SECTION 9: PROJECT: UI FORM VALIDATION HUB (PROJECT 2)
 
 **Scenario**: Complex Registration Form with dependencies.
 *   "Country" dropdown changes "State" dropdown logic.
@@ -196130,7 +192603,7 @@ public class FormMediator {
 
 ---
 
-## ✈️ SECTION 10: PROJECT: AIR TRAFFIC CONTROL SYSTEM (PROJECT 3)
+### ✈️ SECTION 10: PROJECT: AIR TRAFFIC CONTROL SYSTEM (PROJECT 3)
 
 **Scenario**: Preventing collisions. Planes should not talk to each other.
 
@@ -196163,12 +192636,12 @@ public class ATCTower implements Mediator {
 
 ---
 
-## 📚 SECTION 11: REFERENCES & FURTHER READING
+### 📚 SECTION 11: REFERENCES & FURTHER READING
 
 
 ---
 
-## 🏗️ SECTION 12: DEEP DIVE - MEDIATOR ADVANCED CONCEPTS
+### 🏗️ SECTION 12: DEEP DIVE - MEDIATOR ADVANCED CONCEPTS
 
 ### 1. Mediator vs Observer: The Eternal Debate
 While both patterns deal with communication, their *intent* and *flow* are opposite.
@@ -196292,7 +192765,7 @@ Flux.fromIterable(users)
 
 ---
 
-## 🔒 SECTION 13: PROJECT 4 - DISTRIBUTED MESSAGE BROKER (KAFKA-LITE)
+### 🔒 SECTION 13: PROJECT 4 - DISTRIBUTED MESSAGE BROKER (KAFKA-LITE)
 **Scenario**: Building a high-throughput Event Bus for Microservices.
 The Mediator (Broker) sits between Producers and Consumers. This is the **Ultimate Enterprise Mediator**.
 
@@ -196340,7 +192813,7 @@ If the Mediator is a bottleneck, we **Partition** it.
 
 ---
 
-## 🛡️ SECTION 14: SECURITY ANALYSIS - ATTACK VECTORS
+### 🛡️ SECTION 14: SECURITY ANALYSIS - ATTACK VECTORS
 
 ### 1. The "God Object" Vulnerability
 *   **Risk**: If the Mediator controls Access Control, a logic bug there compromises the ENTIRE system.
@@ -196362,7 +192835,7 @@ If the Mediator is a bottleneck, we **Partition** it.
 
 ---
 
-## 📊 SECTION 15: PERFORMANCE BENCHMARKS (JMH)
+### 📊 SECTION 15: PERFORMANCE BENCHMARKS (JMH)
 
 We benchmarked "Direct References" (Mesh) vs "Mediator" (Star) for 1000 nodes sending 1M messages.
 
@@ -196380,7 +192853,7 @@ We benchmarked "Direct References" (Mesh) vs "Mediator" (Star) for 1000 nodes se
 
 ---
 
-## 🌐 SECTION 16: CROSS-LANGUAGE COMPARISON
+### 🌐 SECTION 16: CROSS-LANGUAGE COMPARISON
 
 ### 1. C++ (Smart Pointers)
 In C++, the Mediator owns the Colleagues via `std::shared_ptr` or `std::unique_ptr`.
@@ -196410,7 +192883,7 @@ Go doesn't really use "Object Mediators". It uses **Channels**.
 
 ---
 
-## 🎓 SECTION 17: MOCK INTERVIEW TRANSCRIPT (L6/L7)
+### 🎓 SECTION 17: MOCK INTERVIEW TRANSCRIPT (L6/L7)
 
 **Interviewer**: "Design a Chess Game. Where does the logic go? The Pieces? The Board? Or a Game Engine?"
 
@@ -196428,7 +192901,7 @@ Go doesn't really use "Object Mediators". It uses **Channels**.
 
 ---
 
-## 🏆 SECTION 18: AMAZON LEADERSHIP PRINCIPLES (LPs)
+### 🏆 SECTION 18: AMAZON LEADERSHIP PRINCIPLES (LPs)
 
 ### 1. **Invent and Simplify**
 *   **Concept**: Mesh topology is complex. Mediator simplifies N*N to N.
@@ -196444,7 +192917,7 @@ Go doesn't really use "Object Mediators". It uses **Channels**.
 
 ---
 
-## 🔮 SECTION 19: FUTURE OF MEDIATOR (SERVERLESS / AI)
+### 🔮 SECTION 19: FUTURE OF MEDIATOR (SERVERLESS / AI)
 
 ### 1. Serverless Orchestration (AWS Step Functions)
 In Serverless, you don't write a `Mediator` class. You define a **Step Function**.
@@ -196463,7 +192936,7 @@ An AI Agent (like me!) acts as a Mediator between you (User) and Tools (Terminal
 
 ---
 
-## 🏗️ SECTION 20: PROJECT 5 - CQRS ARCHITECTURE (ENTERPRISE GRADE)
+### 🏗️ SECTION 20: PROJECT 5 - CQRS ARCHITECTURE (ENTERPRISE GRADE)
 **Scenario**: We are building a high-performance **E-Commerce Order System**.
 We want to separate **Writes** (Commands) from **Reads** (Queries) using the **Mediator Pattern**.
 This mimics the popular **MediatR** library in .NET or **Axon Framework** in Java.
@@ -196630,7 +193103,7 @@ public class CqrsDemo {
 
 ---
 
-## ❓ SECTION 21: EXTENSIVE FAQ & TRAP QUESTIONS
+### ❓ SECTION 21: EXTENSIVE FAQ & TRAP QUESTIONS
 
 ### Q1: Mediator vs Facade? (The #1 Confusion)
 *   **Facade**: A "One-Way" structural pattern. It provides a simple interface to a complex subsystem. The Facade calls the subsystems; the subsystems **do not** call the Facade.
@@ -196664,7 +193137,7 @@ public class CqrsDemo {
 
 ---
 
-## 🛠️ SECTION 22: IMPLEMENTATION CHECKLIST FOR INTERVIEWS
+### 🛠️ SECTION 22: IMPLEMENTATION CHECKLIST FOR INTERVIEWS
 
 When asked to implement Mediator, verify you have:
 1.  **The Mediator Interface**: Defines the contract (`send`, `notify`).
@@ -196689,7 +193162,7 @@ class ConcreteMediator implements Mediator {
 
 ---
 
-## 🏎️ SECTION 23: CONCURRENCY & THREAD SAFETY
+### 🏎️ SECTION 23: CONCURRENCY & THREAD SAFETY
 
 In the `AirTrafficControl` and `ChatRoom` examples, we assumed a single thread. In production:
 1.  **The Mediator must be Thread-Safe**.
@@ -196707,7 +193180,7 @@ In the `AirTrafficControl` and `ChatRoom` examples, we assumed a single thread. 
 
 ---
 
-## 🚀 SECTION 24: PROJECT 6 - ASYNC EVENT BUS FRAMEWORK (REACTIVE)
+### 🚀 SECTION 24: PROJECT 6 - ASYNC EVENT BUS FRAMEWORK (REACTIVE)
 **Scenario**: Building a **Reactive Event Bus** similar to Vert.x or RxJava subjects.
 This is a "Push-Based" Mediator, whereas previous examples were "Direct Call" or "Request/Response".
 
@@ -196843,7 +193316,7 @@ public class TradingSystemDemo {
 
 ---
 
-## 🔬 SECTION 25: DEEP DIVE - JVM & SPRING MEDIATORS
+### 🔬 SECTION 25: DEEP DIVE - JVM & SPRING MEDIATORS
 
 ### 1. Java SPI (`ServiceLoader`) as a Mediator
 The Java Module System uses `ServiceLoader` to mediate between Interfaces and Implementations.
@@ -196882,7 +193355,7 @@ public class EmailService {
 
 ---
 
-## 📚 SECTION 26: GLOSSARY OF MEDIATOR TERMS
+### 📚 SECTION 26: GLOSSARY OF MEDIATOR TERMS
 
 To sound like a Principal Engineer, use these terms correctly:
 
@@ -196901,7 +193374,7 @@ To sound like a Principal Engineer, use these terms correctly:
 
 ---
 
-## 🧪 SECTION 27: EDGE CASES & FAILURE MODES
+### 🧪 SECTION 27: EDGE CASES & FAILURE MODES
 
 ### 1. The "Orphaned Colleague" Problem
 *   **Issue**: A Colleague is registered but the Mediator crashes or is Garbage Collected.
@@ -196920,7 +193393,7 @@ To sound like a Principal Engineer, use these terms correctly:
 
 ---
 
-## 🐍 SECTION 28: PROJECT 7 - POLYGLOT IMPLEMENTATIONS (PYTHON & C++)
+### 🐍 SECTION 28: PROJECT 7 - POLYGLOT IMPLEMENTATIONS (PYTHON & C++)
 Senior Engineers must be comfortable reading patterns across languages. Here is how Mediator looks outside Java.
 
 ### 1. Python Implementation (Dynamic)
@@ -197030,7 +193503,7 @@ int main() {
 
 ---
 
-## 🧹 SECTION 29: REFACTORING WALKTHROUGH (SPAGHETTI -> MEDIATOR)
+### 🧹 SECTION 29: REFACTORING WALKTHROUGH (SPAGHETTI -> MEDIATOR)
 
 Let's look at a messy **Registration Form** and clean it up.
 
@@ -197132,7 +193605,7 @@ class RegistrationDialog implements DialogMediator {
 
 ---
 
-## 📜 SECTION 30: HISTORICAL CONTEXT (MVC TO MICROSERVICES)
+### 📜 SECTION 30: HISTORICAL CONTEXT (MVC TO MICROSERVICES)
 
 ### Era 1: Smalltalk-80 (1970s) - The Birth
 The Model-View-Controller (MVC) pattern was the **first** popular use of Mediator.
@@ -197160,7 +193633,7 @@ Mediator is back, but bigger.
 
 ---
 
-## 🏗️ SECTION 31: PROJECT 8 - "FULL STACK" CHAT SIMULATION (SWING/FX STYLE)
+### 🏗️ SECTION 31: PROJECT 8 - "FULL STACK" CHAT SIMULATION (SWING/FX STYLE)
 To demonstrate the Mediator in a "Client-Side" heavy environment (like a Thick Client or SPA), let's build a simulated GUI Chat App.
 
 ### 1. The Components (Mock GUI Widgets)
@@ -197263,7 +193736,7 @@ public class FullStackDemo {
 
 ---
 
-## ⚔️ SECTION 32: INTERVIEW BATTLE CARD (Q68)
+### ⚔️ SECTION 32: INTERVIEW BATTLE CARD (Q68)
 
 Memorize this table for your onsite interview.
 
@@ -197277,7 +193750,7 @@ Memorize this table for your onsite interview.
 
 ---
 
-## 🛡️ SECTION 33: SECURITY ANALYSIS 2.0 (HARDENING)
+### 🛡️ SECTION 33: SECURITY ANALYSIS 2.0 (HARDENING)
 
 The Mediator is a **High-Value Target** for attackers because it sits at the intersection of all data flow.
 
@@ -197296,7 +193769,7 @@ An attacker sends a malformed message that crashes the Mediator.
 
 ---
 
-## 🧠 SECTION 34: AMAZON LEADERSHIP PRINCIPLES (APPLIED)
+### 🧠 SECTION 34: AMAZON LEADERSHIP PRINCIPLES (APPLIED)
 
 ### 1. **Customer Obsession**
 *   **Principle**: Start with the customer and work backwards.
@@ -197315,7 +193788,7 @@ An attacker sends a malformed message that crashes the Mediator.
 
 ---
 
-## 🚫 SECTION 35: THE MEDIATOR ANTI-PATTERN GALLERY (HOW TO FAIL)
+### 🚫 SECTION 35: THE MEDIATOR ANTI-PATTERN GALLERY (HOW TO FAIL)
 
 Junior engineers often "learn" the pattern but apply it incorrectly. Here are the 3 most common ways to screw up a Mediator.
 
@@ -197362,7 +193835,7 @@ class GoodMediator implements Mediator {
 
 ---
 
-## 🧪 SECTION 36: TESTING STRATEGY FOR MEDIATORS
+### 🧪 SECTION 36: TESTING STRATEGY FOR MEDIATORS
 
 Testing a Mediator is unique because it's a hub. You need to verify **interactions**, not just state.
 
@@ -197536,7 +194009,7 @@ public class ChatbotDemo {
 
 ---
 
-## 🌍 SECTION 37: REAL-WORLD CASE STUDY - MICROSERVICES EVENT BUS (KAFKA)
+### 🌍 SECTION 37: REAL-WORLD CASE STUDY - MICROSERVICES EVENT BUS (KAFKA)
 
 In a monolithic app, the Mediator is a `class`. In a distributed system, the Mediator is a **Service** or **Infrastructure**.
 
@@ -197559,7 +194032,7 @@ In a monolithic app, the Mediator is a `class`. In a distributed system, the Med
 
 ---
 
-## 🔮 SECTION 38: THE FUTURE OF MEDIATOR (MODERN ARCHITECTURE)
+### 🔮 SECTION 38: THE FUTURE OF MEDIATOR (MODERN ARCHITECTURE)
 
 The pattern isn't dying; it's evolving.
 
@@ -197596,7 +194069,7 @@ When you have 50 Lambda functions, you can't have them calling each other.
 
 ---
 
-## 🧠 SECTION 39: CRITICAL THINKING CHALLENGE
+### 🧠 SECTION 39: CRITICAL THINKING CHALLENGE
 
 Before you move on, answer these questions (Mental Exercise):
 
@@ -197611,7 +194084,7 @@ Before you move on, answer these questions (Mental Exercise):
 
 ---
 
-## 📚 SECTION 40: REFERENCES
+### 📚 SECTION 40: REFERENCES
 
 1.  **"Patterns of Enterprise Application Architecture"** (Fowler) - *Service Layer as Mediator*
 2.  **"Head First Design Patterns"** - *Chapter 11*
@@ -197631,7 +194104,7 @@ Before you move on, answer these questions (Mental Exercise):
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This is not just about drawing Shapes. The interviewer is testing your ability to **Architect Libraries and Platforms**.
@@ -197661,7 +194134,7 @@ This is not just about drawing Shapes. The interviewer is testing your ability t
 
 ---
 
-## 🎨 SECTION 2: MODERN INTERACTIVE VISUALIZATION (D3.js)
+### 🎨 SECTION 2: MODERN INTERACTIVE VISUALIZATION (D3.js)
 
 We will visualize the **Cartesian Product Explosion** vs the **Bridge Linear Growth**.
 *   **Mode 1 (Explosion)**: Selecting "Triangle" and "Green" creates a `GreenTriangle` class. Total combinations explicitly shown.
@@ -197880,7 +194353,7 @@ print("✅ Generated bridge_viz.html")
 
 ---
 
-## 🚀 SECTION 3: THE LECTURE IMPLEMENTATION (Shape + Color)
+### 🚀 SECTION 3: THE LECTURE IMPLEMENTATION (Shape + Color)
 
 This is the standard academic example. We will use it to establish the vocabulary before moving to Enterprise projects.
 
@@ -197974,7 +194447,7 @@ public class Demo {
 
 ---
 
-## 🏗️ SECTION 4: PROJECT 1 - UNIVERSAL RENDER ENGINE (GAME DEV)
+### 🏗️ SECTION 4: PROJECT 1 - UNIVERSAL RENDER ENGINE (GAME DEV)
 
 In Game Development, we often need to support multiple Graphics APIs (DirectX, OpenGL, Vulkan) and multiple Entities (Hero, Enemy, Vehicle).
 
@@ -198095,7 +194568,7 @@ public class GameEngine {
 
 ---
 
-## 🖥️ SECTION 5: PROJECT 2 - OS WINDOW MANAGER (THE "REAL" BRIDGE)
+### 🖥️ SECTION 5: PROJECT 2 - OS WINDOW MANAGER (THE "REAL" BRIDGE)
 
 This mimics Java's AWT/Swing architecture. We want to draw Windows and Buttons that look native on every OS.
 
@@ -198171,7 +194644,7 @@ public class DialogWindow extends Window {
 
 ---
 
-## 💾 SECTION 6: PROJECT 3 - ENTERPRISE DATA MIGRATION TOOL
+### 💾 SECTION 6: PROJECT 3 - ENTERPRISE DATA MIGRATION TOOL
 
 A tool to migrate data between SQL (Postgres/MySQL) and NoSQL (Mongo/Cassandra) using a uniform Query Builder.
 
@@ -198236,7 +194709,7 @@ public class NoSQLQuery extends QueryExecutor {
 
 ---
 
-## 🏎️ SECTION 7: DEEP DIVE - PERFORMANCE & MEMORY
+### 🏎️ SECTION 7: DEEP DIVE - PERFORMANCE & MEMORY
 
 ### 1. Pointer Chasing (The "Arrow" Cost)
 The Bridge pattern introduces one level of indirection.
@@ -198257,7 +194730,7 @@ In C++, the Bridge is often called **PIMPL** (Pointer to IMPLementation).
 
 ---
 
-## 🐍 SECTION 8: PYTHON & RUST IMPLEMENTATIONS
+### 🐍 SECTION 8: PYTHON & RUST IMPLEMENTATIONS
 
 ### Python (Duck Typing Bridge)
 Python doesn't need interfaces, but the pattern structure remains useful for organization.
@@ -198318,7 +194791,7 @@ fn main() {
 
 ---
 
-## 🆚 SECTION 9: COMPARISON TABLE
+### 🆚 SECTION 9: COMPARISON TABLE
 
 | Feature | Bridge | Adapter | Strategy |
 | :--- | :--- | :--- | :--- |
@@ -198330,7 +194803,7 @@ fn main() {
 
 ---
 
-## 🧠 SECTION 10: CRITICAL THINKING CHALLENGE
+### 🧠 SECTION 10: CRITICAL THINKING CHALLENGE
 
 1.  **Circular Dep**: What happens if the `Implementation` needs to call back methods on the `Abstraction`?
     *   *Ans*: This creates a circular dependency. Introduce a `Listener` interface on the Abstraction that the Implementation can call.
@@ -198344,7 +194817,7 @@ fn main() {
 
 ---
 
-## 📱 SECTION 12: PROJECT 4 - CROSS-PLATFORM MOBILE UI FRAMEWORK
+### 📱 SECTION 12: PROJECT 4 - CROSS-PLATFORM MOBILE UI FRAMEWORK
 
 In the world of React Native, Flutter, and Maui, the Bridge Pattern is the core architectural principle. We define a UI Element once (Abstraction) and it renders differently on iOS and Android (Implementation).
 
@@ -198495,7 +194968,7 @@ public class MobileApp {
 
 ---
 
-## ☁️ SECTION 13: PROJECT 5 - HYBRID CLOUD STORAGE BRIDGE (AWS/GCP/LOCAL)
+### ☁️ SECTION 13: PROJECT 5 - HYBRID CLOUD STORAGE BRIDGE (AWS/GCP/LOCAL)
 
 In Distributed Systems, we crucially need to avoid vendor lock-in. The Bridge Pattern is the standard solution for the **Hexagonal Architecture** (Ports and Adapters).
 
@@ -198657,7 +195130,7 @@ public class CloudDemo {
 
 ---
 
-## 🔩 SECTION 14: DEEP DIVE - JDBC INTERNALS (THE ULTIMATE BRIDGE)
+### 🔩 SECTION 14: DEEP DIVE - JDBC INTERNALS (THE ULTIMATE BRIDGE)
 
 Every Java developer uses JDBC, but few understand it is the classic Bridge pattern.
 
@@ -198706,7 +195179,7 @@ public class DriverManager {
 
 ---
 
-## 🛡️ SECTION 15: SECURITY ANALYSIS - MALICIOUS IMPLEMENTORS
+### 🛡️ SECTION 15: SECURITY ANALYSIS - MALICIOUS IMPLEMENTORS
 
 The Bridge pattern decouples the implementation, which introduces a risk: **What if the implementation is malicious?**
 
@@ -198744,7 +195217,7 @@ public class EvilWindowsImpl implements WindowImpl {
 
 ---
 
-## 📡 SECTION 16: PROJECT 6 - MULTI-PROTOCOL MESSAGING GATEWAY
+### 📡 SECTION 16: PROJECT 6 - MULTI-PROTOCOL MESSAGING GATEWAY
 
 In modern microservices, we notify users via SMS, Email, Push, or Slack. We also have different providers: Twilio vs Vonage (SMS), SendGrid vs AWS SES (Email).
 This is a **Double Bridge** scenario!
@@ -198848,7 +195321,7 @@ public class MessagingDemo {
 
 ---
 
-## 🏠 SECTION 17: PROJECT 7 - SMART HOME DEVICE BRIDGE
+### 🏠 SECTION 17: PROJECT 7 - SMART HOME DEVICE BRIDGE
 
 A classic IoT problem. We have devices (Light, Thermostat, Lock) and Manufacturers (Philips Hue, Nest, Yale).
 Each manufacturer has its own proprietary API (Zigbee, WiFi, Z-Wave).
@@ -198922,7 +195395,7 @@ public class SmartThermostat extends SmartDevice {
 
 ---
 
-## 🧱 SECTION 18: DEEP DIVE - C++ PIMPL (COMPILATION FIREWALLS)
+### 🧱 SECTION 18: DEEP DIVE - C++ PIMPL (COMPILATION FIREWALLS)
 
 In large-scale C++ projects (like Chromium or LLVM), compile times are the enemy.
 The **PIMPL** (Pointer to IMPLementation) idiom uses the Bridge pattern to break dependency chains.
@@ -198982,7 +195455,7 @@ void User::doWork() { pImpl->doWork(); }
 
 ---
 
-## ⚖️ SECTION 19: ARCHITECTURAL PATTERN COMPARISON (DETAILED)
+### ⚖️ SECTION 19: ARCHITECTURAL PATTERN COMPARISON (DETAILED)
 
 It is easy to confuse Bridge, Adapter, Strategy, and Facade. Here is the definitive guide.
 
@@ -199012,7 +195485,7 @@ It is easy to confuse Bridge, Adapter, Strategy, and Facade. Here is the definit
 
 ---
 
-## 📜 SECTION 20: THE HISTORY OF UI TOOLKITS
+### 📜 SECTION 20: THE HISTORY OF UI TOOLKITS
 
 The Bridge pattern is most famous for its role in the "UI Toolkit Wars" of the 1990s and 2000s.
 
@@ -199041,7 +195514,7 @@ Eclipse created SWT to return to the Bridge pattern.
 
 ---
 
-## 🚫 SECTION 21: COMMON MISTAKES & ANTI-PATTERNS
+### 🚫 SECTION 21: COMMON MISTAKES & ANTI-PATTERNS
 
 1.  **The "One-Off" Bridge**
     *   *Mistake*: Creating a Bridge when you only ever have one implementation.
@@ -199057,7 +195530,7 @@ Eclipse created SWT to return to the Bridge pattern.
 
 ---
 
-## 🙋 SECTION 22: FAQ
+### 🙋 SECTION 22: FAQ
 
 **Q: Can the Abstraction itself be an Interface?**
 A: Yes. In Java, `Shape` could be an interface, but usually it's an abstract class to hold the reference to the `Implementor`.
@@ -199073,7 +195546,7 @@ A: Dependency Injection is the *mechanism* used to wire the Bridge. You use DI t
 
 ---
 
-## 🎨 SECTION 23: PROJECT 8 - UNIVERSAL GRAPHICS RENDERING (VULKAN/METAL)
+### 🎨 SECTION 23: PROJECT 8 - UNIVERSAL GRAPHICS RENDERING (VULKAN/METAL)
 
 Game Engines (Unity/Unreal) use the Bridge pattern to support Windows (DirectX), macOS (Metal), and Linux/Android (Vulkan/OpenGL) without rewriting the core engine logic.
 
@@ -199157,7 +195630,7 @@ public class Sprite extends RenderObject {
 
 ---
 
-## 🪵 SECTION 24: DEEP DIVE - THE LOGGING BRIDGE (SLF4J)
+### 🪵 SECTION 24: DEEP DIVE - THE LOGGING BRIDGE (SLF4J)
 
 The most famous Bridge in the Java ecosystem is **SLF4J** (Simple Logging Facade for Java).
 *   **Abstraction**: `org.slf4j.Logger` (Interface used by developers).
@@ -199191,7 +195664,7 @@ If logging was not bridged, Spring would force you to use Log4j, while Hibernate
 
 ---
 
-## 🐍 SECTION 25: MULTI-LANGUAGE IMPLEMENTATIONS (PYTHON & RUST)
+### 🐍 SECTION 25: MULTI-LANGUAGE IMPLEMENTATIONS (PYTHON & RUST)
 
 The Bridge pattern isn't just for Java. It's universal.
 
@@ -199301,7 +195774,7 @@ fn main() {
 
 ---
 
-## 📺 SECTION 26: PROJECT 9 - THE "UNIVERSAL REMOTE" (GUI TOOLKIT)
+### 📺 SECTION 26: PROJECT 9 - THE "UNIVERSAL REMOTE" (GUI TOOLKIT)
 
 This is the textbook definition of the Bridge Pattern. We want to support `Windows`, `Mac`, and `Linux` widgets without rewriting `Button`, `Window`, and `Checkbox` for each OS.
 
@@ -199401,7 +195874,7 @@ public class Checkbox extends Widget {
 
 ---
 
-## ⚖️ SECTION 27: PATTERN COMPARISON - BRIDGE VS THE WORLD
+### ⚖️ SECTION 27: PATTERN COMPARISON - BRIDGE VS THE WORLD
 
 It is easy to confuse Bridge with other structural patterns. Here is the definitive guide.
 
@@ -199458,7 +195931,7 @@ Here is where you have likely used the Bridge Pattern without realizing it:
 
 ---
 
-## 🧪 SECTION 28: INTERACTIVE QUIZ - MASTERING THE BRIDGE
+### 🧪 SECTION 28: INTERACTIVE QUIZ - MASTERING THE BRIDGE
 
 
 Test your understanding.
@@ -199495,7 +195968,7 @@ Test your understanding.
 
 ---
 
-## 🏆 SECTION 28: CASE STUDY - SPRING TRANSACTION MANAGEMENT
+### 🏆 SECTION 28: CASE STUDY - SPRING TRANSACTION MANAGEMENT
 
 Spring's `PlatformTransactionManager` is a massive real-world Bridge.
 
@@ -199516,7 +195989,7 @@ You can switch your backend from simple JDBC to full-blown Hibernate or JTA (Two
 
 ---
 
-## 🛠️ SECTION 30: REFACTORING LEGACY CODE - THE "EXPLOSION" SMELL
+### 🛠️ SECTION 30: REFACTORING LEGACY CODE - THE "EXPLOSION" SMELL
 
 How do you know when you need a Bridge? And how do you refactor towards it?
 
@@ -199599,7 +196072,7 @@ public class Car extends Vehicle {
 
 ---
 
-## 📚 SECTION 31: REFERENCES (ABSOLUTELY FINAL)
+### 📚 SECTION 31: REFERENCES (ABSOLUTELY FINAL)
 
 1.  **"Patterns of Enterprise Application Architecture"** (Fowler) - *Service Layer as Mediator*
 2.  **"Head First Design Patterns"** - *Chapter 11*
@@ -199631,7 +196104,7 @@ public class Car extends Vehicle {
 
 ---
 
-## 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
+### 🏛️ SECTION 1: QUESTION ANALYSIS & UNDERSTANDING
 
 ### 🎯 What This Question Really Tests
 This question is a litmus test for a **Senior Java Engineer**. It moves beyond simple "Collections" knowledge into **API Design**, **Generics**, and **Runtime Type Safety**.
@@ -199661,7 +196134,7 @@ This question is a litmus test for a **Senior Java Engineer**. It moves beyond s
 
 ---
 
-## 🎨 SECTION 2: MODERN INTERACTIVE VISUALIZATION (THE TYPE BUCKET)
+### 🎨 SECTION 2: MODERN INTERACTIVE VISUALIZATION (THE TYPE BUCKET)
 
 We will build an interactive **D3.js Visualization** to demonstrate the concept of a "Type Bucket".
 *   **Visual**: A container that accepts items.
@@ -199798,7 +196271,7 @@ We will build an interactive **D3.js Visualization** to demonstrate the concept 
 
 ---
 
-## 🏗️ SECTION 3: THE FOUNDATION - TYPE LITERALS EXPLAINED
+### 🏗️ SECTION 3: THE FOUNDATION - TYPE LITERALS EXPLAINED
 
 Before coding, we must master `Class<T>`.
 
@@ -199843,7 +196316,7 @@ public class Favorites {
 
 ---
 
-## 🛠️ SECTION 4: PROJECT 1 - "REFLECTOCONTAINER" (ENTERPRISE DI)
+### 🛠️ SECTION 4: PROJECT 1 - "REFLECTOCONTAINER" (ENTERPRISE DI)
 
 We will build a miniature version of **Spring Framework's `ApplicationContext`**. This is a **Strict FAANG Interview Requirement**. You must show you understand how Dependency Injection actually works under the hood.
 
@@ -200102,7 +196575,7 @@ public class EventBusDemo {
 
 ---
 
-## 🎮 SECTION 5: PROJECT 2 - "IRONCLAD ECS" (GAME ENGINE)
+### 🎮 SECTION 5: PROJECT 2 - "IRONCLAD ECS" (GAME ENGINE)
 
 In high-performance Game Development (Unity/Unreal/LibGDX), the **Entity Component System (ECS)** pattern is king.
 *   **Entity**: Just an ID (e.g., `int entityId = 100`).
@@ -200217,7 +196690,7 @@ class Ghost extends Entity { Position p; /* No Velocity */ }
 
 ---
 
-## ☁️ SECTION 6: PROJECT 3 - "TYPED PREFS" (MICROSERVICES CONFIG)
+### ☁️ SECTION 6: PROJECT 3 - "TYPED PREFS" (MICROSERVICES CONFIG)
 
 Microservices often load configuration from:
 1.  Environment Variables (Strings).
@@ -200321,7 +196794,7 @@ public class MicroserviceBoot {
 
 ---
 
-## 🤯 SECTION 7: DEEP DIVE - THE "SUPER TYPE TOKEN" (NEAL GAFTER'S GADGET)
+### 🤯 SECTION 7: DEEP DIVE - THE "SUPER TYPE TOKEN" (NEAL GAFTER'S GADGET)
 
 This is the **Checkmate Move** in an interview.
 **The Problem**: `Map<Class<T>, T>` works for `String.class` and `Integer.class`.
@@ -200435,7 +196908,7 @@ public class SuperTypeDemo {
 
 ---
 
-## ⚡ SECTION 8: PERFORMANCE & SECURITY ANALYSIS
+### ⚡ SECTION 8: PERFORMANCE & SECURITY ANALYSIS
 
 ### 1. Performance: The Boxing Tax
 While this pattern is "Type-Safe", it is **Object-Heavy**.
@@ -200466,7 +196939,7 @@ Even with `type.cast()`, if you use **Unknown Generics** combined with `Varargs`
 
 ---
 
-## 💾 SECTION 9: PROJECT 4 - "SAFEDB" (ENTERPRISE ROW MAPPER)
+### 💾 SECTION 9: PROJECT 4 - "SAFEDB" (ENTERPRISE ROW MAPPER)
 
 One of the most dangerous places in Enterprise Java is **JDBC Result Sets**.
 `ResultSet.getObject("column")` returns `Object`.
@@ -200563,7 +197036,7 @@ public class UserDAO {
 
 ---
 
-## 📦 SECTION 10: PROJECT 5 - "JSONMANCER" (RECURSIVE SERIALIZER)
+### 📦 SECTION 10: PROJECT 5 - "JSONMANCER" (RECURSIVE SERIALIZER)
 
 The best example of Type-Safe Heterogeneous Containers in the wild is **Jackson**.
 How does `ObjectMapper` know how to serialize a `User` object that contains a `List<Address>`?
@@ -200712,7 +197185,7 @@ public class JsonDemo {
 
 ---
 
-## 📡 SECTION 11: PROJECT 6 - "SIGNAL" (TYPE-SAFE EVENT BUS)
+### 📡 SECTION 11: PROJECT 6 - "SIGNAL" (TYPE-SAFE EVENT BUS)
 
 In Frontend (React/Redux) and Backend (Microservices), Event Buses are common.
 We want to subscribe to `UserCreatedEvent` without receiving `ProductDeletedEvent`.
@@ -200786,7 +197259,7 @@ public class BusDemo {
 
 ---
 
-## 🕰️ SECTION 12: HISTORY LESSON - THE DARK AGES VS MODERN ERA
+### 🕰️ SECTION 12: HISTORY LESSON - THE DARK AGES VS MODERN ERA
 
 
 To truly appreciate the Type-Safe Heterogeneous Container, we must look at what came before.
@@ -200823,7 +197296,7 @@ This is the pinnacle of ergonomics. The code looks like Python but has the safet
 
 ---
 
-## 🛡️ SECTION 13: SECURITY DEEP DIVE - THE HEAP POLLUTION ATTACK
+### 🛡️ SECTION 13: SECURITY DEEP DIVE - THE HEAP POLLUTION ATTACK
 
 Generics in Java are a compile-time fiction. At runtime, a `Map<Class<?>, Object>` is just a Map.
 This allows for **Heap Pollution** if we are careless with raw types.
@@ -200856,7 +197329,7 @@ If you redeploy an application (creating a new ClassLoader) but the old Containe
 
 ---
 
-## 🌍 SECTION 14: POLYGLOT PERSPECTIVE
+### 🌍 SECTION 14: POLYGLOT PERSPECTIVE
 
 How do other languages handle this?
 
@@ -200907,7 +197380,7 @@ class Container:
 
 ---
 
-## 🔮 SECTION 15: THE "SUPER TYPE TOKEN" (NEAL GAFTER'S GADGET)
+### 🔮 SECTION 15: THE "SUPER TYPE TOKEN" (NEAL GAFTER'S GADGET)
 
 There is a fatal flaw in `Class<T>`: It does not support Generics.
 `List<String>` and `List<Integer>` share the same class literal: `List.class`.
@@ -201009,7 +197482,7 @@ public class SuperDemo {
 
 ---
 
-## 🥊 SECTION 16: PATTERN SHOWDOWN
+### 🥊 SECTION 16: PATTERN SHOWDOWN
 
 ### 1. Heterogeneous Container vs Service Locator
 | Feature | **Heterogeneous Container** | **Service Locator** |
@@ -201027,7 +197500,7 @@ It IS a Type-Safe Heterogeneous Container, but scoped to the *Thread*.
 
 ---
 
-## 🧪 SECTION 17: INTERACTIVE QUIZ - MASTERING THE TYPE BUCKET
+### 🧪 SECTION 17: INTERACTIVE QUIZ - MASTERING THE TYPE BUCKET
 
 Test your knowledge.
 
@@ -201063,7 +197536,7 @@ You lose compile-time safety. The compiler will emit an "Unchecked Cast" warning
 
 ---
 
-## 🔬 SECTION 18: OPEN SOURCE AUTOPSY - HOW THE GIANTS DO IT
+### 🔬 SECTION 18: OPEN SOURCE AUTOPSY - HOW THE GIANTS DO IT
 
 You are not the first to need a Type-Safe Heterogeneous Container. Let's look at how **Spring** and **Guice** implemented this years ago.
 
@@ -201110,7 +197583,7 @@ public class Key<T> {
 
 ---
 
-## ⚡ SECTION 19: PERFORMANCE LAB
+### ⚡ SECTION 19: PERFORMANCE LAB
 
 Is `Class.cast()` expensive? Is `ConcurrentHashMap` too slow?
 
@@ -201136,7 +197609,7 @@ We ran a JMH benchmark comparing a raw `Object` fetch vs a `type.cast()` fetch.
 
 ---
 
-## 🎯 SECTION 20: SENIOR INTERVIEW DEFENSE
+### 🎯 SECTION 20: SENIOR INTERVIEW DEFENSE
 
 **Interviewer**: "Why not just use a `Map<String, Object>` and cast it manually?"
 
@@ -201156,7 +197629,7 @@ We ran a JMH benchmark comparing a raw `Object` fetch vs a `type.cast()` fetch.
 
 ---
 
-## 🛰️ SECTION 21: THE DISTRIBUTED CONTAINER (gRPC/Protobuf)
+### 🛰️ SECTION 21: THE DISTRIBUTED CONTAINER (gRPC/Protobuf)
 
 In a Microservices architecture, you often need to pass a "Context" between services. This is essentially a Distributed Heterogeneous Container.
 Here is how you implement it using **Protocol Buffers** and `Any` types.
@@ -201281,7 +197754,7 @@ public class DistributedContext {
 
 ---
 
-## 🏗️ SECTION 22: COMMON MISTAKES (ANTI-PATTERNS)
+### 🏗️ SECTION 22: COMMON MISTAKES (ANTI-PATTERNS)
 
 ### 1. The "Stringly Typed" Map
 ```java
@@ -201311,7 +197784,7 @@ List<String>[] lists = new List<String>[10];
 
 ---
 
-## 🛠️ SECTION 25: THE COMPILER PLUGIN (Annotation Processing)
+### 🛠️ SECTION 25: THE COMPILER PLUGIN (Annotation Processing)
 
 To achieve "True Safety", we want to catch Type Mismatches at **Compile Time**, not Runtime.
 We can do this using Java's Pluggable Annotation Processing API.
@@ -201366,7 +197839,7 @@ public class KeyValidatorProcessor extends AbstractProcessor {
 
 ---
 
-## 💾 SECTION 26: SERIALIZATION DEEP DIVE (JACKSON)
+### 💾 SECTION 26: SERIALIZATION DEEP DIVE (JACKSON)
 
 How do you serialize `Map<Class<?>, Object>` to JSON?
 Native serialization fails because `Class` objects don't serialize well, and JSON doesn't support "Mixed Types" easily without metadata.
@@ -201439,7 +197912,7 @@ public class HeterogeneousContainerDeserializer extends JsonDeserializer<Favorit
 
 ---
 
-## 📚 SECTION 27: REFERENCES
+### 📚 SECTION 27: REFERENCES
 
 8.  **Project Loom Documentation** - `ScopedValue<T>` (Java 20+). *The modern, immutable alternative to ThreadLocals.*
 
@@ -201447,7 +197920,7 @@ public class HeterogeneousContainerDeserializer extends JsonDeserializer<Favorit
 
 ---
 
-## 🌍 SECTION 29: POLYGLOT PERSPECTIVES
+### 🌍 SECTION 29: POLYGLOT PERSPECTIVES
 
 ### 1. C++ (The `std::any` Container)
 Since C++17, the standard library provides `std::any`, which is the direct equivalent of a type-safe `Object` container.
@@ -201539,7 +198012,7 @@ container.register("auth", new LoggerService()); // ❌ Compile Error!
 
 ---
 
-## 🧪 SECTION 30: COMPREHENSIVE TESTING STRATEGIES
+### 🧪 SECTION 30: COMPREHENSIVE TESTING STRATEGIES
 
 For a core infrastructure component like a Type-Safe Container, standard unit tests are insufficient. We need **Property-Based Testing** and **Concurrency Torture Testing**.
 
@@ -201652,7 +198125,7 @@ public void testHeapPollutionProtection() {
 
 ---
 
-## 🎤 SECTION 31: MOCK INTERVIEW & FOLLOW-UP QUESTIONS
+### 🎤 SECTION 31: MOCK INTERVIEW & FOLLOW-UP QUESTIONS
 
 **Interviewer**: "Why did you implement `Favorites` using `Class<?>` as the key?"
 **Candidate**: "Using `Class<?>` allows us to enforce type safety at the API boundary. The `put(Class<T>, T)` signature ensures that the value *must* be an instance of the key. A plain `String` key would allow `put("age", "twenty")` which crashes at runtime."
@@ -201670,7 +198143,7 @@ public void testHeapPollutionProtection() {
 
 ---
 
-## 📝 SECTION 31-B: CHEATSHEET & SUMMARY
+### 📝 SECTION 31-B: CHEATSHEET & SUMMARY
 
 | Concept | Explanation | Key Method |
 | :--- | :--- | :--- |
@@ -201688,7 +198161,7 @@ public void testHeapPollutionProtection() {
 
 ---
 
-## ✅ SECTION 32: AMAZON LEADERSHIP PRINCIPLES
+### ✅ SECTION 32: AMAZON LEADERSHIP PRINCIPLES
 
 ### 1. **Invent and Simplify**
 Instead of creating 50 different Maps (`Map<String, User>`, `Map<String, Product>`), we reinvent the storage mechanism to be a single, simplified, Type-Safe Container (`Map<Class<?>, Object>`). This simplification reduces API surface area while increasing safety.
